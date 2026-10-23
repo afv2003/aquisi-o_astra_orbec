@@ -1,0 +1,18 @@
+# Ambientes virtuais e cache do Python
+venv/
+meu_ambiente/
+__pycache__/
+*.pyc
+
+# Dados recolhidos (ROS bags) e vídeos gerados
+data/
+*.mcap
+*.mp4
+
+# Ficheiros do Astra SDK (caso ainda estejam na pasta)
+bin/
+lib/
+include/
+samples/
+install/
+SimpleColorViewer-SFML
