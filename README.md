@@ -32,14 +32,20 @@ docker compose build
      ```
      e altere `/dev/video2` para o número correto correspondente à sua câmara. Guarde o ficheiro antes de avançar.
 
-### Passo 3: Iniciar a aquisição e gravação
+### Passo 3: Autorizar o uso do ecrã (Apenas uma vez depois de ligar o PC)
+Antes de iniciar o Docker, dê permissão para que o RViz consiga abrir a janela gráfica. Só precisa de executar este comando uma vez sempre que liga o computador:
+```bash
+xhost +local:root
+```
+
+### Passo 4: Iniciar a aquisição e gravação
 Com a câmara ligada, inicie o sistema executando no terminal:
 ```bash
 docker compose up
 ```
 * A câmara irá ligar, a janela do **RViz2** abrirá automaticamente para visualização e a gravação do ficheiro `.mcap` começará de imediato dentro da pasta `data/`.
 
-### Passo 4: Terminar e guardar a gravação
+### Passo 5: Terminar e guardar a gravação
 1. Quando quiser parar de gravar, vá ao terminal onde correu o comando anterior e prima **`Ctrl + C`** (apenas uma vez).
 2. Aguarde alguns segundos até que o Docker feche todos os processos em segurança.
 3. Os dados gravados ficarão automaticamente disponíveis no seu computador dentro de uma subpasta com a data e hora da recolha (exemplo: `data/viagem_AAAAMMDD_HHMMSS/`).
