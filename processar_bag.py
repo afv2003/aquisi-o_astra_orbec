@@ -1,19 +1,38 @@
 import sys
+import argparse
 from pathlib import Path
 import cv2
 import numpy as np
 from mcap_ros2.reader import read_ros2_messages
 from mcap.reader import make_reader
 
-if len(sys.argv) < 2:
-    print("Uso: python processar_bag.py caminho/para/o/ficheiro.mcap")
-    sys.exit(1)
+# Tentar importar o YOLO
+try:
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
 
-mcap_file = Path(sys.argv[1])
+# Configurar argumentos da linha de comandos
+parser = argparse.ArgumentParser(description="Processar ROS bag com visualização e deteção YOLO.")
+parser.add_argument("mcap_file", type=str, help="Caminho para o ficheiro .mcap")
+parser.add_argument("-v", action="store_true", help="Mostrar apenas vídeo (Desativa o YOLO)")
+args = parser.parse_args()
+
+mcap_file = Path(args.mcap_file)
 
 if not mcap_file.exists():
     print(f"Erro: Ficheiro '{mcap_file}' não encontrado.")
     sys.exit(1)
+
+# Inicializar o modelo YOLO se o utilizador não passou a flag -v
+usar_yolo = not args.v
+if usar_yolo:
+    if YOLO is None:
+        print("Erro: A biblioteca 'ultralytics' não está instalada. Corre: pip install ultralytics")
+        sys.exit(1)
+    print("A carregar modelo YOLOv8n (poderá demorar um pouco na primeira vez)...")
+    # Usa o modelo mais leve e rápido (nano) para não encravar o vídeo
+    modelo_yolo = YOLO('yolov8n.pt') 
 
 # 1. Obter o tempo total lendo o índice do .mcap
 total_duration_sec = 0.0
@@ -33,6 +52,7 @@ except Exception as e:
 mins, secs = divmod(total_duration_sec, 60)
 print(f"A ler ROS bag sequencialmente: {mcap_file.name}")
 print(f"Tempo total do vídeo: {int(mins)}m {secs:.1f}s")
+print(f"Modo YOLO: {'ATIVADO' if usar_yolo else 'DESATIVADO'}")
 print("\n--- CONTROLOS ---")
 print("[Espaço] : Pausar / Retomar")
 print("[Q]      : Fechar o visualizador")
@@ -59,6 +79,13 @@ for msg in read_ros2_messages(str(mcap_file), topics=['/image_raw']):
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     else:
         continue
+        
+    # --- PROCESSAMENTO YOLO ---
+    if usar_yolo:
+        # Executa a inferência de forma silenciosa para não inundar o terminal
+        resultados = modelo_yolo(frame, verbose=False)
+        # O método .plot() desenha automaticamente os retângulos e labels no frame
+        frame = resultados[0].plot()
         
     ultimo_frame = frame.copy()
 
