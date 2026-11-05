@@ -28,5 +28,7 @@ services:
       - ./data:/data:rw
     stop_signal: SIGINT
     stop_grace_period: 30s
+    # CAMARA é obrigatório (5 ou 8): o bag fica com a designação no nome, ex. viagem_camara5_20261106_101500
+    # Uso: CAMARA=5 docker compose up
     command: >
-      bash -c "sleep 2 && ros2 bag record -s mcap -o /data/viagem_$$(date +%Y%m%d_%H%M%S) --topics /image_raw"
+      bash -c "sleep 2 && ros2 bag record -s mcap -o /data/viagem_camara${CAMARA:?defina CAMARA (5 ou 8) antes de docker compose up}_$$(date +%Y%m%d_%H%M%S) --topics /image_raw"

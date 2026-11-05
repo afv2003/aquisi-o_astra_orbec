@@ -1,3 +1,5 @@
 opencv-python
 numpy
 mcap-ros2-support
+ultralytics
+pyyaml
