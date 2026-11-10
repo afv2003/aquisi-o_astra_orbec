@@ -57,14 +57,23 @@ bash gravar.sh 5       # só uma câmara (a 5, em /dev/video2)
 
 ## 2. Processamento de Imagem / Extração (Offline)
 
-O tratamento das imagens com OpenCV ou a extração para vídeo é feito diretamente no computador através de um ambiente virtual Python (`venv`), sem necessidade de ligar a câmara ou o Docker.
+O tratamento das imagens com OpenCV ou a extração para vídeo é feito diretamente no computador através de um ambiente virtual Python (`venv`), sem necessidade de ligar a câmara ou o Docker. Funciona em **Linux e em Windows**; cada sistema precisa do seu próprio `venv` (um `venv` criado num sistema não funciona no outro).
 
 ### Passo 1: Criar o ambiente virtual `venv` (Apenas na 1.ª vez)
-Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas necessárias (`opencv-python`, `numpy` e `mcap-ros2-support`):
+Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `ultralytics` e `pyyaml`):
+
+**Linux:**
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install --upgrade pip
+pip install -r requirements.txt
+```
+**Windows** (Linha de Comandos):
+```
+python -m venv venv
+venv\Scripts\activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
@@ -73,17 +82,25 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
 
 1. **Ativar o ambiente virtual:**
    ```bash
-   source venv/bin/activate
+   source venv/bin/activate      # Linux
+   venv\Scripts\activate         # Windows
    ```
    *(Saberá que está ativo porque aparecerá `(venv)` no início da linha do terminal).*
 
 2. **Verificar o nome do ficheiro `.mcap` gravado (Opcional):**
    Se não souber o nome exato da pasta que o Docker criou, liste os ficheiros `.mcap` existentes com:
    ```bash
-   find data/ -name "*.mcap"
+   find data/ -name "*.mcap"      # Linux
+   dir /s /b data\*.mcap          # Windows
    ```
 
-3. **Executar o script Python:**
+3. **Confirmar que o bag tem as duas câmaras (Opcional):**
+   ```bash
+   python -c "from mcap.reader import make_reader; s=make_reader(open('data/<nome_da_pasta>/<nome_do_ficheiro>.mcap','rb')).get_summary(); [print(c.topic, s.statistics.channel_message_counts.get(i,0), 'mensagens') for i,c in s.channels.items()]"
+   ```
+   Deve aparecer `/camara5/image_raw` e `/camara8/image_raw` com números de mensagens parecidos (cerca de 1800 por minuto, a 30 imagens por segundo).
+
+4. **Executar o script Python:**
    Corra o programa `processar_bag.py` indicando à frente o caminho completo para o ficheiro `.mcap` que pretende processar:
    ```bash
    python processar_bag.py data/<nome_da_pasta>/<nome_do_ficheiro>.mcap
@@ -92,7 +109,7 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    * Use `--camara 5` ou `--camara 8` para escolher a câmara a processar; cada câmara é processada separadamente.
    * Use `-v` para ver só o vídeo, sem YOLO. A imagem é corrigida com a calibração dessa câmara (ver secção 3).
 
-4. **Sair do ambiente virtual (Quando terminar o trabalho):**
+5. **Sair do ambiente virtual (Quando terminar o trabalho):**
    ```bash
    deactivate
    ```
