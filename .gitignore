@@ -16,3 +16,5 @@ include/
 samples/
 install/
 SimpleColorViewer-SFML
+
+yolov8n.pt
