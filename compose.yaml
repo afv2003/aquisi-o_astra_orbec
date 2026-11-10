@@ -3,16 +3,45 @@ x-ros: &ros
   network_mode: host
   ipc: host
 
+# Duas câmaras Astra em simultâneo (5 e 8).
+# Lançar com o gravar.sh, indicando que câmara está em cada /dev/video:
+#   bash gravar.sh 5 8    (câmara 5 em /dev/video2, câmara 8 em /dev/video4)
+# Cada câmara publica no seu tópico: /camara5/image_raw e /camara8/image_raw.
+
 services:
-  driver_camara:
+  driver_camara5:
     <<: *ros
     privileged: true
-    command: ros2 run usb_cam usb_cam_node_exe --ros-args -p frame_id:=base_link -p video_device:=/dev/video2
-    
+    devices:
+      - source: ${DEV_CAMARA5:?lance com bash gravar.sh 5 8}
+        target: /dev/camara5
+        permissions: rwm
+    command: >
+      ros2 run usb_cam usb_cam_node_exe --ros-args
+      -r __ns:=/camara5
+      -p video_device:=/dev/camara5
+      -p frame_id:=camara5
+      -p camera_name:=astra_rgb_5
+
+  driver_camara8:
+    <<: *ros
+    privileged: true
+    devices:
+      - source: ${DEV_CAMARA8:?lance com bash gravar.sh 5 8}
+        target: /dev/camara8
+        permissions: rwm
+    command: >
+      ros2 run usb_cam usb_cam_node_exe --ros-args
+      -r __ns:=/camara8
+      -p video_device:=/dev/camara8
+      -p frame_id:=camara8
+      -p camera_name:=astra_rgb_8
+
   rviz:
     <<: *ros
     depends_on:
-      - driver_camara
+      - driver_camara5
+      - driver_camara8
     environment:
       - DISPLAY=${DISPLAY:-:0}
       - QT_X11_NO_MITSHM=1
@@ -20,15 +49,16 @@ services:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
     command: rviz2 -f base_link
 
+  # Um só bag com as duas câmaras (mesmo relógio, mesma gravação):
+  # data/viagem_<data_hora>/ com os tópicos /camara5/image_raw e /camara8/image_raw.
   gravador_bag:
     <<: *ros
     depends_on:
-      - driver_camara
+      - driver_camara5
+      - driver_camara8
     volumes:
       - ./data:/data:rw
     stop_signal: SIGINT
     stop_grace_period: 30s
-    # CAMARA é obrigatório (5 ou 8): o bag fica com a designação no nome, ex. viagem_camara5_20261106_101500
-    # Uso: CAMARA=5 docker compose up
     command: >
-      bash -c "sleep 2 && ros2 bag record -s mcap -o /data/viagem_camara${CAMARA:?defina CAMARA (5 ou 8) antes de docker compose up}_$$(date +%Y%m%d_%H%M%S) --topics /image_raw"
+      bash -c "sleep 2 && ros2 bag record -s mcap -o /data/viagem_$$(date +%Y%m%d_%H%M%S) --topics /camara5/image_raw /camara8/image_raw"

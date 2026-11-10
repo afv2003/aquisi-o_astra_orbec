@@ -32,21 +32,57 @@ if not mcap_file.exists():
     print(f"Erro: Ficheiro '{mcap_file}' não encontrado.")
     sys.exit(1)
 
-# --- CÂMARA QUE GRAVOU O BAG (rastreabilidade) ---
-# O compose.yaml grava com o nome viagem_camara<N>_<data_hora>; a câmara lê-se daí.
+# --- CÂMARA E TÓPICO A PROCESSAR (rastreabilidade) ---
+# Bags novos (duas câmaras): cada câmara tem o seu tópico, /camara5/image_raw e /camara8/image_raw.
+# Bags antigos (uma câmara): tópico /image_raw; a câmara lê-se do nome da pasta (viagem_camara5_...)
+# ou de --camara.
+def topicos_do_bag(caminho):
+    try:
+        with open(caminho, "rb") as f:
+            resumo = make_reader(f).get_summary()
+        return sorted({c.topic for c in resumo.channels.values()}) if resumo else []
+    except Exception:
+        return []
+
+
+topicos = topicos_do_bag(mcap_file)
+cams_no_bag = {}
+for t in topicos:
+    m = re.fullmatch(r"/camara([0-9A-Za-z]+)/image_raw", t)
+    if m:
+        cams_no_bag[m.group(1)] = t
+
 encontradas = re.findall(r"camara([0-9A-Za-z]+?)(?=_|\.|$)", mcap_file.resolve().as_posix())
-camara_bag = encontradas[-1] if encontradas else None
-if args.camara and camara_bag and args.camara != camara_bag:
-    print(f"Erro: indicou --camara {args.camara}, mas o bag foi gravado pela câmara {camara_bag}.")
-    sys.exit(1)
-camara = args.camara or camara_bag
+camara_nome = encontradas[-1] if encontradas else None
+
+if cams_no_bag:  # bag novo: uma ou duas câmaras, cada uma no seu tópico
+    lista = " e ".join(sorted(cams_no_bag))
+    if args.camara:
+        if args.camara not in cams_no_bag:
+            print(f"Erro: indicou --camara {args.camara}, mas este bag só tem a(s) câmara(s) {lista}.")
+            sys.exit(1)
+        camara, origem_cam = args.camara, "--camara"
+    elif len(cams_no_bag) == 1:
+        camara, origem_cam = next(iter(cams_no_bag)), "tópico do bag"
+    else:
+        print(f"Este bag tem as câmaras {lista}. Indique qual quer processar, por exemplo:")
+        print(f"  python processar_bag.py {args.mcap_file} --camara {sorted(cams_no_bag)[0]}")
+        sys.exit(1)
+    topicos_leitura = [cams_no_bag[camara]]
+else:  # bag antigo (uma câmara, tópico /image_raw) ou sem índice de tópicos
+    if args.camara and camara_nome and args.camara != camara_nome:
+        print(f"Erro: indicou --camara {args.camara}, mas o bag foi gravado pela câmara {camara_nome}.")
+        sys.exit(1)
+    camara = args.camara or camara_nome
+    origem_cam = "nome do bag" if camara_nome else "--camara"
+    if not camara and not args.calib and not args.sem_correcao:
+        print("Erro: não sei que câmara gravou este bag (o nome não tem 'camara<N>').")
+        print("Indique-a com --camara 5 ou --camara 8.")
+        sys.exit(1)
+    topicos_leitura = ["/image_raw"] + ([f"/camara{camara}/image_raw"] if camara and not topicos else [])
+
 if camara:
-    origem_cam = "nome do bag" if camara_bag else "--camara"
-    print(f"Câmara: {camara} (de: {origem_cam})")
-elif not args.calib and not args.sem_correcao:
-    print("Erro: não sei que câmara gravou este bag (o nome não tem 'camara<N>').")
-    print("Indique-a com --camara 5 ou --camara 8.")
-    sys.exit(1)
+    print(f"Câmara: {camara} (de: {origem_cam}) | tópico: {', '.join(topicos_leitura)}")
 if args.calib is None:
     args.calib = f"config/camera_astra_{camara}.yaml" if camara else "config/camera_astra.yaml"
 
@@ -66,7 +102,8 @@ def carregar_calibracao_yaml(caminho):
 def carregar_calibracao_bag(caminho_mcap):
     """Alternativa: lê o 1.º /camera_info gravado no bag (se o usb_cam tiver calibração)."""
     try:
-        for m in read_ros2_messages(str(caminho_mcap), topics=['/camera_info']):
+        for m in read_ros2_messages(str(caminho_mcap),
+                                    topics=['/camera_info'] + ([f'/camara{camara}/camera_info'] if camara else [])):
             ci = m.ros_msg
             K = np.array(ci.k, dtype=np.float64).reshape(3, 3)
             if K[0, 0] == 0:  # usb_cam sem calibração publica zeros
@@ -152,7 +189,7 @@ saiu_cedo = False
 ultimo_frame = None
 
 # Lê as mensagens à medida que o vídeo avança
-for msg in read_ros2_messages(str(mcap_file), topics=['/image_raw']):
+for msg in read_ros2_messages(str(mcap_file), topics=topicos_leitura):
     ros_msg = msg.ros_msg
     width, height = ros_msg.width, ros_msg.height
     

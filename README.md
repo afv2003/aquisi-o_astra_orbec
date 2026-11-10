@@ -10,7 +10,7 @@ Sistema em Docker para aquisição de imagem com câmara USB em ROS 2 Jazzy, vis
 
 ## 1. Aquisição de Dados (No Veículo)
 
-O contentor Docker instala e executa o driver `usb_cam` (configurado para `/dev/video2`), abre o `rviz2` e inicia automaticamente a gravação do tópico `/image_raw` na pasta `./data`.
+O Docker lança as **duas câmaras Astra (5 e 8) em simultâneo**, cada uma com o seu driver `usb_cam`, abre o `rviz2` e grava as duas num só bag (`.mcap`) na pasta `./data`. Cada câmara publica no seu tópico: `/camara5/image_raw` e `/camara8/image_raw`.
 
 ### Passo 1: Construir a imagem do Docker (Apenas na 1.ª vez)
 Antes de utilizar o sistema pela primeira vez, é necessário descarregar e construir a imagem Docker com o ROS 2 e os pacotes da câmara. Abra o terminal na pasta do projeto e execute:
@@ -18,19 +18,14 @@ Antes de utilizar o sistema pela primeira vez, é necessário descarregar e cons
 docker compose build
 ```
 
-### Passo 2: Ligar e verificar a câmara USB
-1. Ligue a câmara USB ao computador **antes** de iniciar o contentor.
-2. > **Nota:** "Em princípio, a câmara externa deverá ser atribuída ao caminho `/dev/video2`, uma vez que o `/dev/video0` e o `/dev/video1` costumam estar reservados para a webcam integrada do portátil."
-3. **Como confirmar ou alterar caso não seja `/dev/video2`:**
-   * Para ver quais as câmaras detetadas pelo computador, corra no terminal:
-     ```bash
-     ls /dev/video*
-     ```
-   * Se a câmara externa tiver outro número (por exemplo, `/dev/video4`), abra o ficheiro `compose.yaml` num editor de texto (ou com `nano compose.yaml`), procure a linha do serviço `driver_camara`:
-     ```yaml
-     command: ros2 run usb_cam usb_cam_node_exe --ros-args -p frame_id:=base_link -p video_device:=/dev/video2
-     ```
-     e altere `/dev/video2` para o número correto correspondente à sua câmara. Guarde o ficheiro antes de avançar.
+### Passo 2: Ligar as câmaras e ver em que `/dev/video` está cada uma
+1. Ligue as duas câmaras ao computador **antes** de iniciar a aquisição.
+2. Veja os dispositivos:
+   ```bash
+   ls /dev/video*
+   ```
+   Normalmente `/dev/video0` e `/dev/video1` são a webcam do portátil, e as duas Astra ficam em **`/dev/video2`** e **`/dev/video4`** (cada câmara cria dois dispositivos; usa-se o primeiro de cada).
+3. O Linux numera as câmaras pela ordem em que as deteta, por isso a mesma câmara pode ficar no `video2` num dia e no `video4` noutro. Para saber qual é qual, desligue uma câmara e veja qual dos dois desaparece.
 
 ### Passo 3: Autorizar o uso do ecrã (Apenas uma vez depois de ligar o PC)
 Antes de iniciar o Docker, dê permissão para que o RViz consiga abrir a janela gráfica. Só precisa de executar este comando uma vez sempre que liga o computador:
@@ -39,17 +34,24 @@ xhost +local:root
 ```
 
 ### Passo 4: Iniciar a aquisição e gravação
-Com a câmara ligada, inicie o sistema indicando **qual das câmaras** (5 ou 8) está ligada:
+Indique as câmaras **pela ordem dos dispositivos**: a primeira fica no `/dev/video2`, a segunda no `/dev/video4`.
 ```bash
-CAMARA=5 docker compose up
+bash gravar.sh 5 8     # câmara 5 em /dev/video2, câmara 8 em /dev/video4
+bash gravar.sh 8 5     # se estiverem ao contrário
+bash gravar.sh 5       # só uma câmara (a 5, em /dev/video2)
 ```
-* O `CAMARA` é obrigatório: sem ele, o Docker não arranca e mostra `defina CAMARA (5 ou 8)`. Assim cada gravação fica associada à câmara que a fez.
-* A câmara irá ligar, a janela do **RViz2** abrirá automaticamente para visualização e a gravação do ficheiro `.mcap` começará de imediato dentro da pasta `data/`.
+* O script mostra a associação feita (`Câmara 5  ->  /dev/video2`) e lança o `docker compose up`.
+* As câmaras ligam, a janela do **RViz2** abre e a gravação começa de imediato dentro da pasta `data/`.
+* No RViz2, adicione dois displays **Image** (botão *Add*) com os tópicos `/camara5/image_raw` e `/camara8/image_raw`.
+* **Confirme sempre que as câmaras não estão trocadas:** tape a lente da câmara 5 e veja que a imagem que fica preta é a do `/camara5/image_raw`. Se não for, pare (`Ctrl + C`) e lance com a ordem contrária.
+* Se um `/dev/video` não existir, o script para e avisa. O `docker compose up` sozinho não funciona: use sempre o `gravar.sh`.
+* As duas câmaras juntas usam muita largura de banda USB. Ligue-as em portas de lados diferentes do portátil. Se uma delas não arrancar com erro `No space left on device`, é esse o problema.
+* Cada minuto de gravação com as duas câmaras ocupa cerca de 2 GB; confirme que há espaço livre no disco.
 
 ### Passo 5: Terminar e guardar a gravação
 1. Quando quiser parar de gravar, vá ao terminal onde correu o comando anterior e prima **`Ctrl + C`** (apenas uma vez).
 2. Aguarde alguns segundos até que o Docker feche todos os processos em segurança.
-3. Os dados gravados ficarão automaticamente disponíveis no seu computador dentro de uma subpasta com a data e hora da recolha (exemplo: `data/viagem_camara5_AAAAMMDD_HHMMSS/`). O nome inclui a câmara usada.
+3. Os dados gravados ficarão automaticamente disponíveis no seu computador dentro de uma subpasta com a data e hora da recolha (exemplo: `data/viagem_AAAAMMDD_HHMMSS/`). O bag tem as duas câmaras, cada uma no seu tópico.
 
 ---
 
@@ -86,8 +88,9 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    ```bash
    python processar_bag.py data/<nome_da_pasta>/<nome_do_ficheiro>.mcap
    ```
-   *(Exemplo prático: `python processar_bag.py data/viagem_camara5_20261106_101500/viagem_camara5_20261106_101500_0.mcap`)*
-   * Use `-v` para ver só o vídeo, sem YOLO. A imagem é corrigida com a calibração da câmara que gravou o bag (ver secção 3).
+   *(Exemplo prático: `python processar_bag.py data/viagem_20261110_101500/viagem_20261110_101500_0.mcap --camara 5`)*
+   * Use `--camara 5` ou `--camara 8` para escolher a câmara a processar; cada câmara é processada separadamente.
+   * Use `-v` para ver só o vídeo, sem YOLO. A imagem é corrigida com a calibração dessa câmara (ver secção 3).
 
 4. **Sair do ambiente virtual (Quando terminar o trabalho):**
    ```bash
@@ -132,17 +135,18 @@ config/camera_astra_8.yaml
 ```
 
 ### Passo 3: Usar
-* **Processamento offline:** o `processar_bag.py` lê a câmara do nome do bag (`viagem_camara5_...`) e usa `config/camera_astra_<N>.yaml`:
+* **Processamento offline:** o `processar_bag.py` lê o tópico da câmara escolhida (`/camara<N>/image_raw`) e usa `config/camera_astra_<N>.yaml`:
   ```bash
-  python processar_bag.py data/<pasta>/<ficheiro>.mcap                  # câmara lida do nome do bag
-  python processar_bag.py data/<pasta_antiga>/<ficheiro>.mcap --camara 5   # bags antigos, sem camara<N> no nome
+  python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5   # bag com as duas câmaras: escolher uma
+  python processar_bag.py data/<pasta>/<ficheiro>.mcap              # bag com uma só câmara: escolhida sozinha
   python processar_bag.py data/<pasta>/<ficheiro>.mcap --calib outro.yaml
   python processar_bag.py data/<pasta>/<ficheiro>.mcap --sem-correcao
   ```
-  * Se indicar `--camara` diferente da do nome do bag, o script para com erro, para não usar a calibração errada.
-  * Num bag sem `camara<N>` no nome (gravado antes desta alteração), é obrigatório indicar `--camara`.
+  * Num bag com as duas câmaras, sem `--camara`, o script para e pede qual processar.
+  * Se indicar uma câmara que não está no bag, o script para com erro, para não usar a calibração errada.
+  * **Bags antigos** (uma câmara, tópico `/image_raw`): a câmara lê-se do nome da pasta (`viagem_camara5_...`); se o nome não a tiver, é obrigatório indicar `--camara`.
   Durante a reprodução, a tecla **C** liga/desliga a correção para comparar.
 * Corra o script a partir da pasta do repositório; noutra pasta, indique o ficheiro com `--calib`.
-* Não renomeie as pastas dos bags: a designação `camara<N>` no nome é o que liga cada gravação à sua calibração.
+* Nos bags novos, a câmara fica gravada no próprio bag (no nome do tópico), por isso não depende do nome da pasta.
 
 > **Importante:** a calibração só é válida para a resolução usada (640x480, a resolução por omissão do `usb_cam`). Se mudar a resolução, a focagem ou a lente, repita a calibração.
