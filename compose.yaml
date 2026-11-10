@@ -7,33 +7,27 @@ x-ros: &ros
 # Lançar com o gravar.sh, indicando que câmara está em cada /dev/video:
 #   bash gravar.sh 5 8    (câmara 5 em /dev/video2, câmara 8 em /dev/video4)
 # Cada câmara publica no seu tópico: /camara5/image_raw e /camara8/image_raw.
+# Com privileged: true, os /dev/video do PC já estão visíveis dentro do contentor,
+# por isso o driver abre diretamente o /dev/video indicado pelo gravar.sh.
 
 services:
   driver_camara5:
     <<: *ros
     privileged: true
-    devices:
-      - source: ${DEV_CAMARA5:?lance com bash gravar.sh 5 8}
-        target: /dev/camara5
-        permissions: rwm
     command: >
       ros2 run usb_cam usb_cam_node_exe --ros-args
       -r __ns:=/camara5
-      -p video_device:=/dev/camara5
+      -p video_device:=${DEV_CAMARA5:?lance com bash gravar.sh 5 8}
       -p frame_id:=camara5
       -p camera_name:=astra_rgb_5
 
   driver_camara8:
     <<: *ros
     privileged: true
-    devices:
-      - source: ${DEV_CAMARA8:?lance com bash gravar.sh 5 8}
-        target: /dev/camara8
-        permissions: rwm
     command: >
       ros2 run usb_cam usb_cam_node_exe --ros-args
       -r __ns:=/camara8
-      -p video_device:=/dev/camara8
+      -p video_device:=${DEV_CAMARA8:?lance com bash gravar.sh 5 8}
       -p frame_id:=camara8
       -p camera_name:=astra_rgb_8
 
