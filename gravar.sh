@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Lançar a aquisição indicando que câmara está em cada /dev/video.
 #
 #   bash gravar.sh 5 8   ->  câmara 5 em /dev/video2, câmara 8 em /dev/video4

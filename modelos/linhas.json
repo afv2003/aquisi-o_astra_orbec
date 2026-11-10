@@ -1,0 +1,15 @@
+{
+  "img_w": 800,
+  "img_h": 320,
+  "n_offsets": 72,
+  "conf_threshold": 0.4,
+  "nms_thres": 50.0,
+  "max_lanes": 4,
+  "corte_topo": 0.4576271186440678,
+  "modelo": "clrnet_r34",
+  "descricao": "CLRNet ResNet34, CULane (F1 78.99 no UnLanedet)",
+  "pesos": "clrnet_model_best_culane.pth",
+  "origem": "https://github.com/zkyntu/UnLanedet",
+  "opset": 17,
+  "exportado_em": "2026-11-10T22:54:22"
+}

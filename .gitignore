@@ -18,3 +18,9 @@ install/
 SimpleColorViewer-SFML
 
 yolov8n.pt
+
+# Deteção de linhas: ambiente de exportação e pesos originais do UnLanedet (não vão para o git)
+.venv-exportar/
+pesos/
+*.pth
+modelos/teste_linhas.png

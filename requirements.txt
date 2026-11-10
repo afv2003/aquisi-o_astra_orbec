@@ -3,3 +3,4 @@ numpy
 mcap-ros2-support
 ultralytics
 pyyaml
+onnxruntime

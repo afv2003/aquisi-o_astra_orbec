@@ -1,4 +1,4 @@
-﻿import re
+import re
 import sys
 import argparse
 from pathlib import Path
@@ -13,10 +13,16 @@ try:
 except ImportError:
     YOLO = None
 
+# Deteção de linhas da estrada (CLRNet em ONNX): módulo linhas.py, na mesma pasta deste script
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import linhas
+
 # Configurar argumentos da linha de comandos
-parser = argparse.ArgumentParser(description="Processar ROS bag com visualização e deteção YOLO.")
+parser = argparse.ArgumentParser(
+    description="Processar ROS bag: correção da distorção, deteção de objetos (YOLO) e de linhas (CLRNet).")
 parser.add_argument("mcap_file", type=str, help="Caminho para o ficheiro .mcap")
-parser.add_argument("-v", action="store_true", help="Mostrar apenas vídeo (Desativa o YOLO)")
+parser.add_argument("-v", action="store_true",
+                    help="Mostrar apenas vídeo (desativa o YOLO e a deteção de linhas)")
 parser.add_argument("--camara", type=str, default=None,
                     help="Câmara que gravou o bag (5 ou 8). Por omissão: lida do nome do bag "
                          "(viagem_camara5_...). Usa config/camera_astra_<N>.yaml")
@@ -24,12 +30,25 @@ parser.add_argument("--calib", type=str, default=None,
                     help="Ficheiro de calibração a usar (sobrepõe-se a --camara)")
 parser.add_argument("--sem-correcao", action="store_true",
                     help="Não corrigir a distorção da lente (usar a imagem original)")
+parser.add_argument("--corte-linhas", type=float, default=None,
+                    help="Fração da imagem ignorada em cima na deteção de linhas (0 a 1). "
+                         "Por omissão: a do modelo (modelos/linhas.json)")
 args = parser.parse_args()
 
 mcap_file = Path(args.mcap_file)
 
 if not mcap_file.exists():
     print(f"Erro: Ficheiro '{mcap_file}' não encontrado.")
+    sys.exit(1)
+
+# Um ficheiro MCAP começa sempre com estes 8 bytes; se não, está vazio, incompleto ou não é MCAP
+with open(mcap_file, "rb") as f:
+    inicio = f.read(8)
+if inicio != b"\x89MCAP0\r\n":
+    tamanho = mcap_file.stat().st_size
+    print(f"Erro: '{mcap_file}' não é um ficheiro MCAP válido ({tamanho} bytes).")
+    if tamanho < 1024:
+        print("O ficheiro está vazio: a gravação não gravou nada, ou a cópia falhou.")
     sys.exit(1)
 
 # --- CÂMARA E TÓPICO A PROCESSAR (rastreabilidade) ---
@@ -155,6 +174,20 @@ if usar_yolo:
     # Usa o modelo mais leve e rápido (nano) para não encravar o vídeo
     modelo_yolo = YOLO('yolov8n.pt') 
 
+# Deteção de linhas: sempre ativa (exceto com -v). Usa modelos/linhas.onnx com o onnxruntime.
+detetor_linhas = None
+if not args.v:
+    try:
+        detetor_linhas = linhas.DetetorLinhas(corte_topo=args.corte_linhas)
+        print(f"Deteção de linhas: ATIVADA ({detetor_linhas.cfg.get('descricao', 'CLRNet')}, "
+              f"{detetor_linhas.dispositivo}, corte do topo {detetor_linhas.cfg['corte_topo']:.0%})")
+    except ImportError:
+        print("Aviso: a biblioteca 'onnxruntime' não está instalada; a deteção de linhas fica DESLIGADA. "
+              "Corre: pip install -r requirements.txt")
+    except FileNotFoundError as e:
+        print(f"Aviso: modelo de linhas não encontrado ({e}); a deteção de linhas fica DESLIGADA. "
+              "Ver README, secção 4.")
+
 # 1. Obter o tempo total lendo o índice do .mcap
 total_duration_sec = 0.0
 start_time_sec = 0.0
@@ -208,13 +241,19 @@ for msg in read_ros2_messages(str(mcap_file), topics=topicos_leitura):
     if corrigir:
         frame = corrigir_distorcao(frame)
 
+    # --- DETEÇÃO DE LINHAS (sobre a imagem corrigida, antes de o YOLO desenhar por cima) ---
+    linhas_frame = detetor_linhas.detetar(frame) if detetor_linhas is not None else []
+
     # --- PROCESSAMENTO YOLO ---
     if usar_yolo:
         # Executa a inferência de forma silenciosa para não inundar o terminal
         resultados = modelo_yolo(frame, verbose=False)
         # O método .plot() desenha automaticamente os retângulos e labels no frame
         frame = resultados[0].plot()
-        
+
+    if detetor_linhas is not None:
+        linhas.desenhar_linhas(frame, linhas_frame)
+
     ultimo_frame = frame.copy()
 
     # Calcula o tempo decorrido convertendo o log_time (datetime) para segundos
@@ -226,6 +265,9 @@ for msg in read_ros2_messages(str(mcap_file), topics=topicos_leitura):
         cv2.putText(frame, ("CORRIGIDA" if corrigir else "ORIGINAL")
                     + (f"  (camara {camara})" if camara else ""), (20, 75),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if corrigir else (0, 165, 255), 2)
+    if detetor_linhas is not None:
+        cv2.putText(frame, f"LINHAS: {len(linhas_frame)}", (20, 105),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
     cv2.imshow(janela_nome, frame)
     
