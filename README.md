@@ -1,6 +1,6 @@
 # Aquisição e Processamento de Imagem em ROS 2 (Jazzy)
 
-Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e 8) em ROS 2 Jazzy, visualização em tempo real no RViz2 e gravação automática em formato ROS bag (`.mcap`), acompanhado de scripts em Python/OpenCV para processamento offline: correção da distorção da lente, deteção de objetos (YOLO) e deteção de linhas da estrada (CLRNet).
+Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e 8) em ROS 2 Jazzy, visualização em tempo real no RViz2 e gravação automática em formato ROS bag (`.mcap`), acompanhado de scripts em Python/OpenCV para processamento offline: correção da distorção da lente, deteção de objetos (YOLO), deteção de linhas da estrada (CLRNet) e deteção da estrada, ou área circulável (YOLOP).
 
 | Secção | O quê | Onde |
 |---|---|---|
@@ -9,6 +9,7 @@ Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e
 | 3 | Calibração das câmaras | Windows |
 | 4 | Deteção de linhas da estrada (CLRNet, modelo já incluído) | dentro do processamento |
 | 5 | Deteção de objetos (YOLO, modelo já incluído) | dentro do processamento |
+| 6 | Deteção da estrada (YOLOP, modelo já incluído) | dentro do processamento |
 
 ## Pré-requisitos
 * Aquisição: Linux com Docker e Docker Compose instalados
@@ -140,9 +141,22 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
      1. lê a imagem do tópico da câmara e converte-a para cores (BGR);
      2. corrige a distorção da lente com a calibração dessa câmara (secção 3);
      3. deteta as linhas da estrada na imagem corrigida (CLRNet, secção 4);
-     4. deteta objetos na imagem corrigida e desenha as caixas (YOLO, secção 5);
-     5. desenha as linhas por cima e mostra tudo na mesma janela, com o tempo, a câmara e o número de linhas.
-   * Use `-v` para ver só o vídeo, sem YOLO nem deteção de linhas.
+     4. deteta a estrada (área circulável) na mesma imagem (YOLOP, secção 6);
+     5. deteta objetos na imagem corrigida e desenha as caixas (YOLO, secção 5);
+     6. pinta a estrada de verde, desenha as linhas por cima e mostra tudo na mesma janela, com o tempo, a câmara, o número de linhas e a percentagem de estrada.
+   * **Ligar e desligar cada deteção** (as opções podem juntar-se, por exemplo `--sem-objetos --sem-estrada`):
+
+     | Deteção | Desligar ao arrancar | Tecla no vídeo | Confiança mínima (por omissão) |
+     |---|---|---|---|
+     | Objetos (YOLO) | `--sem-objetos` | **O** | `--conf-objetos` (0.25) |
+     | Linhas (CLRNet) | `--sem-linhas` | **L** | `--conf-linhas` (0.4) |
+     | Estrada (YOLOP) | `--sem-estrada` | **E** | `--conf-estrada` (classe mais provável) |
+     | Todas | `-v` (só vídeo) | **V** (desliga todas / volta a ligá-las) | — |
+
+     * Uma deteção desligada com a tecla deixa também de ser calculada, por isso o vídeo fica mais rápido; o bloco de informação mostra `desligada`.
+     * Uma deteção desligada na linha de comandos nem é carregada (arranque mais rápido), e a sua tecla não faz nada.
+     * Outras teclas: **Espaço** pausa, **C** liga/desliga a correção da distorção, **Q** fecha.
+     * **Confiança mínima:** um número de 0 a 1. Mais alto mostra menos deteções, mas mais seguras; mais baixo mostra mais, incluindo erradas.
    * Se o `.mcap` estiver vazio (por exemplo, uma cópia que falhou), o script avisa: `não é um ficheiro MCAP válido (0 bytes)`.
    * Se a gravação foi interrompida (Docker parado à força, `Ctrl + C` duas vezes, disco cheio) ou a cópia ficou incompleta, falta o índice que o MCAP guarda no fim do ficheiro. O script avisa (`o bag não tem o índice no fim`), lê as imagens sequencialmente desde o início e para no ponto onde o ficheiro foi cortado; o tempo total aparece como desconhecido.
    * Se parte do ficheiro estiver estragada (por exemplo, numa cópia ou transferência), o script verifica cada bloco de dados do MCAP, salta os blocos estragados (avisa `bloco estragado no bag`) e continua; no fim indica quantos segundos de vídeo faltam. Se isto acontecer, copie de novo o ficheiro original e verifique-o (secção 1, Passo 6).
@@ -153,7 +167,7 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    ```
 
 ### Passo 3: Desempenho (velocidade) e GPU
-No vídeo aparece uma linha com o tempo de cada etapa, por exemplo `linhas 340 ms | YOLO 60 ms | 2.5 img/s (gravado a 30)`; no fim, o terminal mostra a média.
+No vídeo aparece uma linha com o tempo de cada etapa, por exemplo `objetos 60 ms | linhas 340 ms | estrada 400 ms | 1.2 img/s (gravado a 30)`; no fim, o terminal mostra a média.
 * **Em CPU, o processamento é bastante mais lento do que a gravação** (30 imagens por segundo = 33 ms por imagem). A etapa mais pesada é a deteção de linhas (CLRNet, cerca de 100 a 350 ms por imagem, conforme o processador), seguida do YOLO. O vídeo não perde imagens: só passa mais devagar.
 * **Com GPU** (medido numa NVIDIA RTX 3050 Ti Laptop): linhas cerca de 37 ms e YOLO cerca de 59 ms por imagem, cerca de 10 imagens por segundo.
 * O script espera apenas o que falta para acompanhar o ritmo da gravação; quando o processamento já é mais lento, não acrescenta espera.
@@ -168,7 +182,7 @@ No vídeo aparece uma linha com o tempo de cada etapa, por exemplo `linhas 340 m
     pip uninstall -y onnxruntime onnxruntime-directml
     pip install "onnxruntime-gpu<1.27"
     ```
-  * Confirme no terminal: `YOLO em: GPU (...)` e `Deteção de linhas: ATIVADA (..., GPU (CUDA), ...)`.
+  * Confirme no terminal: `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), ...)`, `Deteção de linhas: ATIVADA (..., GPU (CUDA), ...)` e `Deteção da estrada: ATIVADA (..., GPU (CUDA), ...)`.
   * Depois de trocar, não volte a correr `pip install -r requirements.txt` (reinstalaria o `onnxruntime` de CPU ao lado do de GPU).
   * Não use o `onnxruntime-directml`: foi testado e falhou com este modelo na RTX 3050 Ti (a GPU deixou de responder).
   * Se a GPU falhar na deteção de linhas, o script avisa e continua em CPU; para voltar tudo ao CPU: `pip uninstall -y onnxruntime-gpu torch torchvision` e `pip install onnxruntime torch torchvision`.
@@ -232,7 +246,7 @@ python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --sem-correcao  
 
 ## 4. Deteção de linhas da estrada (CLRNet)
 
-O `processar_bag.py` deteta as linhas da estrada em cada imagem, **sempre** (exceto com `-v`), com o modelo **CLRNet ResNet34** treinado no conjunto de dados CULane, tal como disponibilizado pelo [UnLanedet](https://github.com/zkyntu/UnLanedet). O modelo está guardado em formato ONNX em `modelos/linhas.onnx` e corre com a biblioteca `onnxruntime` (incluída no `requirements.txt`).
+O `processar_bag.py` deteta as linhas da estrada em cada imagem, **sempre** (exceto com `-v` ou `--sem-linhas`), com o modelo **CLRNet ResNet34** treinado no conjunto de dados CULane, tal como disponibilizado pelo [UnLanedet](https://github.com/zkyntu/UnLanedet). O modelo está guardado em formato ONNX em `modelos/linhas.onnx` e corre com a biblioteca `onnxruntime` (incluída no `requirements.txt`).
 
 > **Para usar a deteção de linhas basta a secção 4.1.** As secções 4.2 e 4.3 explicam como funciona e como o modelo foi gerado (registo do que foi feito, **não é preciso repetir**). A secção 4.4 só é precisa para gerar o modelo de novo (por exemplo, depois de o afinar).
 
@@ -242,7 +256,7 @@ Não é preciso instalar nada além do `requirements.txt` (secção 2):
 python processar_bag.py <bag>.mcap --camara 5                       # objetos + linhas
 python processar_bag.py <bag>.mcap --camara 5 --corte-linhas 0.5    # ignorar a metade de cima da imagem
 python processar_bag.py <bag>.mcap --camara 5 --conf-linhas 0.2     # mostrar linhas com menos confiança
-python processar_bag.py <bag>.mcap --camara 5 -v                    # só vídeo (sem YOLO nem linhas)
+python processar_bag.py <bag>.mcap --camara 5 --sem-linhas          # sem as linhas (tecla L no vídeo)
 ```
 * No terminal aparece `Deteção de linhas: ATIVADA (CLRNet ResNet34, ..., CPU, corte do topo 46%, confiança mínima 0.4)` (ou `GPU (CUDA)`); no vídeo, as linhas aparecem coloridas e o contador `LINHAS: N`.
 * Funciona em **Windows, Linux e macOS**, com ou sem GPU. Não precisa do UnLanedet, de PyTorch, nem de máquinas virtuais.
@@ -349,30 +363,33 @@ O modelo foi treinado no CULane: imagens de uma câmara no carro, virada para a 
 
 ## 5. Deteção de objetos (YOLO)
 
-O `processar_bag.py` deteta objetos em cada imagem, **sempre** (exceto com `-v`), com o modelo **YOLOv8n** da biblioteca [Ultralytics](https://github.com/ultralytics/ultralytics) (`ultralytics`, incluída no `requirements.txt`).
+O `processar_bag.py` deteta objetos em cada imagem, **sempre** (exceto com `-v` ou `--sem-objetos`), com o modelo **YOLOv8n** da biblioteca [Ultralytics](https://github.com/ultralytics/ultralytics) (`ultralytics`, incluída no `requirements.txt`).
 
 ### 5.1 Utilização
 Não é preciso fazer nada além da secção 2: o modelo `yolov8n.pt` (cerca de 6,5 MB) já está no repositório.
 ```bash
-python processar_bag.py <bag>.mcap --camara 5        # com YOLO (e linhas)
-python processar_bag.py <bag>.mcap --camara 5 -v     # sem YOLO nem linhas
+python processar_bag.py <bag>.mcap --camara 5                       # com objetos (e linhas e estrada)
+python processar_bag.py <bag>.mcap --camara 5 --conf-objetos 0.5    # só objetos com confiança >= 0.5
+python processar_bag.py <bag>.mcap --camara 5 --sem-objetos         # sem objetos (tecla O no vídeo)
 ```
-* No terminal aparece `A carregar modelo YOLOv8n ...` e `Modo YOLO: ATIVADO`; no vídeo, cada objeto detetado aparece numa caixa com o nome da classe e a confiança.
+* No terminal aparece `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), confiança mínima 0.25)` (ou `CPU`); no vídeo, cada objeto detetado aparece numa caixa com o nome da classe e a confiança, e o bloco de informação mostra `OBJETOS: N`.
+* **`--conf-objetos`**: confiança mínima de um objeto (0.25 por omissão, o valor do `ultralytics`). Por exemplo, 0.5 esconde as deteções duvidosas (como `car 0.32` em carros distantes).
 * Corra o script a partir da pasta do repositório: o modelo é lido de `yolov8n.pt` nessa pasta.
-* Se a biblioteca `ultralytics` não estiver instalada, o script para e indica o comando para a instalar.
+* Se a biblioteca `ultralytics` não estiver instalada, o script avisa e continua sem a deteção de objetos.
 
 ### 5.2 Como funciona
 * **Modelo:** YOLOv8n ("nano"), a versão mais pequena e rápida do YOLOv8, pré-treinada no conjunto de dados COCO. Deteta as **80 classes do COCO**, entre elas `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. Foi escolhida a versão mais leve para o vídeo não ficar demasiado lento.
 * **Onde entra:** corre sobre a imagem **já corrigida** da distorção (secção 3), depois da deteção de linhas (que precisa da imagem limpa, sem caixas desenhadas).
 * **Desenho:** as caixas são desenhadas pela própria biblioteca (`resultados[0].plot()`); as linhas da estrada são desenhadas por cima.
-* **CPU ou GPU:** o `ultralytics` usa o PyTorch, instalado com ele. Com o PyTorch normal corre em CPU; com o PyTorch com CUDA usa a GPU NVIDIA (secção 2, Passo 3). O terminal mostra `YOLO em: GPU (...)` ou `CPU`.
+* **Formato:** ao contrário das linhas e da estrada (ONNX), o YOLO fica em PyTorch (`yolov8n.pt`), porque o `ultralytics` já trata de tudo (pré e pós-processamento, GPU) e funciona em qualquer sistema. Passar para ONNX só compensaria para retirar o PyTorch do `venv`; isso obrigaria a escrever o pré e o pós-processamento do YOLO (como no `linhas.py`), porque o `ultralytics` continua a precisar do PyTorch mesmo com um modelo ONNX.
+* **CPU ou GPU:** o `ultralytics` usa o PyTorch, instalado com ele. Com o PyTorch normal corre em CPU; com o PyTorch com CUDA usa a GPU NVIDIA (secção 2, Passo 3). O terminal mostra `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), ...)` ou `CPU`.
 
 ### 5.3 Trocar de modelo
 Para mais precisão (e menos velocidade), pode trocar `yolov8n.pt` por `yolov8s.pt`, `yolov8m.pt`, etc., na linha `modelo_yolo = YOLO('yolov8n.pt')` do `processar_bag.py`; o `ultralytics` descarrega o novo modelo na primeira utilização.
 
 ### 5.4 Condições de utilização e limitações
 * **Posição da câmara:** qualquer. O COCO tem fotografias tiradas de todos os ângulos, por isso o YOLO não exige a câmara virada para a frente (ao contrário da deteção de linhas).
-* **Parâmetros:** os da biblioteca, por omissão: confiança mínima 0.25 e imagem reduzida para 640 px de lado maior (a das Astra, 640x480, entra sem perda).
+* **Parâmetros:** confiança mínima 0.25 (ajustável com `--conf-objetos`) e imagem reduzida para 640 px de lado maior (a das Astra, 640x480, entra sem perda); são os valores por omissão do `ultralytics`.
 * **Tamanho dos objetos:** objetos pequenos ou distantes (menos de cerca de 30 px de altura) ou muito tapados são detetados pior, ou não são detetados.
 * **Classes parecidas** podem ser confundidas: por exemplo, uma carrinha pode aparecer como `truck` em vez de `car`.
 * **Luz:** pouca luz, contraluz e reflexos pioram a deteção.
@@ -382,9 +399,42 @@ Para mais precisão (e menos velocidade), pode trocar `yolov8n.pt` por `yolov8s.
 
 ---
 
+## 6. Deteção da estrada (YOLOP)
+
+O `processar_bag.py` deteta em cada imagem a **área circulável** (a estrada por onde o veículo pode seguir) e pinta-a de verde, **sempre** (exceto com `-v` ou `--sem-estrada`). Usa o **YOLOP** em ONNX (`modelos/estrada.onnx`), com o mesmo `onnxruntime` da deteção de linhas: não é preciso instalar nada além do `requirements.txt`.
+
+### 6.1 Utilização
+```bash
+python processar_bag.py <bag>.mcap --camara 5                  # objetos + linhas + estrada
+python processar_bag.py <bag>.mcap --camara 5 --conf-estrada 0.9   # só a estrada de que o modelo tem mais certeza
+python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estrada (tecla E no vídeo)
+```
+* No terminal aparece `Deteção da estrada: ATIVADA (YOLOP, área circulável, CPU, classe mais provável)` (ou `GPU (CUDA)`); no vídeo, a estrada fica pintada de verde e aparece `ESTRADA: N% da imagem`.
+* **`--conf-estrada`**: o modelo dá a cada píxel uma pontuação de "estrada" de 0 a 1. Por omissão, um píxel é estrada quando essa pontuação é maior do que a de "não estrada" (como no YOLOP); com `--conf-estrada 0.9`, só quando é pelo menos 0.9. Valores mais altos limpam bordas duvidosas. O modelo dá pontuações muito extremas (quase sempre perto de 0 ou de 1), por isso o efeito é pequeno: num frame de teste, a área passou de 23% (omissão) para 16% da imagem com 0.99, e parte do passeio continuou marcada, porque o modelo "tem a certeza" de que é estrada. Estes erros resolvem-se com a câmara na posição certa (secção 6.3), não com o limiar.
+* Na linha de desempenho do vídeo aparece o tempo da etapa (`estrada X ms`). O modelo é do tamanho do CLRNet, por isso, em CPU, o vídeo fica cerca de duas vezes mais lento; com GPU (secção 2, Passo 3) o efeito é pequeno.
+
+### 6.2 Como funciona
+* **Modelo:** [YOLOP](https://github.com/hustvl/YOLOP) (licença MIT), treinado no BDD100K (vídeos de condução em cidade e estrada, de dia e de noite). É uma rede com três saídas: objetos, área circulável e linhas. Aqui usa-se **só a área circulável**: os objetos já são detetados pelo YOLOv8 (secção 5) e as linhas pelo CLRNet (secção 4), que é mais preciso nas linhas.
+* **Ficheiro:** `modelos/estrada.onnx` é o `weights/yolop-640-640.onnx` publicado pelos autores do YOLOP, copiado sem alterações (entrada 640x640). Não foi preciso exportar nada.
+* **Pré-processamento** (igual ao `test_onnx.py` do YOLOP): a imagem é reduzida mantendo a proporção (640x480 fica igual) e completada com cinzento até 640x640; depois, RGB, divide por 255 e normaliza com a média e o desvio do ImageNet.
+* **Pós-processamento:** em cada píxel fica a classe mais provável (estrada ou não), retira-se a parte cinzenta e a máscara volta ao tamanho da imagem.
+* **Ordem:** corre sobre a imagem já corrigida da distorção e **antes** de se desenhar qualquer coisa (caixas do YOLO, linhas), para os desenhos não confundirem o modelo.
+* **Saída usada:** `drive_area_seg`, 2 canais (não estrada, estrada) de 640x640, cada um com uma pontuação de 0 a 1 por píxel.
+* **Código:** `estrada.py`, com a mesma estrutura do `linhas.py` (GPU se houver, CPU se não houver ou se a GPU falhar).
+
+### 6.3 Condições de utilização e limitações
+* **Câmara no veículo, virada para a frente**, como no BDD100K (câmara no tabliê). Noutras posições o resultado piora: num vídeo de teste, com a câmara num passeio virada na diagonal para uma passadeira, o modelo marcou parte do passeio como estrada.
+* **"Área circulável" não é "todo o asfalto":** no BDD100K, é sobretudo a faixa onde o veículo vai e as faixas para onde pode mudar; a faixa do sentido contrário e os lugares de estacionamento normalmente não são marcados.
+* Funciona sem linhas pintadas, em cruzamentos e de noite, ao contrário da deteção de linhas; mas não diz em que faixa o veículo vai (isso é a deteção de linhas, secção 4).
+* As bordas da área são aproximadas (alguns píxeis), e a máscara pode "falhar" em sombras fortes ou em pisos muito diferentes do habitual (empedrado, terra).
+* O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
+
+---
+
 ## Créditos
 * CLRNet: Zheng et al., *CLRNet: Cross Layer Refinement Network for Lane Detection*, CVPR 2022.
 * Implementação e pesos: [UnLanedet](https://github.com/zkyntu/UnLanedet) (licença Apache 2.0).
 * Conjunto de dados de treino das linhas: CULane.
+* Deteção da estrada: [YOLOP](https://github.com/hustvl/YOLOP), Wu et al., *YOLOP: You Only Look Once for Panoptic Driving Perception* (licença MIT), treinado no BDD100K.
 * Deteção de objetos: [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (licença AGPL-3.0), pré-treinado no COCO.
-* Verifique as condições de utilização do CULane, do UnLanedet e do Ultralytics antes de usar os modelos fora do contexto académico.
+* Verifique as condições de utilização do CULane, do BDD100K, do UnLanedet, do YOLOP e do Ultralytics antes de usar os modelos fora do contexto académico.

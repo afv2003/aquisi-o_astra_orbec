@@ -18,13 +18,19 @@ except ImportError:
 # Deteção de linhas da estrada (CLRNet em ONNX): módulo linhas.py, na mesma pasta deste script
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import linhas
+import estrada
 
 # Configurar argumentos da linha de comandos
 parser = argparse.ArgumentParser(
-    description="Processar ROS bag: correção da distorção, deteção de objetos (YOLO) e de linhas (CLRNet).")
+    description="Processar ROS bag: correção da distorção, deteção de objetos (YOLO), de linhas (CLRNet) e da estrada (YOLOP).")
 parser.add_argument("mcap_file", type=str, help="Caminho para o ficheiro .mcap")
 parser.add_argument("-v", action="store_true",
-                    help="Mostrar apenas vídeo (desativa o YOLO e a deteção de linhas)")
+                    help="Mostrar apenas o vídeo: o mesmo que --sem-objetos --sem-linhas --sem-estrada")
+parser.add_argument("--sem-objetos", action="store_true", help="Não detetar objetos (YOLO)")
+parser.add_argument("--sem-linhas", action="store_true", help="Não detetar as linhas da estrada (CLRNet)")
+parser.add_argument("--sem-estrada", action="store_true", help="Não detetar a estrada (YOLOP)")
+parser.add_argument("--conf-objetos", type=float, default=0.25,
+                    help="Confiança mínima (0 a 1) para mostrar um objeto. Por omissão: 0.25 (a do ultralytics)")
 parser.add_argument("--camara", type=str, default=None,
                     help="Câmara que gravou o bag (5 ou 8). Por omissão: lida do nome do bag "
                          "(viagem_camara5_...). Usa config/camera_astra_<N>.yaml")
@@ -38,7 +44,16 @@ parser.add_argument("--corte-linhas", type=float, default=None,
 parser.add_argument("--conf-linhas", type=float, default=None,
                     help="Confiança mínima (0 a 1) para mostrar uma linha. Por omissão: 0.4 "
                          "(modelos/linhas.json). Valores mais baixos mostram mais linhas, e mais falsas")
+parser.add_argument("--conf-estrada", type=float, default=None,
+                    help="Confiança mínima (0.5 a 1) para um píxel ser estrada. Por omissão: a classe mais "
+                         "provável (como no YOLOP). Valores mais altos marcam menos área")
 args = parser.parse_args()
+if args.v:
+    args.sem_objetos = args.sem_linhas = args.sem_estrada = True
+for nome in ("conf_objetos", "conf_linhas", "conf_estrada"):
+    valor = getattr(args, nome)
+    if valor is not None and not 0 <= valor <= 1:
+        parser.error(f"--{nome.replace('_', '-')} tem de estar entre 0 e 1 (recebeu {valor})")
 
 mcap_file = Path(args.mcap_file)
 
@@ -242,24 +257,29 @@ def corrigir_distorcao(img):
     m1, m2 = _mapas_correcao[(w, h)]
     return cv2.remap(img, m1, m2, cv2.INTER_LINEAR)
 
-# Inicializar o modelo YOLO se o utilizador não passou a flag -v
-usar_yolo = not args.v
-if usar_yolo:
-    if YOLO is None:
-        print("Erro: A biblioteca 'ultralytics' não está instalada. Corre: pip install ultralytics")
-        sys.exit(1)
+# --- MODELOS: cada um é carregado só se não tiver sido desligado na linha de comandos ---
+# Objetos (YOLOv8n, ultralytics/PyTorch)
+modelo_yolo = None
+if args.sem_objetos:
+    print(f"Deteção de objetos: DESLIGADA ({'-v' if args.v else '--sem-objetos'})")
+elif YOLO is None:
+    print("Aviso: a biblioteca 'ultralytics' não está instalada; a deteção de objetos fica DESLIGADA. "
+          "Corre: pip install -r requirements.txt")
+else:
     print("A carregar modelo YOLOv8n (poderá demorar um pouco na primeira vez)...")
-    # Usa o modelo mais leve e rápido (nano) para não encravar o vídeo
-    modelo_yolo = YOLO('yolov8n.pt')
+    modelo_yolo = YOLO('yolov8n.pt')   # versão "nano", a mais leve, para o vídeo não ficar lento
     try:
         import torch
-        print(f"YOLO em: {'GPU (' + torch.cuda.get_device_name(0) + ')' if torch.cuda.is_available() else 'CPU'}")
+        disp_yolo = 'GPU (' + torch.cuda.get_device_name(0) + ')' if torch.cuda.is_available() else 'CPU'
     except Exception:
-        pass
+        disp_yolo = "CPU"
+    print(f"Deteção de objetos: ATIVADA (YOLOv8n, {disp_yolo}, confiança mínima {args.conf_objetos:g})")
 
-# Deteção de linhas: sempre ativa (exceto com -v). Usa modelos/linhas.onnx com o onnxruntime.
+# Linhas da estrada (CLRNet, modelos/linhas.onnx com o onnxruntime)
 detetor_linhas = None
-if not args.v:
+if args.sem_linhas:
+    print(f"Deteção de linhas: DESLIGADA ({'-v' if args.v else '--sem-linhas'})")
+else:
     try:
         detetor_linhas = linhas.DetetorLinhas(corte_topo=args.corte_linhas, confianca=args.conf_linhas)
         print(f"Deteção de linhas: ATIVADA ({detetor_linhas.cfg.get('descricao', 'CLRNet')}, "
@@ -271,6 +291,27 @@ if not args.v:
     except FileNotFoundError as e:
         print(f"Aviso: modelo de linhas não encontrado ({e}); a deteção de linhas fica DESLIGADA. "
               "Ver README, secção 4.")
+
+# Estrada / área circulável (YOLOP, modelos/estrada.onnx com o onnxruntime)
+detetor_estrada = None
+if args.sem_estrada:
+    print(f"Deteção da estrada: DESLIGADA ({'-v' if args.v else '--sem-estrada'})")
+else:
+    try:
+        detetor_estrada = estrada.DetetorEstrada(confianca=args.conf_estrada)
+        conf_txt = (f"confiança mínima {args.conf_estrada:g}" if args.conf_estrada is not None
+                    else "classe mais provável")
+        print(f"Deteção da estrada: ATIVADA (YOLOP, área circulável, {detetor_estrada.dispositivo}, {conf_txt})")
+    except ImportError:
+        print("Aviso: a biblioteca 'onnxruntime' não está instalada; a deteção da estrada fica DESLIGADA.")
+    except FileNotFoundError as e:
+        print(f"Aviso: modelo da estrada não encontrado ({e}); a deteção da estrada fica DESLIGADA. "
+              "Ver README, secção 6.")
+
+# Estado de cada deteção durante o vídeo (as teclas O, L, E e V ligam/desligam)
+ativo = {"objetos": modelo_yolo is not None, "linhas": detetor_linhas is not None,
+         "estrada": detetor_estrada is not None}
+carregado = dict(ativo)
 
 # 1. Obter o tempo total lendo o índice do .mcap
 total_duration_sec = 0.0
@@ -292,11 +333,18 @@ mins, secs = divmod(total_duration_sec, 60)
 print(f"A ler ROS bag sequencialmente: {mcap_file.name}")
 print(f"Tempo total do vídeo: {int(mins)}m {secs:.1f}s" if total_duration_sec > 0
       else "Tempo total do vídeo: desconhecido (o bag não tem índice)")
-print(f"Modo YOLO: {'ATIVADO' if usar_yolo else 'DESATIVADO'}")
 print("\n--- CONTROLOS ---")
 print("[Espaço] : Pausar / Retomar")
 if calibracao is not None:
     print("[C]      : Ligar / desligar a correção da distorção (para comparar)")
+if carregado["objetos"]:
+    print("[O]      : Ligar / desligar a deteção de objetos (YOLO)")
+if carregado["linhas"]:
+    print("[L]      : Ligar / desligar a deteção de linhas (CLRNet)")
+if carregado["estrada"]:
+    print("[E]      : Ligar / desligar a deteção da estrada (YOLOP)")
+if any(carregado.values()):
+    print("[V]      : Desligar todas as deteções (só vídeo) / voltar a ligá-las")
 print("[Q]      : Fechar o visualizador")
 corrigir = calibracao is not None
 
@@ -309,15 +357,16 @@ ultimo_frame = None
 
 # Lê as mensagens à medida que o vídeo avança
 # Tempos de cada etapa (média móvel, em ms) e ritmo da gravação, para mostrar no vídeo
-tempos = {"linhas": 0.0, "yolo": 0.0, "total": 0.0}
-n_frames = 0
-soma = {"linhas": 0.0, "yolo": 0.0, "total": 0.0}
+tempos = {"linhas": 0.0, "estrada": 0.0, "objetos": 0.0, "total": 0.0}
+soma = {"linhas": 0.0, "estrada": 0.0, "objetos": 0.0, "total": 0.0}
+contagem = {"linhas": 0, "estrada": 0, "objetos": 0, "total": 0}   # imagens em que cada etapa correu
 t_msg_anterior = None
 
 
 def media(chave, valor_ms):
-    tempos[chave] = valor_ms if n_frames == 0 else 0.9 * tempos[chave] + 0.1 * valor_ms
+    tempos[chave] = valor_ms if contagem[chave] == 0 else 0.9 * tempos[chave] + 0.1 * valor_ms
     soma[chave] += valor_ms
+    contagem[chave] += 1
 
 
 def painel(img, textos):
@@ -356,22 +405,34 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
     if corrigir:
         frame = corrigir_distorcao(frame)
 
-    # --- DETEÇÃO DE LINHAS (sobre a imagem corrigida, antes de o YOLO desenhar por cima) ---
-    t0 = time.perf_counter()
-    linhas_frame = detetor_linhas.detetar(frame) if detetor_linhas is not None else []
-    media("linhas", (time.perf_counter() - t0) * 1000)
-
-    # --- PROCESSAMENTO YOLO ---
-    if usar_yolo:
-        # Executa a inferência de forma silenciosa para não inundar o terminal
+    # As três deteções correm sobre a imagem corrigida e ainda sem desenhos.
+    # --- DETEÇÃO DE LINHAS (CLRNet) ---
+    linhas_frame = []
+    if ativo["linhas"]:
         t0 = time.perf_counter()
-        resultados = modelo_yolo(frame, verbose=False)
-        media("yolo", (time.perf_counter() - t0) * 1000)
-        # O método .plot() desenha automaticamente os retângulos e labels no frame
-        frame = resultados[0].plot()
+        linhas_frame = detetor_linhas.detetar(frame)
+        media("linhas", (time.perf_counter() - t0) * 1000)
 
-    if detetor_linhas is not None:
-        linhas.desenhar_linhas(frame, linhas_frame)
+    # --- DETEÇÃO DA ESTRADA (YOLOP) ---
+    mascara_estrada = None
+    if ativo["estrada"]:
+        t0 = time.perf_counter()
+        mascara_estrada = detetor_estrada.detetar(frame)
+        media("estrada", (time.perf_counter() - t0) * 1000)
+
+    # --- DETEÇÃO DE OBJETOS (YOLO) ---
+    n_objetos = 0
+    if ativo["objetos"]:
+        t0 = time.perf_counter()
+        resultados = modelo_yolo(frame, conf=args.conf_objetos, verbose=False)
+        media("objetos", (time.perf_counter() - t0) * 1000)
+        n_objetos = len(resultados[0].boxes)
+        frame = resultados[0].plot()   # cópia da imagem com as caixas e as etiquetas desenhadas
+
+    # Desenho: estrada por baixo (semitransparente), linhas por cima
+    if mascara_estrada is not None:
+        estrada.desenhar_estrada(frame, mascara_estrada)
+    linhas.desenhar_linhas(frame, linhas_frame)
 
     ultimo_frame = frame.copy()
 
@@ -380,9 +441,8 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
     intervalo_ms = (t_msg - t_msg_anterior) * 1000 if t_msg_anterior is not None else 33.0
     intervalo_ms = intervalo_ms if 0 < intervalo_ms < 1000 else 33.0
     t_msg_anterior = t_msg
-    ritmo_ms = intervalo_ms if n_frames == 0 else 0.95 * ritmo_ms + 0.05 * intervalo_ms  # média, para não oscilar
+    ritmo_ms = intervalo_ms if contagem["total"] == 0 else 0.95 * ritmo_ms + 0.05 * intervalo_ms  # média, para não oscilar
     media("total", (time.perf_counter() - t_inicio) * 1000)
-    n_frames += 1
     img_s = 1000 / max(tempos["total"], 1e-3)
 
     # Informação no canto superior esquerdo (tempo, correção, linhas, desempenho)
@@ -394,10 +454,22 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
     if calibracao is not None:
         textos.append((("CORRIGIDA" if corrigir else "ORIGINAL") + (f"  (camara {camara})" if camara else ""),
                        0.6, (0, 255, 0) if corrigir else (0, 165, 255)))
-    if detetor_linhas is not None:
-        textos.append((f"LINHAS: {len(linhas_frame)}", 0.6, (0, 255, 255)))
-    textos.append((f"linhas {tempos['linhas']:.0f} ms | YOLO {tempos['yolo']:.0f} ms | "
-                   f"{img_s:.1f} img/s (gravado a {1000 / ritmo_ms:.0f})", 0.5, (255, 255, 255)))
+    estados = [("objetos", "OBJETOS", f"{n_objetos}", (255, 255, 255)),
+               ("linhas", "LINHAS", f"{len(linhas_frame)}", (0, 255, 255)),
+               ("estrada", "ESTRADA", f"{mascara_estrada.mean():.0%} da imagem" if mascara_estrada is not None
+                else "", (0, 200, 0))]
+    desempenho = []
+    for chave, nome, valor, cor in estados:
+        if not carregado[chave]:
+            continue
+        if ativo[chave]:
+            textos.append((f"{nome}: {valor}", 0.6, cor))
+            desempenho.append(f"{chave} {tempos[chave]:.0f} ms")
+        else:
+            desligado = {"objetos": "desligados", "linhas": "desligadas", "estrada": "desligada"}[chave]
+            textos.append((f"{nome}: {desligado}", 0.6, (150, 150, 150)))
+    desempenho.append(f"{img_s:.1f} img/s (gravado a {1000 / ritmo_ms:.0f})")
+    textos.append((" | ".join(desempenho), 0.5, (255, 255, 255)))
     painel(frame, textos)
 
     cv2.imshow(janela_nome, frame)
@@ -413,6 +485,13 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
         paused = True
     elif key == ord('c') and calibracao is not None:
         corrigir = not corrigir
+    elif key in (ord('o'), ord('l'), ord('e')):
+        chave = {ord('o'): "objetos", ord('l'): "linhas", ord('e'): "estrada"}[key]
+        if carregado[chave]:
+            ativo[chave] = not ativo[chave]
+    elif key == ord('v') and any(carregado.values()):
+        ligar = not any(ativo.values())   # se alguma estiver ligada, desliga todas; senão, liga todas
+        ativo = {k: ligar and carregado[k] for k in ativo}
 
     while paused:
         key_pause = cv2.waitKey(0) & 0xFF 
@@ -426,10 +505,12 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
     if saiu_cedo:
         break
 
-if n_frames:
-    print(f"\nTempo médio por imagem: linhas {soma['linhas'] / n_frames:.0f} ms | "
-          f"YOLO {soma['yolo'] / n_frames:.0f} ms | total {soma['total'] / n_frames:.0f} ms "
-          f"({1000 * n_frames / max(soma['total'], 1e-3):.1f} imagens/s)")
+if contagem["total"]:
+    partes = [f"{k} {soma[k] / contagem[k]:.0f} ms" for k in ("objetos", "linhas", "estrada", "total")
+              if contagem[k]]
+    img_s_media = 1000 * contagem["total"] / max(soma["total"], 1e-3)
+    print("\nTempo médio por imagem (nas imagens em que cada deteção esteve ligada): "
+          + " | ".join(partes) + f" ({img_s_media:.1f} imagens/s)")
 
 if not saiu_cedo and ultimo_frame is not None:
     print("\nFim do vídeo alcançado!")
