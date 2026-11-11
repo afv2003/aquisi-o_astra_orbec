@@ -20,6 +20,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import linhas
 import estrada
 
+# Classes do YOLO mostradas por omissão: só elementos de estrada (nomes do COCO, ver README, secção 5).
+# Para mudar a lista de forma permanente, altere-a aqui; para uma execução, use --classes-objetos.
+CLASSES_ESTRADA = ["person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign"]
+
 # Configurar argumentos da linha de comandos
 parser = argparse.ArgumentParser(
     description="Processar ROS bag: correção da distorção, deteção de objetos (YOLO), de linhas (CLRNet) e da estrada (YOLOP).")
@@ -31,6 +35,10 @@ parser.add_argument("--sem-linhas", action="store_true", help="Não detetar as l
 parser.add_argument("--sem-estrada", action="store_true", help="Não detetar a estrada (YOLOP)")
 parser.add_argument("--conf-objetos", type=float, default=0.25,
                     help="Confiança mínima (0 a 1) para mostrar um objeto. Por omissão: 0.25 (a do ultralytics)")
+parser.add_argument("--classes-objetos", type=str, default=None,
+                    help="Classes do YOLO a detetar, separadas por vírgulas (ex.: \"car,truck,traffic light\"). "
+                         "Por omissão: as de estrada (CLASSES_ESTRADA, no início do script). "
+                         "'todas' deteta as 80 classes do COCO")
 parser.add_argument("--camara", type=str, default=None,
                     help="Câmara que gravou o bag (5 ou 8). Por omissão: lida do nome do bag "
                          "(viagem_camara5_...). Usa config/camera_astra_<N>.yaml")
@@ -268,12 +276,27 @@ elif YOLO is None:
 else:
     print("A carregar modelo YOLOv8n (poderá demorar um pouco na primeira vez)...")
     modelo_yolo = YOLO('yolov8n.pt')   # versão "nano", a mais leve, para o vídeo não ficar lento
+    # Classes a detetar: nomes -> números do modelo (o YOLO só procura estas)
+    nomes_yolo = {nome: i for i, nome in modelo_yolo.names.items()}
+    pedido = args.classes_objetos
+    if pedido is not None and pedido.strip().lower() == "todas":
+        classes_yolo = None
+    else:
+        lista = CLASSES_ESTRADA if pedido is None else [c.strip() for c in pedido.split(",") if c.strip()]
+        desconhecidas = [c for c in lista if c not in nomes_yolo]
+        if desconhecidas or not lista:
+            print(f"Erro: classe(s) desconhecida(s) para o YOLO: {', '.join(desconhecidas) or '(nenhuma)'}.")
+            print("Classes possíveis: " + ", ".join(modelo_yolo.names.values()))
+            sys.exit(1)
+        classes_yolo = sorted(nomes_yolo[c] for c in lista)
     try:
         import torch
         disp_yolo = 'GPU (' + torch.cuda.get_device_name(0) + ')' if torch.cuda.is_available() else 'CPU'
     except Exception:
         disp_yolo = "CPU"
     print(f"Deteção de objetos: ATIVADA (YOLOv8n, {disp_yolo}, confiança mínima {args.conf_objetos:g})")
+    print("  Classes: " + ("todas (80 do COCO)" if classes_yolo is None
+                           else ", ".join(modelo_yolo.names[i] for i in classes_yolo)))
 
 # Linhas da estrada (CLRNet, modelos/linhas.onnx com o onnxruntime)
 detetor_linhas = None
@@ -424,7 +447,7 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
     n_objetos = 0
     if ativo["objetos"]:
         t0 = time.perf_counter()
-        resultados = modelo_yolo(frame, conf=args.conf_objetos, verbose=False)
+        resultados = modelo_yolo(frame, conf=args.conf_objetos, classes=classes_yolo, verbose=False)
         media("objetos", (time.perf_counter() - t0) * 1000)
         n_objetos = len(resultados[0].boxes)
         frame = resultados[0].plot()   # cópia da imagem com as caixas e as etiquetas desenhadas

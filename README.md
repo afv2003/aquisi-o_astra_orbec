@@ -148,7 +148,7 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
 
      | Deteção | Desligar ao arrancar | Tecla no vídeo | Confiança mínima (por omissão) |
      |---|---|---|---|
-     | Objetos (YOLO) | `--sem-objetos` | **O** | `--conf-objetos` (0.25) |
+     | Objetos (YOLO) | `--sem-objetos` | **O** | `--conf-objetos` (0.25); classes: `--classes-objetos` (as de estrada) |
      | Linhas (CLRNet) | `--sem-linhas` | **L** | `--conf-linhas` (0.4) |
      | Estrada (YOLOP) | `--sem-estrada` | **E** | `--conf-estrada` (classe mais provável) |
      | Todas | `-v` (só vídeo) | **V** (desliga todas / volta a ligá-las) | — |
@@ -371,8 +371,14 @@ Não é preciso fazer nada além da secção 2: o modelo `yolov8n.pt` (cerca de 
 python processar_bag.py <bag>.mcap --camara 5                       # com objetos (e linhas e estrada)
 python processar_bag.py <bag>.mcap --camara 5 --conf-objetos 0.5    # só objetos com confiança >= 0.5
 python processar_bag.py <bag>.mcap --camara 5 --sem-objetos         # sem objetos (tecla O no vídeo)
+python processar_bag.py <bag>.mcap --camara 5 --classes-objetos "car,truck,traffic light"   # só estas classes
+python processar_bag.py <bag>.mcap --camara 5 --classes-objetos todas                       # as 80 classes
 ```
 * No terminal aparece `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), confiança mínima 0.25)` (ou `CPU`); no vídeo, cada objeto detetado aparece numa caixa com o nome da classe e a confiança, e o bloco de informação mostra `OBJETOS: N`.
+* **Classes detetadas:** por omissão, só **elementos de estrada**: `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. O terminal mostra a lista usada (`Classes: ...`).
+  * Para mudar a lista de forma permanente, altere `CLASSES_ESTRADA` no início do `processar_bag.py`.
+  * Para uma só execução, use `--classes-objetos` com os nomes em inglês do COCO, separados por vírgulas e entre aspas se algum tiver espaços (`"traffic light"`). Um nome errado dá erro e mostra a lista de nomes possíveis.
+  * O filtro é aplicado pelo próprio YOLO (opção `classes` do `ultralytics`): as outras classes não são detetadas nem desenhadas.
 * **`--conf-objetos`**: confiança mínima de um objeto (0.25 por omissão, o valor do `ultralytics`). Por exemplo, 0.5 esconde as deteções duvidosas (como `car 0.32` em carros distantes).
 * Corra o script a partir da pasta do repositório: o modelo é lido de `yolov8n.pt` nessa pasta.
 * Se a biblioteca `ultralytics` não estiver instalada, o script avisa e continua sem a deteção de objetos.
@@ -394,7 +400,7 @@ Para mais precisão (e menos velocidade), pode trocar `yolov8n.pt` por `yolov8s.
 * **Classes parecidas** podem ser confundidas: por exemplo, uma carrinha pode aparecer como `truck` em vez de `car`.
 * **Luz:** pouca luz, contraluz e reflexos pioram a deteção.
 * O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
-* Só deteta as 80 classes do COCO (não deteta, por exemplo, marcas no chão; essas são tratadas pela deteção de linhas, secção 4).
+* Só conhece as 80 classes do COCO, e por omissão mostra apenas as de estrada (secção 5.1). Não deteta, por exemplo, sinais de trânsito além do `stop sign`, nem marcas no chão (essas são tratadas pela deteção de linhas, secção 4). Para outros sinais seria preciso outro modelo, treinado com eles.
 * Os resultados não são gravados: apenas mostrados no vídeo.
 
 ---
