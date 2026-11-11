@@ -20,6 +20,11 @@ Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e
 
 O Docker lança as **duas câmaras Astra (5 e 8) em simultâneo**, cada uma com o seu driver `usb_cam`, abre o `rviz2` e grava as duas num só bag (`.mcap`) na pasta `./data`. Cada câmara publica no seu tópico: `/camara5/image_raw` e `/camara8/image_raw`.
 
+**Ficheiros e como funcionam:**
+* `Dockerfile`: imagem com o ROS 2 Jazzy, o driver `usb_cam` e o `rviz2`. Assim, a aquisição não precisa do ROS instalado no PC.
+* `compose.yaml`: lança 4 contentores ROS (nós) na mesma rede: um driver por câmara (`driver_camara5` e `driver_camara8`, cada um com o seu namespace e, por isso, o seu tópico), o `rviz` (visualização) e o `gravador_bag` (`ros2 bag record` dos dois tópicos para um só `.mcap`, com o mesmo relógio). Os drivers correm em modo `privileged` para terem acesso aos `/dev/video` do PC.
+* `gravar.sh`: associa cada câmara física (5 ou 8) ao seu `/dev/video`, confirma que o dispositivo existe e lança o `docker compose up`. Existe porque a ordem dos `/dev/video` muda de dia para dia; sem ele, as câmaras podiam ficar trocadas nos tópicos.
+
 ### Passo 1: Construir a imagem do Docker (Apenas na 1.ª vez)
 Antes de utilizar o sistema pela primeira vez, é necessário descarregar e construir a imagem Docker com o ROS 2 e os pacotes da câmara. Abra o terminal na pasta do projeto e execute:
 ```bash
@@ -182,6 +187,11 @@ python calibrar_astra.py --camara 5 --cam 1 --colunas 9 --linhas 7 --quadrado 25
 * Se carregar em **Q** sem ter feito R → O → C, aparece um aviso. Um segundo **Q** grava assim mesmo; outra tecla cancela. **ESC** sai sem gravar.
 * O resultado fica em `calibracoes/camara5_<data_hora>/camera_astra_5.yaml` (ou `camara8_...` / `camera_astra_8.yaml`).
 
+**Como funciona o `calibrar_astra.py`:** em cada imagem procura os cantos do xadrez (`findChessboardCornersSB`, refinados com `cornerSubPix`) e, com `--auto`, guarda a foto quando a posição do xadrez é suficientemente diferente das anteriores (critério do ROS). Na calibração (`calibrateCameraExtended`, modelo `plumb_bob`) calcula a matriz da câmara K e os coeficientes de distorção D, com o erro de cada foto. Grava:
+* `camera_astra_<N>.yaml`: K e D no formato `camera_info` do ROS (o mesmo da ferramenta `camera_calibration`), lido pelo `processar_bag.py`;
+* `calibracao.json`: os mesmos valores mais o relatório (erro RMS, erro por foto, fotos rejeitadas);
+* `imagens/`: as fotos usadas, para repetir ou verificar a calibração.
+
 ### Passo 2: Copiar a calibração para este projeto
 Copie o ficheiro gerado de cada câmara para a pasta `config/` deste repositório:
 ```
@@ -195,6 +205,8 @@ O `processar_bag.py` usa automaticamente `config/camera_astra_<N>.yaml` da câma
 python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --calib outro.yaml   # outro ficheiro de calibração
 python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --sem-correcao       # sem correção
 ```
+* A correção é rápida: os mapas de correção são calculados uma vez (`initUndistortRectifyMap`) e aplicados a cada imagem (`remap`).
+* Se não houver `config/camera_astra_<N>.yaml`, o script tenta o `/camera_info` gravado no bag; se também não houver, mostra a imagem sem correção e avisa.
 * Durante a reprodução, a tecla **C** liga/desliga a correção, para comparar.
 * Corra o script a partir da pasta do repositório (o caminho `config/` é relativo a essa pasta).
 
@@ -305,9 +317,15 @@ Outros modelos: `--modelo clrernet_r34` (CLRerNet) ou `--modelo clrnet_r50`. No 
 
 O `.venv-exportar` pode ser mantido para exportações futuras ou apagado (para libertar espaço): os comandos acima voltam a criá-lo.
 
-### 4.5 Limitações conhecidas
-* O modelo foi treinado com imagens de estradas reais (CULane, câmara à altura de um carro). Noutro tipo de imagens (outra altura da câmara, pistas, pouca resolução) os resultados podem piorar; nesse caso, é preciso afiná-lo com imagens próprias e voltar a exportá-lo (secção 4.4).
-* A calibração e o corte da imagem afetam o resultado: a deteção é feita sobre a imagem já corrigida.
+### 4.5 Condições de utilização e limitações
+O modelo foi treinado no CULane: imagens de uma câmara no carro, virada para a frente, a circular em estrada. Só funciona bem em imagens parecidas:
+* **Câmara no veículo, virada para a frente** (no sentido da marcha), à altura aproximada de um carro e alinhada com a estrada (não virada para o lado nem muito inclinada).
+* **Horizonte a meio da imagem, ou acima:** o modelo ignora a parte de cima da imagem (46% por omissão), onde no CULane está o céu. Se a câmara estiver montada de outra forma, ajuste com `--corte-linhas` (por exemplo, `--corte-linhas 0.35` se o horizonte estiver mais acima).
+* **O que deteta:** linhas pintadas **no sentido da estrada** (contínuas ou tracejadas), até 4 por imagem (as faixas junto ao veículo), com confiança de pelo menos 0.4. Quando faltam linhas pintadas, prevê a sua posição provável, mas com menos confiança.
+* **O que não deteta:** linhas **atravessadas** (passadeiras, linhas de paragem), setas e outras marcas no chão. Lancis e bermas só aparecem às vezes, com confiança baixa.
+* **Exemplo:** num vídeo de teste com a câmara num passeio, baixa e virada na diagonal para uma passadeira, o resultado foi `LINHAS: 0` (a confiança máxima foi 0.27, no lancil). O programa funciona; a imagem é que não corresponde ao treino do modelo.
+* A deteção é feita sobre a imagem já corrigida da distorção (secção 3); uma calibração errada também prejudica as linhas.
+* Fora destas condições (outra posição da câmara, pistas, pouca luz), é preciso afinar o modelo com imagens próprias e voltar a exportá-lo (secção 4.4).
 
 ---
 
@@ -334,7 +352,12 @@ python processar_bag.py <bag>.mcap --camara 5 -v     # sem YOLO nem linhas
 ### 5.3 Trocar de modelo
 Para mais precisão (e menos velocidade), pode trocar `yolov8n.pt` por `yolov8s.pt`, `yolov8m.pt`, etc., na linha `modelo_yolo = YOLO('yolov8n.pt')` do `processar_bag.py`; o `ultralytics` descarrega o novo modelo na primeira utilização.
 
-### 5.4 Limitações conhecidas
+### 5.4 Condições de utilização e limitações
+* **Posição da câmara:** qualquer. O COCO tem fotografias tiradas de todos os ângulos, por isso o YOLO não exige a câmara virada para a frente (ao contrário da deteção de linhas).
+* **Parâmetros:** os da biblioteca, por omissão: confiança mínima 0.25 e imagem reduzida para 640 px de lado maior (a das Astra, 640x480, entra sem perda).
+* **Tamanho dos objetos:** objetos pequenos ou distantes (menos de cerca de 30 px de altura) ou muito tapados são detetados pior, ou não são detetados.
+* **Classes parecidas** podem ser confundidas: por exemplo, uma carrinha pode aparecer como `truck` em vez de `car`.
+* **Luz:** pouca luz, contraluz e reflexos pioram a deteção.
 * O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
 * Só deteta as 80 classes do COCO (não deteta, por exemplo, marcas no chão; essas são tratadas pela deteção de linhas, secção 4).
 * Os resultados não são gravados: apenas mostrados no vídeo.
