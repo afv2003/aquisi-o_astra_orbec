@@ -159,6 +159,8 @@ class DetetorLinhas:
         # GPU se houver: CUDA (onnxruntime-gpu, NVIDIA) ou DirectML (onnxruntime-directml, Windows);
         # se não houver, ou se falhar, usa o CPU.
         self.ort = ort
+        if hasattr(ort, "set_default_logger_severity"):
+            ort.set_default_logger_severity(3)  # avisos do CUDA (ScatterND) saem no registo geral, não no da sessão
         disponiveis = ort.get_available_providers()
         import sys
         if ("CUDAExecutionProvider" in disponiveis and hasattr(ort, "preload_dlls")

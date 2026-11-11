@@ -66,20 +66,59 @@ def bag_tem_indice(caminho):
 
 
 def ler_mensagens(caminho, topicos):
-    """Mensagens dos tópicos indicados; funciona também com bags incompletos no fim."""
-    if indice_ok:
-        yield from read_ros2_messages(str(caminho), topics=topicos)
-        return
+    """
+    Mensagens dos tópicos indicados, em ordem de tempo.
+    * Bag com índice: os dados estão em blocos ("chunks"), cada um com um código de verificação
+      (CRC). Um bloco estragado (pontos coloridos na imagem, ou erro de leitura) é saltado e a
+      leitura continua no bloco seguinte.
+    * Bag sem índice (cortado no fim): lido sequencialmente até ao ponto onde foi cortado.
+    """
     lidas = 0
+    if not indice_ok:
+        with open(caminho, "rb") as f:
+            leitor = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
+            try:
+                for m in read_ros2_messages(leitor, topics=topicos, log_time_order=False):
+                    lidas += 1
+                    yield m
+            except Exception as e:
+                print(f"\nAviso: o bag está cortado ou com dados estragados a partir deste ponto "
+                      f"({type(e).__name__}); foram lidas {lidas} mensagens.")
+        return
+
     with open(caminho, "rb") as f:
-        leitor = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
-        try:
-            for m in read_ros2_messages(leitor, topics=topicos, log_time_order=False):
-                lidas += 1
-                yield m
-        except Exception as e:
-            print(f"\nAviso: o bag está cortado ou com dados estragados a partir deste ponto "
-                  f"({type(e).__name__}); foram lidas {lidas} mensagens.")
+        leitor = make_reader(f, validate_crcs=True, decoder_factories=[DecoderFactory()])
+        resumo = leitor.get_summary()
+        canais = {cid for cid, c in resumo.channels.items() if c.topic in topicos}
+        blocos = sorted((c for c in resumo.chunk_indexes
+                         if not c.message_index_offsets or canais & set(c.message_index_offsets)),
+                        key=lambda c: (c.message_start_time, c.chunk_start_offset))
+        inicio, ultimo = None, -1
+        saltados, perdido_s = 0, 0.0
+        while True:
+            try:
+                for m in read_ros2_messages(leitor, topics=topicos, start_time=inicio):
+                    lidas += 1
+                    ultimo = m.log_time_ns
+                    yield m
+                break
+            except Exception as e:
+                # o bloco estragado é o primeiro que ainda não foi lido; continua-se depois dele
+                limite = max(ultimo, (inicio or 0) - 1)
+                restantes = [c for c in blocos if c.message_end_time > limite]
+                if not restantes:
+                    print(f"\nAviso: dados estragados no fim do bag ({type(e).__name__}); "
+                          f"foram lidas {lidas} mensagens.")
+                    break
+                mau = restantes[0]
+                inicio = mau.message_end_time + 1
+                saltados += 1
+                perdido_s += max(0.0, (mau.message_end_time - max(mau.message_start_time, limite)) / 1e9)
+                print(f"\nAviso: bloco estragado no bag ({type(e).__name__}); "
+                      f"saltado (cerca de {perdido_s:.1f} s perdidos até agora, {saltados} bloco(s)).")
+        if saltados:
+            print(f"\nBag com {saltados} bloco(s) estragado(s), saltado(s): cerca de {perdido_s:.1f} s "
+                  f"de vídeo em falta. O ficheiro foi danificado depois de gravado (cópia ou disco).")
 
 
 indice_ok = bag_tem_indice(mcap_file)
