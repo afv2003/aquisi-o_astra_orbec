@@ -148,7 +148,7 @@ def carregar_config(caminho_json=None):
 # Detetor (onnxruntime)
 # --------------------------------------------------------------------------- #
 class DetetorLinhas:
-    def __init__(self, caminho_onnx=None, caminho_json=None, corte_topo=None):
+    def __init__(self, caminho_onnx=None, caminho_json=None, corte_topo=None, confianca=None):
         import onnxruntime as ort
         self.caminho = Path(caminho_onnx) if caminho_onnx else PASTA_MODELOS / "linhas.onnx"
         if not self.caminho.exists():
@@ -156,6 +156,8 @@ class DetetorLinhas:
         self.cfg = carregar_config(caminho_json or self.caminho.with_suffix(".json"))
         if corte_topo is not None:
             self.cfg["corte_topo"] = corte_topo
+        if confianca is not None:
+            self.cfg["conf_threshold"] = confianca
         # GPU se houver: CUDA (onnxruntime-gpu, NVIDIA) ou DirectML (onnxruntime-directml, Windows);
         # se não houver, ou se falhar, usa o CPU.
         self.ort = ort

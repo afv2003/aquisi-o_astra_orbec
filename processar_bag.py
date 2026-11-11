@@ -35,6 +35,9 @@ parser.add_argument("--sem-correcao", action="store_true",
 parser.add_argument("--corte-linhas", type=float, default=None,
                     help="Fração da imagem ignorada em cima na deteção de linhas (0 a 1). "
                          "Por omissão: a do modelo (modelos/linhas.json)")
+parser.add_argument("--conf-linhas", type=float, default=None,
+                    help="Confiança mínima (0 a 1) para mostrar uma linha. Por omissão: 0.4 "
+                         "(modelos/linhas.json). Valores mais baixos mostram mais linhas, e mais falsas")
 args = parser.parse_args()
 
 mcap_file = Path(args.mcap_file)
@@ -258,9 +261,10 @@ if usar_yolo:
 detetor_linhas = None
 if not args.v:
     try:
-        detetor_linhas = linhas.DetetorLinhas(corte_topo=args.corte_linhas)
+        detetor_linhas = linhas.DetetorLinhas(corte_topo=args.corte_linhas, confianca=args.conf_linhas)
         print(f"Deteção de linhas: ATIVADA ({detetor_linhas.cfg.get('descricao', 'CLRNet')}, "
-              f"{detetor_linhas.dispositivo}, corte do topo {detetor_linhas.cfg['corte_topo']:.0%})")
+              f"{detetor_linhas.dispositivo}, corte do topo {detetor_linhas.cfg['corte_topo']:.0%}, "
+              f"confiança mínima {detetor_linhas.cfg['conf_threshold']:g})")
     except ImportError:
         print("Aviso: a biblioteca 'onnxruntime' não está instalada; a deteção de linhas fica DESLIGADA. "
               "Corre: pip install -r requirements.txt")
@@ -316,6 +320,22 @@ def media(chave, valor_ms):
     soma[chave] += valor_ms
 
 
+def painel(img, textos):
+    """Escreve os textos (texto, escala, cor) no canto superior esquerdo, sobre um fundo escuro
+    semitransparente, para se lerem por cima da imagem e das caixas do YOLO."""
+    fonte, margem = cv2.FONT_HERSHEY_SIMPLEX, 8
+    medidas = [cv2.getTextSize(t, fonte, e, 2) for t, e, _ in textos]
+    larg = max(w for (w, _), _ in medidas) + 2 * margem
+    alt = sum(h + b + margem for (_, h), b in medidas) + margem
+    fundo = img[0:alt, 0:larg]
+    fundo[:] = (fundo * 0.35).astype(np.uint8)
+    y = 0
+    for (t, e, cor), ((_, h), b) in zip(textos, medidas):
+        y += margem + h
+        cv2.putText(img, t, (margem, y), fonte, e, cor, 2, cv2.LINE_AA)
+        y += b
+
+
 for msg in ler_mensagens(mcap_file, topicos_leitura):
     t_inicio = time.perf_counter()
     ros_msg = msg.ros_msg
@@ -326,7 +346,7 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
         frame_yuv = np.frombuffer(ros_msg.data, dtype=np.uint8).reshape((height, width, 2))
         frame = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR_YUYV)
     elif ros_msg.encoding in ['rgb8', 'bgr8']:
-        frame = np.frombuffer(ros_msg.data, dtype=np.uint8).reshape((height, width, 3))
+        frame = np.frombuffer(ros_msg.data, dtype=np.uint8).reshape((height, width, 3)).copy()
         if ros_msg.encoding == 'rgb8':
             frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     else:
@@ -355,33 +375,30 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
 
     ultimo_frame = frame.copy()
 
-    # Calcula o tempo decorrido convertendo o log_time (datetime) para segundos
-    if start_time_sec == 0:  # bag sem índice: conta-se a partir da primeira imagem
-        start_time_sec = msg.log_time.timestamp()
-    if start_time_sec > 0:
-        elapsed_sec = msg.log_time.timestamp() - start_time_sec
-        texto_tempo = (f"{elapsed_sec:.1f}s / {total_duration_sec:.1f}s" if total_duration_sec > 0
-                       else f"{elapsed_sec:.1f}s")
-        cv2.putText(frame, texto_tempo, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-    if calibracao is not None:
-        cv2.putText(frame, ("CORRIGIDA" if corrigir else "ORIGINAL")
-                    + (f"  (camara {camara})" if camara else ""), (20, 75),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0) if corrigir else (0, 165, 255), 2)
-    if detetor_linhas is not None:
-        cv2.putText(frame, f"LINHAS: {len(linhas_frame)}", (20, 105),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-
     # Ritmo: intervalo entre imagens na gravação vs. tempo que o processamento demorou
     t_msg = msg.log_time.timestamp()
     intervalo_ms = (t_msg - t_msg_anterior) * 1000 if t_msg_anterior is not None else 33.0
     intervalo_ms = intervalo_ms if 0 < intervalo_ms < 1000 else 33.0
     t_msg_anterior = t_msg
+    ritmo_ms = intervalo_ms if n_frames == 0 else 0.95 * ritmo_ms + 0.05 * intervalo_ms  # média, para não oscilar
     media("total", (time.perf_counter() - t_inicio) * 1000)
     n_frames += 1
     img_s = 1000 / max(tempos["total"], 1e-3)
-    cv2.putText(frame, f"linhas {tempos['linhas']:.0f} ms | YOLO {tempos['yolo']:.0f} ms | "
-                f"{img_s:.1f} img/s (gravado a {1000 / intervalo_ms:.0f})", (20, 135),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+
+    # Informação no canto superior esquerdo (tempo, correção, linhas, desempenho)
+    if start_time_sec == 0:  # bag sem índice: conta-se a partir da primeira imagem
+        start_time_sec = t_msg
+    elapsed_sec = t_msg - start_time_sec
+    textos = [(f"{elapsed_sec:.1f}s / {total_duration_sec:.1f}s" if total_duration_sec > 0
+               else f"{elapsed_sec:.1f}s", 0.9, (0, 255, 0))]
+    if calibracao is not None:
+        textos.append((("CORRIGIDA" if corrigir else "ORIGINAL") + (f"  (camara {camara})" if camara else ""),
+                       0.6, (0, 255, 0) if corrigir else (0, 165, 255)))
+    if detetor_linhas is not None:
+        textos.append((f"LINHAS: {len(linhas_frame)}", 0.6, (0, 255, 255)))
+    textos.append((f"linhas {tempos['linhas']:.0f} ms | YOLO {tempos['yolo']:.0f} ms | "
+                   f"{img_s:.1f} img/s (gravado a {1000 / ritmo_ms:.0f})", 0.5, (255, 255, 255)))
+    painel(frame, textos)
 
     cv2.imshow(janela_nome, frame)
 

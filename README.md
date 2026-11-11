@@ -225,11 +225,13 @@ Não é preciso instalar nada além do `requirements.txt` (secção 2):
 ```bash
 python processar_bag.py <bag>.mcap --camara 5                       # objetos + linhas
 python processar_bag.py <bag>.mcap --camara 5 --corte-linhas 0.5    # ignorar a metade de cima da imagem
+python processar_bag.py <bag>.mcap --camara 5 --conf-linhas 0.2     # mostrar linhas com menos confiança
 python processar_bag.py <bag>.mcap --camara 5 -v                    # só vídeo (sem YOLO nem linhas)
 ```
-* No terminal aparece `Deteção de linhas: ATIVADA (CLRNet ResNet34, ..., CPU, corte do topo 46%)` (ou `GPU (CUDA)`); no vídeo, as linhas aparecem coloridas e o contador `LINHAS: N`.
+* No terminal aparece `Deteção de linhas: ATIVADA (CLRNet ResNet34, ..., CPU, corte do topo 46%, confiança mínima 0.4)` (ou `GPU (CUDA)`); no vídeo, as linhas aparecem coloridas e o contador `LINHAS: N`.
 * Funciona em **Windows, Linux e macOS**, com ou sem GPU. Não precisa do UnLanedet, de PyTorch, nem de máquinas virtuais.
 * **`--corte-linhas`**: o modelo só analisa a parte de baixo da imagem (no CULane corta-se 46 % em cima). Se as linhas saírem mal posicionadas, experimente valores entre 0.3 e 0.6.
+* **`--conf-linhas`**: confiança mínima para mostrar uma linha (0.4 por omissão, o valor usado na avaliação do modelo). Com valores mais baixos (0.2 a 0.3) aparecem linhas que o modelo vê com dúvida, por exemplo em imagens fora das condições da secção 4.5, mas também mais linhas falsas. Abaixo de 0.1 não é útil.
 * Velocidade e uso da GPU: secção 2, Passo 3. Se a GPU falhar, a deteção continua em CPU.
 * Se o `modelos/linhas.onnx` não existir ou o `onnxruntime` não estiver instalado, o script avisa e continua sem a deteção de linhas.
 
