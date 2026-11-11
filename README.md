@@ -9,7 +9,6 @@ Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e
 | 3 | Calibração das câmaras | Windows |
 | 4 | Deteção de linhas da estrada (CLRNet, modelo já incluído) | dentro do processamento |
 | 5 | Deteção de objetos (YOLO, modelo já incluído) | dentro do processamento |
-| 6 | Estrutura do repositório e o que vai para o git | — |
 
 ## Pré-requisitos
 * Aquisição: Linux com Docker e Docker Compose instalados
@@ -107,7 +106,7 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    ```bash
    python -c "from mcap.reader import make_reader; s=make_reader(open('data/<nome_da_pasta>/<nome_do_ficheiro>.mcap','rb')).get_summary(); [print(c.topic, s.statistics.channel_message_counts.get(i,0), 'mensagens') for i,c in s.channels.items()]"
    ```
-   Deve aparecer `/camara5/image_raw` e `/camara8/image_raw` com números de mensagens parecidos (cerca de 1800 por minuto, a 30 imagens por segundo). Só funciona em bags completos; se der erro, ver o Passo 4.
+   Deve aparecer `/camara5/image_raw` e `/camara8/image_raw` com números de mensagens parecidos (cerca de 1800 por minuto, a 30 imagens por segundo). Só funciona em bags completos (com o índice no fim).
 
 4. **Executar o script Python:**
    Corra o programa `processar_bag.py` indicando à frente o caminho completo para o ficheiro `.mcap` que pretende processar:
@@ -151,22 +150,6 @@ No vídeo aparece uma linha com o tempo de cada etapa, por exemplo `linhas 340 m
   * Depois de trocar, não volte a correr `pip install -r requirements.txt` (reinstalaria o `onnxruntime` de CPU ao lado do de GPU).
   * Não use o `onnxruntime-directml`: foi testado e falhou com este modelo na RTX 3050 Ti (a GPU deixou de responder).
   * Se a GPU falhar na deteção de linhas, o script avisa e continua em CPU; para voltar tudo ao CPU: `pip uninstall -y onnxruntime-gpu torch torchvision` e `pip install onnxruntime torch torchvision`.
-
-### Passo 4: Imagem com pontos coloridos ou bag estragado
-Pontos coloridos soltos, em faixas horizontais, não vêm do processamento: estão no próprio bag. Há duas origens possíveis, que se distinguem assim:
-
-1. **Verificar se o bag se lê todo** (no `venv`, numa só linha; troque o caminho):
-   ```
-   python -c "from mcap.reader import NonSeekingReader as R; r=R(open(r'data\<pasta>\<ficheiro>.mcap','rb'), validate_crcs=True); print('mensagens lidas:', sum(1 for _ in r.iter_messages(log_time_order=False)))"
-   ```
-2. **Interpretar o resultado:**
-   * **Lê-se todo (mostra o número de mensagens), mas há pontos coloridos:** os dados chegaram estragados da câmara pelo USB, durante a gravação. Na aquisição (secção 1): ligar cada câmara diretamente ao PC (sem hub), em portas de lados diferentes, com cabos curtos, e confirmar no RViz que a imagem em direto está limpa.
-   * **Dá erro (`CRCValidationError`, `RecordLengthLimitExceeded`, `UnicodeDecodeError` no processamento, ...):** o **ficheiro** foi danificado depois de gravado (a câmara não consegue estragar a estrutura do MCAP). Correr o mesmo comando no PC onde foi gravado e comparar a impressão digital do original com a da cópia (`sha256sum <ficheiro>` em Linux, `certutil -hashfile <ficheiro> SHA256` em Windows):
-     * original bom e códigos diferentes: estragou-se na transferência (`.zip`, envio, extração); transferir de novo;
-     * original com o mesmo erro: estragou-se no PC da gravação (disco); gravar para o disco interno do Linux e verificar erros do disco (`sudo dmesg | grep -i error`).
-   * **`EndOfFile` no fim:** a gravação foi interrompida (parar sempre com um só `Ctrl + C` e esperar que o Docker feche).
-
-Antes de enviar um bag, quem grava deve confirmar no Linux que ele se lê todo (comando acima) e enviar também o código `sha256sum`, para quem o recebe confirmar que a cópia é igual.
 
 ---
 
@@ -354,31 +337,6 @@ Para mais precisão (e menos velocidade), pode trocar `yolov8n.pt` por `yolov8s.
 * O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
 * Só deteta as 80 classes do COCO (não deteta, por exemplo, marcas no chão; essas são tratadas pela deteção de linhas, secção 4).
 * Os resultados não são gravados: apenas mostrados no vídeo.
-
----
-
-## 6. Estrutura do repositório
-
-| Ficheiro / pasta | O que é | No git? |
-|---|---|---|
-| `compose.yaml`, `Dockerfile`, `gravar.sh` | aquisição em Docker/ROS 2 (secção 1) | sim |
-| `processar_bag.py` | processamento offline: correção da distorção, linhas e YOLO (secção 2) | sim |
-| `linhas.py` | deteção de linhas com o ONNX; usado pelo `processar_bag.py` (secção 4) | sim |
-| `calibrar_astra.py` | calibração das câmaras, em Windows (secção 3) | sim |
-| `exportar_linhas.py` | gera o `modelos/linhas.onnx` a partir do UnLanedet; só para quem regenera o modelo (secção 4.4) | sim |
-| `config/camera_astra_5.yaml`, `config/camera_astra_8.yaml` | calibração de cada câmara | sim |
-| `modelos/linhas.onnx`, `modelos/linhas.json` | modelo de deteção de linhas e os seus parâmetros | sim |
-| `yolov8n.pt` | modelo YOLO de deteção de objetos (secção 5) | sim |
-| `requirements.txt` | bibliotecas do `venv` normal | sim |
-| `.gitattributes` | mantém os scripts `.sh` com fins de linha de Linux | sim |
-| `venv/` | ambiente Python normal (cada pessoa cria o seu) | não |
-| `.venv-exportar/` | ambiente de exportação (secção 4.3) | não |
-| `pesos/` | pesos originais do UnLanedet (descarregados pelo `exportar_linhas.py`) | não |
-| `data/` | bags gravados (muito grandes) | não |
-| `UnLanedet/` | código do UnLanedet, clonado **fora** do repositório | não |
-| `calibracoes/` | fotos e resultados da calibração, fora do repositório | não |
-
-Trabalho no repositório: antes de começar, `git pull`; alterações novas são feitas numa branch e só passam para a `main` depois de testadas.
 
 ---
 
