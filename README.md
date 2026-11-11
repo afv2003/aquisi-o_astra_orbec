@@ -7,8 +7,9 @@ Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e
 | 1 | Aquisição (gravar bags) | Linux, com Docker |
 | 2 | Processamento offline dos bags | Windows, Linux ou macOS, com `venv` |
 | 3 | Calibração das câmaras | Windows |
-| 4 | Deteção de linhas (modelo já incluído) | dentro do processamento |
-| 5 | Estrutura do repositório e o que vai para o git | — |
+| 4 | Deteção de linhas da estrada (CLRNet, modelo já incluído) | dentro do processamento |
+| 5 | Deteção de objetos (YOLO, modelo já incluído) | dentro do processamento |
+| 6 | Estrutura do repositório e o que vai para o git | — |
 
 ## Pré-requisitos
 * Aquisição: Linux com Docker e Docker Compose instalados
@@ -106,7 +107,7 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    ```bash
    python -c "from mcap.reader import make_reader; s=make_reader(open('data/<nome_da_pasta>/<nome_do_ficheiro>.mcap','rb')).get_summary(); [print(c.topic, s.statistics.channel_message_counts.get(i,0), 'mensagens') for i,c in s.channels.items()]"
    ```
-   Deve aparecer `/camara5/image_raw` e `/camara8/image_raw` com números de mensagens parecidos (cerca de 1800 por minuto, a 30 imagens por segundo).
+   Deve aparecer `/camara5/image_raw` e `/camara8/image_raw` com números de mensagens parecidos (cerca de 1800 por minuto, a 30 imagens por segundo). Só funciona em bags completos; se der erro, ver o Passo 4.
 
 4. **Executar o script Python:**
    Corra o programa `processar_bag.py` indicando à frente o caminho completo para o ficheiro `.mcap` que pretende processar:
@@ -115,20 +116,63 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    ```
    *(Exemplo prático: `python processar_bag.py data/viagem_20261110_101500/viagem_20261110_101500_0.mcap --camara 5`)*
    * Use `--camara 5` ou `--camara 8` para escolher a câmara a processar; cada câmara é processada separadamente.
-   * Em cada imagem, o script corrige a distorção (secção 3), deteta objetos (YOLO) e deteta as linhas da estrada (CLRNet, secção 4), e mostra tudo na mesma janela.
+   * Em cada imagem, por esta ordem, o script:
+     1. lê a imagem do tópico da câmara e converte-a para cores (BGR);
+     2. corrige a distorção da lente com a calibração dessa câmara (secção 3);
+     3. deteta as linhas da estrada na imagem corrigida (CLRNet, secção 4);
+     4. deteta objetos na imagem corrigida e desenha as caixas (YOLO, secção 5);
+     5. desenha as linhas por cima e mostra tudo na mesma janela, com o tempo, a câmara e o número de linhas.
    * Use `-v` para ver só o vídeo, sem YOLO nem deteção de linhas.
-   * Se o `.mcap` estiver vazio ou incompleto (por exemplo, uma cópia que falhou), o script avisa: `não é um ficheiro MCAP válido (0 bytes)`.
+   * Se o `.mcap` estiver vazio (por exemplo, uma cópia que falhou), o script avisa: `não é um ficheiro MCAP válido (0 bytes)`.
+   * Se a gravação foi interrompida (Docker parado à força, `Ctrl + C` duas vezes, disco cheio) ou a cópia ficou incompleta, falta o índice que o MCAP guarda no fim do ficheiro. O script avisa (`o bag não tem o índice no fim`), lê as imagens sequencialmente desde o início e para no ponto onde o ficheiro foi cortado; o tempo total aparece como desconhecido.
 
 5. **Sair do ambiente virtual (Quando terminar o trabalho):**
    ```bash
    deactivate
    ```
 
+### Passo 3: Desempenho (velocidade) e GPU
+No vídeo aparece uma linha com o tempo de cada etapa, por exemplo `linhas 340 ms | YOLO 60 ms | 2.5 img/s (gravado a 30)`; no fim, o terminal mostra a média.
+* **Em CPU, o processamento é bastante mais lento do que a gravação** (30 imagens por segundo = 33 ms por imagem). A etapa mais pesada é a deteção de linhas (CLRNet, cerca de 100 a 350 ms por imagem, conforme o processador), seguida do YOLO. O vídeo não perde imagens: só passa mais devagar.
+* **Com GPU** (medido numa NVIDIA RTX 3050 Ti Laptop): linhas cerca de 37 ms e YOLO cerca de 59 ms por imagem, cerca de 10 imagens por segundo.
+* O script espera apenas o que falta para acompanhar o ritmo da gravação; quando o processamento já é mais lento, não acrescenta espera.
+* **Para ir mais rápido, use a GPU** (opcional, no `venv`; o `requirements.txt` fica em CPU para funcionar em qualquer PC). Com GPU NVIDIA (testado numa RTX 3050 Ti Laptop):
+  * **YOLO:** PyTorch com CUDA 12 (comando de [pytorch.org](https://pytorch.org/get-started/locally/) para o seu sistema):
+    ```
+    pip uninstall -y torch torchvision
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+    ```
+  * **Deteção de linhas:** `onnxruntime-gpu` numa versão compilada com CUDA 12 (anterior à 1.27, que já usa CUDA 13), para usar as mesmas bibliotecas CUDA que o PyTorch acima (não é preciso instalar o CUDA no sistema):
+    ```
+    pip uninstall -y onnxruntime onnxruntime-directml
+    pip install "onnxruntime-gpu<1.27"
+    ```
+  * Confirme no terminal: `YOLO em: GPU (...)` e `Deteção de linhas: ATIVADA (..., GPU (CUDA), ...)`.
+  * Depois de trocar, não volte a correr `pip install -r requirements.txt` (reinstalaria o `onnxruntime` de CPU ao lado do de GPU).
+  * Não use o `onnxruntime-directml`: foi testado e falhou com este modelo na RTX 3050 Ti (a GPU deixou de responder).
+  * Se a GPU falhar na deteção de linhas, o script avisa e continua em CPU; para voltar tudo ao CPU: `pip uninstall -y onnxruntime-gpu torch torchvision` e `pip install onnxruntime torch torchvision`.
+
+### Passo 4: Imagem com pontos coloridos ou bag estragado
+Pontos coloridos soltos, em faixas horizontais, não vêm do processamento: estão no próprio bag. Há duas origens possíveis, que se distinguem assim:
+
+1. **Verificar se o bag se lê todo** (no `venv`, numa só linha; troque o caminho):
+   ```
+   python -c "from mcap.reader import NonSeekingReader as R; r=R(open(r'data\<pasta>\<ficheiro>.mcap','rb'), validate_crcs=True); print('mensagens lidas:', sum(1 for _ in r.iter_messages(log_time_order=False)))"
+   ```
+2. **Interpretar o resultado:**
+   * **Lê-se todo (mostra o número de mensagens), mas há pontos coloridos:** os dados chegaram estragados da câmara pelo USB, durante a gravação. Na aquisição (secção 1): ligar cada câmara diretamente ao PC (sem hub), em portas de lados diferentes, com cabos curtos, e confirmar no RViz que a imagem em direto está limpa.
+   * **Dá erro (`CRCValidationError`, `RecordLengthLimitExceeded`, `UnicodeDecodeError` no processamento, ...):** o **ficheiro** foi danificado depois de gravado (a câmara não consegue estragar a estrutura do MCAP). Correr o mesmo comando no PC onde foi gravado e comparar a impressão digital do original com a da cópia (`sha256sum <ficheiro>` em Linux, `certutil -hashfile <ficheiro> SHA256` em Windows):
+     * original bom e códigos diferentes: estragou-se na transferência (`.zip`, envio, extração); transferir de novo;
+     * original com o mesmo erro: estragou-se no PC da gravação (disco); gravar para o disco interno do Linux e verificar erros do disco (`sudo dmesg | grep -i error`).
+   * **`EndOfFile` no fim:** a gravação foi interrompida (parar sempre com um só `Ctrl + C` e esperar que o Docker feche).
+
+Antes de enviar um bag, quem grava deve confirmar no Linux que ele se lê todo (comando acima) e enviar também o código `sha256sum`, para quem o recebe confirmar que a cópia é igual.
+
 ---
 
 ## 3. Calibração da câmara (correção da distorção da lente)
 
-A lente da Astra curva ligeiramente as linhas retas, sobretudo nos cantos da imagem. A calibração mede essa distorção uma única vez e o `processar_bag.py` corrige-a em cada frame, antes do YOLO.
+A lente da Astra curva ligeiramente as linhas retas, sobretudo nos cantos da imagem. A calibração mede essa distorção uma única vez e o `processar_bag.py` corrige-a em cada imagem, antes da deteção de linhas e do YOLO.
 
 ### Passo 1: Gerar a calibração (Windows, uma vez por câmara)
 Há duas câmaras Astra, identificadas como **5** e **8**. Cada uma tem a sua calibração, porque duas unidades do mesmo modelo nunca são exatamente iguais.
@@ -139,7 +183,7 @@ pip install opencv-python numpy
 python calibrar_astra.py --camara 5 --cam 1 --colunas 9 --linhas 7 --quadrado 25 --auto
 ```
 * `--camara` é a designação da câmara física (**5** ou **8**), obrigatória.
-* `--colunas`/`--linhas` são os **cantos internos** do xadrez (10x7 quadrados → 9x6 cantos).
+* `--colunas`/`--linhas` são os **cantos internos** do xadrez (10x8 quadrados → 9x7 cantos).
 * `--quadrado` é o lado de um quadrado medido com régua (em mm).
 * `--cam` é o número da câmara (`python calibrar_astra.py --listar` mostra as disponíveis).
 * Mostre o xadrez em várias posições: centro, cantos, perto, longe, inclinado, até as 4 barras (X, Y, Tam, Incl) ficarem verdes ou haver 40 fotos. É o mesmo critério da ferramenta `camera_calibration` do ROS; antes disso, R, C e Q não ficam disponíveis.
@@ -162,19 +206,13 @@ config/camera_astra_8.yaml
 ```
 
 ### Passo 3: Usar
-* **Processamento offline:** o `processar_bag.py` lê o tópico da câmara escolhida (`/camara<N>/image_raw`) e usa `config/camera_astra_<N>.yaml`:
-  ```bash
-  python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5   # bag com as duas câmaras: escolher uma
-  python processar_bag.py data/<pasta>/<ficheiro>.mcap              # bag com uma só câmara: escolhida sozinha
-  python processar_bag.py data/<pasta>/<ficheiro>.mcap --calib outro.yaml
-  python processar_bag.py data/<pasta>/<ficheiro>.mcap --sem-correcao
-  ```
-  * Num bag com as duas câmaras, sem `--camara`, o script para e pede qual processar.
-  * Se indicar uma câmara que não está no bag, o script para com erro, para não usar a calibração errada.
-  * **Bags antigos** (uma câmara, tópico `/image_raw`): a câmara lê-se do nome da pasta (`viagem_camara5_...`); se o nome não a tiver, é obrigatório indicar `--camara`.
-  Durante a reprodução, a tecla **C** liga/desliga a correção para comparar.
-* Corra o script a partir da pasta do repositório; noutra pasta, indique o ficheiro com `--calib`.
-* Nos bags novos, a câmara fica gravada no próprio bag (no nome do tópico), por isso não depende do nome da pasta.
+O `processar_bag.py` usa automaticamente `config/camera_astra_<N>.yaml` da câmara processada (escolha da câmara: secção 2, Passo 2).
+```bash
+python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --calib outro.yaml   # outro ficheiro de calibração
+python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --sem-correcao       # sem correção
+```
+* Durante a reprodução, a tecla **C** liga/desliga a correção, para comparar.
+* Corra o script a partir da pasta do repositório (o caminho `config/` é relativo a essa pasta).
 
 > **Importante:** a calibração só é válida para a resolução usada (640x480, a resolução por omissão do `usb_cam`). Se mudar a resolução, a focagem ou a lente, repita a calibração.
 
@@ -193,10 +231,10 @@ python processar_bag.py <bag>.mcap --camara 5                       # objetos + 
 python processar_bag.py <bag>.mcap --camara 5 --corte-linhas 0.5    # ignorar a metade de cima da imagem
 python processar_bag.py <bag>.mcap --camara 5 -v                    # só vídeo (sem YOLO nem linhas)
 ```
-* No terminal aparece `Deteção de linhas: ATIVADA (CLRNet ResNet34, ..., CPU, corte do topo 46%)`; no vídeo, as linhas aparecem coloridas e o contador `LINHAS: N`.
+* No terminal aparece `Deteção de linhas: ATIVADA (CLRNet ResNet34, ..., CPU, corte do topo 46%)` (ou `GPU (CUDA)`); no vídeo, as linhas aparecem coloridas e o contador `LINHAS: N`.
 * Funciona em **Windows, Linux e macOS**, com ou sem GPU. Não precisa do UnLanedet, de PyTorch, nem de máquinas virtuais.
 * **`--corte-linhas`**: o modelo só analisa a parte de baixo da imagem (no CULane corta-se 46 % em cima). Se as linhas saírem mal posicionadas, experimente valores entre 0.3 e 0.6.
-* Em CPU, o processamento é mais lento do que o vídeo original. Com GPU NVIDIA, pode trocar `onnxruntime` por `onnxruntime-gpu` no `venv`.
+* Velocidade e uso da GPU: secção 2, Passo 3. Se a GPU falhar, a deteção continua em CPU.
 * Se o `modelos/linhas.onnx` não existir ou o `onnxruntime` não estiver instalado, o script avisa e continua sem a deteção de linhas.
 
 ### 4.2 Como funciona
@@ -289,18 +327,48 @@ O `.venv-exportar` pode ser mantido para exportações futuras ou apagado (para 
 
 ---
 
-## 5. Estrutura do repositório
+## 5. Deteção de objetos (YOLO)
+
+O `processar_bag.py` deteta objetos em cada imagem, **sempre** (exceto com `-v`), com o modelo **YOLOv8n** da biblioteca [Ultralytics](https://github.com/ultralytics/ultralytics) (`ultralytics`, incluída no `requirements.txt`).
+
+### 5.1 Utilização
+Não é preciso fazer nada além da secção 2: o modelo `yolov8n.pt` (cerca de 6,5 MB) já está no repositório.
+```bash
+python processar_bag.py <bag>.mcap --camara 5        # com YOLO (e linhas)
+python processar_bag.py <bag>.mcap --camara 5 -v     # sem YOLO nem linhas
+```
+* No terminal aparece `A carregar modelo YOLOv8n ...` e `Modo YOLO: ATIVADO`; no vídeo, cada objeto detetado aparece numa caixa com o nome da classe e a confiança.
+* Corra o script a partir da pasta do repositório: o modelo é lido de `yolov8n.pt` nessa pasta.
+* Se a biblioteca `ultralytics` não estiver instalada, o script para e indica o comando para a instalar.
+
+### 5.2 Como funciona
+* **Modelo:** YOLOv8n ("nano"), a versão mais pequena e rápida do YOLOv8, pré-treinada no conjunto de dados COCO. Deteta as **80 classes do COCO**, entre elas `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. Foi escolhida a versão mais leve para o vídeo não ficar demasiado lento.
+* **Onde entra:** corre sobre a imagem **já corrigida** da distorção (secção 3), depois da deteção de linhas (que precisa da imagem limpa, sem caixas desenhadas).
+* **Desenho:** as caixas são desenhadas pela própria biblioteca (`resultados[0].plot()`); as linhas da estrada são desenhadas por cima.
+* **CPU ou GPU:** o `ultralytics` usa o PyTorch, instalado com ele. Com o PyTorch normal corre em CPU; com o PyTorch com CUDA usa a GPU NVIDIA (secção 2, Passo 3). O terminal mostra `YOLO em: GPU (...)` ou `CPU`.
+
+### 5.3 Trocar de modelo
+Para mais precisão (e menos velocidade), pode trocar `yolov8n.pt` por `yolov8s.pt`, `yolov8m.pt`, etc., na linha `modelo_yolo = YOLO('yolov8n.pt')` do `processar_bag.py`; o `ultralytics` descarrega o novo modelo na primeira utilização.
+
+### 5.4 Limitações conhecidas
+* O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
+* Só deteta as 80 classes do COCO (não deteta, por exemplo, marcas no chão; essas são tratadas pela deteção de linhas, secção 4).
+* Os resultados não são gravados: apenas mostrados no vídeo.
+
+---
+
+## 6. Estrutura do repositório
 
 | Ficheiro / pasta | O que é | No git? |
 |---|---|---|
 | `compose.yaml`, `Dockerfile`, `gravar.sh` | aquisição em Docker/ROS 2 (secção 1) | sim |
-| `processar_bag.py` | processamento offline: correção da distorção, YOLO e linhas (secção 2) | sim |
+| `processar_bag.py` | processamento offline: correção da distorção, linhas e YOLO (secção 2) | sim |
 | `linhas.py` | deteção de linhas com o ONNX; usado pelo `processar_bag.py` (secção 4) | sim |
 | `calibrar_astra.py` | calibração das câmaras, em Windows (secção 3) | sim |
 | `exportar_linhas.py` | gera o `modelos/linhas.onnx` a partir do UnLanedet; só para quem regenera o modelo (secção 4.4) | sim |
 | `config/camera_astra_5.yaml`, `config/camera_astra_8.yaml` | calibração de cada câmara | sim |
 | `modelos/linhas.onnx`, `modelos/linhas.json` | modelo de deteção de linhas e os seus parâmetros | sim |
-| `yolov8n.pt` | modelo YOLO de deteção de objetos | sim |
+| `yolov8n.pt` | modelo YOLO de deteção de objetos (secção 5) | sim |
 | `requirements.txt` | bibliotecas do `venv` normal | sim |
 | `.gitattributes` | mantém os scripts `.sh` com fins de linha de Linux | sim |
 | `venv/` | ambiente Python normal (cada pessoa cria o seu) | não |
@@ -317,4 +385,6 @@ Trabalho no repositório: antes de começar, `git pull`; alterações novas são
 ## Créditos
 * CLRNet: Zheng et al., *CLRNet: Cross Layer Refinement Network for Lane Detection*, CVPR 2022.
 * Implementação e pesos: [UnLanedet](https://github.com/zkyntu/UnLanedet) (licença Apache 2.0).
-* Conjunto de dados de treino: CULane. Verifique as condições de utilização do CULane e do UnLanedet antes de usar o modelo fora do contexto académico.
+* Conjunto de dados de treino das linhas: CULane.
+* Deteção de objetos: [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (licença AGPL-3.0), pré-treinado no COCO.
+* Verifique as condições de utilização do CULane, do UnLanedet e do Ultralytics antes de usar os modelos fora do contexto académico.

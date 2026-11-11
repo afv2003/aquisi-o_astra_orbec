@@ -1,11 +1,13 @@
 import re
 import sys
+import time
 import argparse
 from pathlib import Path
 import cv2
 import numpy as np
 from mcap_ros2.reader import read_ros2_messages
-from mcap.reader import make_reader
+from mcap_ros2.decoder import DecoderFactory
+from mcap.reader import make_reader, NonSeekingReader
 
 # Tentar importar o YOLO
 try:
@@ -50,6 +52,40 @@ if inicio != b"\x89MCAP0\r\n":
     if tamanho < 1024:
         print("O ficheiro está vazio: a gravação não gravou nada, ou a cópia falhou.")
     sys.exit(1)
+
+# Um MCAP tem no fim um índice (resumo), escrito quando a gravação termina corretamente.
+# Se a gravação foi interrompida (ou a cópia ficou incompleta), esse índice falta ou está
+# estragado; nesse caso o bag é lido sequencialmente, desde o início, sem o índice.
+def bag_tem_indice(caminho):
+    try:
+        with open(caminho, "rb") as f:
+            make_reader(f).get_summary()
+        return True
+    except Exception:
+        return False
+
+
+def ler_mensagens(caminho, topicos):
+    """Mensagens dos tópicos indicados; funciona também com bags incompletos no fim."""
+    if indice_ok:
+        yield from read_ros2_messages(str(caminho), topics=topicos)
+        return
+    lidas = 0
+    with open(caminho, "rb") as f:
+        leitor = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
+        try:
+            for m in read_ros2_messages(leitor, topics=topicos, log_time_order=False):
+                lidas += 1
+                yield m
+        except Exception as e:
+            print(f"\nAviso: o bag está cortado ou com dados estragados a partir deste ponto "
+                  f"({type(e).__name__}); foram lidas {lidas} mensagens.")
+
+
+indice_ok = bag_tem_indice(mcap_file)
+if not indice_ok:
+    print("Aviso: o bag não tem o índice no fim (gravação interrompida ou cópia incompleta). "
+          "A ler as imagens sequencialmente, desde o início.")
 
 # --- CÂMARA E TÓPICO A PROCESSAR (rastreabilidade) ---
 # Bags novos (duas câmaras): cada câmara tem o seu tópico, /camara5/image_raw e /camara8/image_raw.
@@ -172,7 +208,12 @@ if usar_yolo:
         sys.exit(1)
     print("A carregar modelo YOLOv8n (poderá demorar um pouco na primeira vez)...")
     # Usa o modelo mais leve e rápido (nano) para não encravar o vídeo
-    modelo_yolo = YOLO('yolov8n.pt') 
+    modelo_yolo = YOLO('yolov8n.pt')
+    try:
+        import torch
+        print(f"YOLO em: {'GPU (' + torch.cuda.get_device_name(0) + ')' if torch.cuda.is_available() else 'CPU'}")
+    except Exception:
+        pass
 
 # Deteção de linhas: sempre ativa (exceto com -v). Usa modelos/linhas.onnx com o onnxruntime.
 detetor_linhas = None
@@ -191,21 +232,23 @@ if not args.v:
 # 1. Obter o tempo total lendo o índice do .mcap
 total_duration_sec = 0.0
 start_time_sec = 0.0
-try:
-    with open(mcap_file, "rb") as f:
-        reader = make_reader(f)
-        summary = reader.get_summary()
-        if summary and summary.statistics:
-            start_time_ns = summary.statistics.message_start_time
-            end_time_ns = summary.statistics.message_end_time
-            total_duration_sec = (end_time_ns - start_time_ns) / 1e9
-            start_time_sec = start_time_ns / 1e9
-except Exception as e:
-    print(f"Aviso: Não foi possível calcular o tempo total: {e}")
+if indice_ok:
+    try:
+        with open(mcap_file, "rb") as f:
+            reader = make_reader(f)
+            summary = reader.get_summary()
+            if summary and summary.statistics:
+                start_time_ns = summary.statistics.message_start_time
+                end_time_ns = summary.statistics.message_end_time
+                total_duration_sec = (end_time_ns - start_time_ns) / 1e9
+                start_time_sec = start_time_ns / 1e9
+    except Exception as e:
+        print(f"Aviso: Não foi possível calcular o tempo total: {e}")
 
 mins, secs = divmod(total_duration_sec, 60)
 print(f"A ler ROS bag sequencialmente: {mcap_file.name}")
-print(f"Tempo total do vídeo: {int(mins)}m {secs:.1f}s")
+print(f"Tempo total do vídeo: {int(mins)}m {secs:.1f}s" if total_duration_sec > 0
+      else "Tempo total do vídeo: desconhecido (o bag não tem índice)")
 print(f"Modo YOLO: {'ATIVADO' if usar_yolo else 'DESATIVADO'}")
 print("\n--- CONTROLOS ---")
 print("[Espaço] : Pausar / Retomar")
@@ -222,7 +265,20 @@ saiu_cedo = False
 ultimo_frame = None
 
 # Lê as mensagens à medida que o vídeo avança
-for msg in read_ros2_messages(str(mcap_file), topics=topicos_leitura):
+# Tempos de cada etapa (média móvel, em ms) e ritmo da gravação, para mostrar no vídeo
+tempos = {"linhas": 0.0, "yolo": 0.0, "total": 0.0}
+n_frames = 0
+soma = {"linhas": 0.0, "yolo": 0.0, "total": 0.0}
+t_msg_anterior = None
+
+
+def media(chave, valor_ms):
+    tempos[chave] = valor_ms if n_frames == 0 else 0.9 * tempos[chave] + 0.1 * valor_ms
+    soma[chave] += valor_ms
+
+
+for msg in ler_mensagens(mcap_file, topicos_leitura):
+    t_inicio = time.perf_counter()
     ros_msg = msg.ros_msg
     width, height = ros_msg.width, ros_msg.height
     
@@ -242,12 +298,16 @@ for msg in read_ros2_messages(str(mcap_file), topics=topicos_leitura):
         frame = corrigir_distorcao(frame)
 
     # --- DETEÇÃO DE LINHAS (sobre a imagem corrigida, antes de o YOLO desenhar por cima) ---
+    t0 = time.perf_counter()
     linhas_frame = detetor_linhas.detetar(frame) if detetor_linhas is not None else []
+    media("linhas", (time.perf_counter() - t0) * 1000)
 
     # --- PROCESSAMENTO YOLO ---
     if usar_yolo:
         # Executa a inferência de forma silenciosa para não inundar o terminal
+        t0 = time.perf_counter()
         resultados = modelo_yolo(frame, verbose=False)
+        media("yolo", (time.perf_counter() - t0) * 1000)
         # O método .plot() desenha automaticamente os retângulos e labels no frame
         frame = resultados[0].plot()
 
@@ -257,9 +317,12 @@ for msg in read_ros2_messages(str(mcap_file), topics=topicos_leitura):
     ultimo_frame = frame.copy()
 
     # Calcula o tempo decorrido convertendo o log_time (datetime) para segundos
+    if start_time_sec == 0:  # bag sem índice: conta-se a partir da primeira imagem
+        start_time_sec = msg.log_time.timestamp()
     if start_time_sec > 0:
         elapsed_sec = msg.log_time.timestamp() - start_time_sec
-        texto_tempo = f"{elapsed_sec:.1f}s / {total_duration_sec:.1f}s"
+        texto_tempo = (f"{elapsed_sec:.1f}s / {total_duration_sec:.1f}s" if total_duration_sec > 0
+                       else f"{elapsed_sec:.1f}s")
         cv2.putText(frame, texto_tempo, (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
     if calibracao is not None:
         cv2.putText(frame, ("CORRIGIDA" if corrigir else "ORIGINAL")
@@ -269,9 +332,23 @@ for msg in read_ros2_messages(str(mcap_file), topics=topicos_leitura):
         cv2.putText(frame, f"LINHAS: {len(linhas_frame)}", (20, 105),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
+    # Ritmo: intervalo entre imagens na gravação vs. tempo que o processamento demorou
+    t_msg = msg.log_time.timestamp()
+    intervalo_ms = (t_msg - t_msg_anterior) * 1000 if t_msg_anterior is not None else 33.0
+    intervalo_ms = intervalo_ms if 0 < intervalo_ms < 1000 else 33.0
+    t_msg_anterior = t_msg
+    media("total", (time.perf_counter() - t_inicio) * 1000)
+    n_frames += 1
+    img_s = 1000 / max(tempos["total"], 1e-3)
+    cv2.putText(frame, f"linhas {tempos['linhas']:.0f} ms | YOLO {tempos['yolo']:.0f} ms | "
+                f"{img_s:.1f} img/s (gravado a {1000 / intervalo_ms:.0f})", (20, 135),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+
     cv2.imshow(janela_nome, frame)
-    
-    key = cv2.waitKey(30) & 0xFF
+
+    # Espera só o que falta para acompanhar o ritmo da gravação (nunca menos de 1 ms)
+    espera = max(1, int(intervalo_ms - (time.perf_counter() - t_inicio) * 1000))
+    key = cv2.waitKey(espera) & 0xFF
     
     if key == ord('q') or key == 27:
         saiu_cedo = True
@@ -292,6 +369,11 @@ for msg in read_ros2_messages(str(mcap_file), topics=topicos_leitura):
             
     if saiu_cedo:
         break
+
+if n_frames:
+    print(f"\nTempo médio por imagem: linhas {soma['linhas'] / n_frames:.0f} ms | "
+          f"YOLO {soma['yolo'] / n_frames:.0f} ms | total {soma['total'] / n_frames:.0f} ms "
+          f"({1000 * n_frames / max(soma['total'], 1e-3):.1f} imagens/s)")
 
 if not saiu_cedo and ultimo_frame is not None:
     print("\nFim do vídeo alcançado!")

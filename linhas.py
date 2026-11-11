@@ -156,15 +156,45 @@ class DetetorLinhas:
         self.cfg = carregar_config(caminho_json or self.caminho.with_suffix(".json"))
         if corte_topo is not None:
             self.cfg["corte_topo"] = corte_topo
+        # GPU se houver: CUDA (onnxruntime-gpu, NVIDIA) ou DirectML (onnxruntime-directml, Windows);
+        # se não houver, ou se falhar, usa o CPU.
+        self.ort = ort
         disponiveis = ort.get_available_providers()
-        preferidos = [p for p in ("CUDAExecutionProvider", "CPUExecutionProvider") if p in disponiveis]
-        self.sessao = ort.InferenceSession(str(self.caminho), providers=preferidos)
+        import sys
+        if ("CUDAExecutionProvider" in disponiveis and hasattr(ort, "preload_dlls")
+                and "torch" not in sys.modules):  # com o PyTorch carregado, o CUDA já está carregado
+            try:  # carrega as bibliotecas CUDA/cuDNN instaladas pelo pip (sem instalar o CUDA no sistema)
+                ort.preload_dlls()
+            except Exception:
+                pass
+        preferidos = [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider")
+                      if p in disponiveis]
+        try:
+            self._criar_sessao(preferidos)
+        except Exception as e:
+            print(f"Aviso: não foi possível usar a GPU na deteção de linhas ({type(e).__name__}); a usar o CPU.")
+            self._criar_sessao(["CPUExecutionProvider"])
+
+    def _criar_sessao(self, fornecedores):
+        opcoes = self.ort.SessionOptions()
+        opcoes.log_severity_level = 3   # só erros (esconde avisos inofensivos, ex. ScatterND/Memcpy)
+        self.sessao = self.ort.InferenceSession(str(self.caminho), sess_options=opcoes, providers=fornecedores)
         self.entrada = self.sessao.get_inputs()[0].name
-        self.dispositivo = "GPU" if self.sessao.get_providers()[0] == "CUDAExecutionProvider" else "CPU"
+        usado = self.sessao.get_providers()[0]
+        self.dispositivo = {"CUDAExecutionProvider": "GPU (CUDA)",
+                            "DmlExecutionProvider": "GPU (DirectML)"}.get(usado, "CPU")
 
     def detetar(self, img_bgr):
         """Devolve uma lista de linhas; cada linha é um array (N, 2) de pontos (x, y) em píxeis."""
         x, corte_px = preprocessar(img_bgr, self.cfg)
-        saida = self.sessao.run(None, {self.entrada: x})[0]
+        try:
+            saida = self.sessao.run(None, {self.entrada: x})[0]
+        except Exception as e:
+            if self.dispositivo == "CPU":
+                raise
+            print(f"\nAviso: a deteção de linhas falhou na {self.dispositivo} ({type(e).__name__}); "
+                  "a continuar em CPU.")
+            self._criar_sessao(["CPUExecutionProvider"])
+            saida = self.sessao.run(None, {self.entrada: x})[0]
         h, w = img_bgr.shape[:2]
         return descodificar(saida[0], self.cfg, w, h, corte_px)
