@@ -19,6 +19,7 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import linhas
 import estrada
+import visual   # desenho dos resultados e do painel (cores fixas por modelo e por classe)
 
 # Classes do YOLO mostradas por omissão: só elementos de estrada (nomes do COCO, ver README, secção 5).
 # Para mudar a lista de forma permanente, altere-a aqui; para uma execução, use --classes-objetos.
@@ -331,6 +332,14 @@ else:
         print(f"Aviso: modelo da estrada não encontrado ({e}); a deteção da estrada fica DESLIGADA. "
               "Ver README, secção 6.")
 
+# Nome de cada modelo, como aparece no painel do vídeo
+NOMES_LINHAS = {"clrnet_r34": "CLRNet", "clrnet_r50": "CLRNet", "clrernet_r34": "CLRerNet"}
+nome_modelo = {
+    "objetos": "YOLOv8n",
+    "linhas": NOMES_LINHAS.get(detetor_linhas.cfg.get("modelo"), "CLRNet") if detetor_linhas else "CLRNet",
+    "estrada": "YOLOP",
+}
+
 # Estado de cada deteção durante o vídeo (as teclas O, L, E e V ligam/desligam)
 ativo = {"objetos": modelo_yolo is not None, "linhas": detetor_linhas is not None,
          "estrada": detetor_estrada is not None}
@@ -392,22 +401,6 @@ def media(chave, valor_ms):
     contagem[chave] += 1
 
 
-def painel(img, textos):
-    """Escreve os textos (texto, escala, cor) no canto superior esquerdo, sobre um fundo escuro
-    semitransparente, para se lerem por cima da imagem e das caixas do YOLO."""
-    fonte, margem = cv2.FONT_HERSHEY_SIMPLEX, 8
-    medidas = [cv2.getTextSize(t, fonte, e, 2) for t, e, _ in textos]
-    larg = max(w for (w, _), _ in medidas) + 2 * margem
-    alt = sum(h + b + margem for (_, h), b in medidas) + margem
-    fundo = img[0:alt, 0:larg]
-    fundo[:] = (fundo * 0.35).astype(np.uint8)
-    y = 0
-    for (t, e, cor), ((_, h), b) in zip(textos, medidas):
-        y += margem + h
-        cv2.putText(img, t, (margem, y), fonte, e, cor, 2, cv2.LINE_AA)
-        y += b
-
-
 for msg in ler_mensagens(mcap_file, topicos_leitura):
     t_inicio = time.perf_counter()
     ros_msg = msg.ros_msg
@@ -444,18 +437,19 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
         media("estrada", (time.perf_counter() - t0) * 1000)
 
     # --- DETEÇÃO DE OBJETOS (YOLO) ---
-    n_objetos = 0
+    caixas = []   # (x1, y1, x2, y2, classe, confiança)
     if ativo["objetos"]:
         t0 = time.perf_counter()
         resultados = modelo_yolo(frame, conf=args.conf_objetos, classes=classes_yolo, verbose=False)
         media("objetos", (time.perf_counter() - t0) * 1000)
-        n_objetos = len(resultados[0].boxes)
-        frame = resultados[0].plot()   # cópia da imagem com as caixas e as etiquetas desenhadas
+        caixas_yolo = resultados[0].boxes
+        caixas = [(*xyxy, modelo_yolo.names[int(c)], float(p)) for xyxy, c, p in
+                  zip(caixas_yolo.xyxy.tolist(), caixas_yolo.cls.tolist(), caixas_yolo.conf.tolist())]
 
-    # Desenho: estrada por baixo (semitransparente), linhas por cima
-    if mascara_estrada is not None:
-        estrada.desenhar_estrada(frame, mascara_estrada)
-    linhas.desenhar_linhas(frame, linhas_frame)
+    # Desenho (cores fixas, ver visual.py): estrada por baixo, linhas por cima, objetos por cima de tudo
+    visual.desenhar_estrada(frame, mascara_estrada)
+    visual.desenhar_linhas(frame, linhas_frame)
+    visual.desenhar_caixas(frame, caixas)
 
     ultimo_frame = frame.copy()
 
@@ -468,32 +462,26 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
     media("total", (time.perf_counter() - t_inicio) * 1000)
     img_s = 1000 / max(tempos["total"], 1e-3)
 
-    # Informação no canto superior esquerdo (tempo, correção, linhas, desempenho)
+    # Painel no canto superior esquerdo (tempo, câmara, um marcador por modelo, desempenho)
     if start_time_sec == 0:  # bag sem índice: conta-se a partir da primeira imagem
         start_time_sec = t_msg
-    elapsed_sec = t_msg - start_time_sec
-    textos = [(f"{elapsed_sec:.1f}s / {total_duration_sec:.1f}s" if total_duration_sec > 0
-               else f"{elapsed_sec:.1f}s", 0.9, (0, 255, 0))]
-    if calibracao is not None:
-        textos.append((("CORRIGIDA" if corrigir else "ORIGINAL") + (f"  (camara {camara})" if camara else ""),
-                       0.6, (0, 255, 0) if corrigir else (0, 165, 255)))
-    estados = [("objetos", "OBJETOS", f"{n_objetos}", (255, 255, 255)),
-               ("linhas", "LINHAS", f"{len(linhas_frame)}", (0, 255, 255)),
-               ("estrada", "ESTRADA", f"{mascara_estrada.mean():.0%} da imagem" if mascara_estrada is not None
-                else "", (0, 200, 0))]
-    desempenho = []
-    for chave, nome, valor, cor in estados:
-        if not carregado[chave]:
-            continue
-        if ativo[chave]:
-            textos.append((f"{nome}: {valor}", 0.6, cor))
-            desempenho.append(f"{chave} {tempos[chave]:.0f} ms")
-        else:
-            desligado = {"objetos": "desligados", "linhas": "desligadas", "estrada": "desligada"}[chave]
-            textos.append((f"{nome}: {desligado}", 0.6, (150, 150, 150)))
-    desempenho.append(f"{img_s:.1f} img/s (gravado a {1000 / ritmo_ms:.0f})")
-    textos.append((" | ".join(desempenho), 0.5, (255, 255, 255)))
-    painel(frame, textos)
+    texto_cam = f"Câmara {camara}" if camara else "Câmara não indicada"
+    if calibracao is None:
+        subtitulo, cor_sub = f"{texto_cam}  ·  sem calibração", "#F59E0B"
+    elif corrigir:
+        subtitulo, cor_sub = f"{texto_cam}  ·  corrigida", "#9CA3AF"
+    else:
+        subtitulo, cor_sub = f"{texto_cam}  ·  original (sem correção)", "#F59E0B"
+    n_obj, n_lin = len(caixas), len(linhas_frame)
+    valores = {"objetos": f"{n_obj} objeto" + ("" if n_obj == 1 else "s"),
+               "linhas": f"{n_lin} linha" + ("" if n_lin == 1 else "s"),
+               "estrada": f"{mascara_estrada.mean():.0%} da imagem" if mascara_estrada is not None else ""}
+    info = {"tempo": t_msg - start_time_sec, "total": total_duration_sec,
+            "subtitulo": subtitulo, "cor_subtitulo": cor_sub,
+            "modelos": [(k, nome_modelo[k], valores[k], tempos[k], ativo[k], carregado[k])
+                        for k in ("objetos", "linhas", "estrada")],
+            "rodape": f"{img_s:.1f} img/s  ·  gravado a {1000 / ritmo_ms:.0f} img/s"}
+    frame = visual.compor(frame, caixas, info)
 
     cv2.imshow(janela_nome, frame)
 
@@ -537,14 +525,7 @@ if contagem["total"]:
 
 if not saiu_cedo and ultimo_frame is not None:
     print("\nFim do vídeo alcançado!")
-    texto_fim = "FIM DO VIDEO"
-    texto_tecla = "Prima Q para fechar"
-    
-    centro_x, centro_y = width // 2 - 150, height // 2
-    
-    cv2.putText(ultimo_frame, texto_fim, (centro_x, centro_y), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
-    cv2.putText(ultimo_frame, texto_tecla, (centro_x - 30, centro_y + 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-    
+    ultimo_frame = visual.ecra_fim(ultimo_frame)
     cv2.imshow(janela_nome, ultimo_frame)
     
     while True:

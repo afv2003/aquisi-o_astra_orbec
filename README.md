@@ -90,7 +90,7 @@ Os bags são ficheiros grandes (cerca de 2 GB por minuto) e estragam-se facilmen
 O tratamento das imagens com OpenCV ou a extração para vídeo é feito diretamente no computador através de um ambiente virtual Python (`venv`), sem necessidade de ligar a câmara ou o Docker. Funciona em **Linux e em Windows**; cada sistema precisa do seu próprio `venv` (um `venv` criado num sistema não funciona no outro).
 
 ### Passo 1: Criar o ambiente virtual `venv` (Apenas na 1.ª vez)
-Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `ultralytics`, `pyyaml` e `onnxruntime`):
+Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `ultralytics`, `pyyaml`, `onnxruntime` e `pillow`):
 
 **Linux:**
 ```bash
@@ -106,6 +106,8 @@ venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
+* Isto instala tudo em versão de **CPU**, que funciona em qualquer PC. Para usar a GPU NVIDIA, siga depois o Passo 3.
+* **Se já instalou a versão GPU (Passo 3), não volte a correr `pip install -r requirements.txt`**: estragaria a instalação GPU (ver o aviso no Passo 3). Quando o `requirements.txt` ganhar uma biblioteca nova, instale só essa (`pip install <nome>`).
 
 ### Passo 2: Como executar o programa Python (Utilização normal)
 Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado, siga esta sequência:
@@ -142,8 +144,8 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
      2. corrige a distorção da lente com a calibração dessa câmara (secção 3);
      3. deteta as linhas da estrada na imagem corrigida (CLRNet, secção 4);
      4. deteta a estrada (área circulável) na mesma imagem (YOLOP, secção 6);
-     5. deteta objetos na imagem corrigida e desenha as caixas (YOLO, secção 5);
-     6. pinta a estrada de verde, desenha as linhas por cima e mostra tudo na mesma janela, com o tempo, a câmara, o número de linhas e a percentagem de estrada.
+     5. deteta objetos na imagem corrigida (YOLO, secção 5);
+     6. desenha os resultados (estrada, linhas e objetos, por esta ordem) e o painel de informação, e mostra tudo na mesma janela (ver "Informação no vídeo", abaixo).
    * **Ligar e desligar cada deteção** (as opções podem juntar-se, por exemplo `--sem-objetos --sem-estrada`):
 
      | Deteção | Desligar ao arrancar | Tecla no vídeo | Confiança mínima (por omissão) |
@@ -153,13 +155,26 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
      | Estrada (YOLOP) | `--sem-estrada` | **E** | `--conf-estrada` (classe mais provável) |
      | Todas | `-v` (só vídeo) | **V** (desliga todas / volta a ligá-las) | — |
 
-     * Uma deteção desligada com a tecla deixa também de ser calculada, por isso o vídeo fica mais rápido; o bloco de informação mostra `desligada`.
+     * Uma deteção desligada com a tecla deixa também de ser calculada, por isso o vídeo fica mais rápido; no painel, o marcador fica vazio e aparece `desligado`.
      * Uma deteção desligada na linha de comandos nem é carregada (arranque mais rápido), e a sua tecla não faz nada.
      * Outras teclas: **Espaço** pausa, **C** liga/desliga a correção da distorção, **Q** fecha.
      * **Confiança mínima:** um número de 0 a 1. Mais alto mostra menos deteções, mas mais seguras; mais baixo mostra mais, incluindo erradas.
    * Se o `.mcap` estiver vazio (por exemplo, uma cópia que falhou), o script avisa: `não é um ficheiro MCAP válido (0 bytes)`.
    * Se a gravação foi interrompida (Docker parado à força, `Ctrl + C` duas vezes, disco cheio) ou a cópia ficou incompleta, falta o índice que o MCAP guarda no fim do ficheiro. O script avisa (`o bag não tem o índice no fim`), lê as imagens sequencialmente desde o início e para no ponto onde o ficheiro foi cortado; o tempo total aparece como desconhecido.
    * Se parte do ficheiro estiver estragada (por exemplo, numa cópia ou transferência), o script verifica cada bloco de dados do MCAP, salta os blocos estragados (avisa `bloco estragado no bag`) e continua; no fim indica quantos segundos de vídeo faltam. Se isto acontecer, copie de novo o ficheiro original e verifique-o (secção 1, Passo 6).
+   * **Informação no vídeo:**
+     * **Painel** (canto superior esquerdo): tempo decorrido e total, com barra de progresso; câmara e estado da correção (a laranja quando a imagem não está corrigida); uma linha por modelo, identificado pelo nome (`YOLOv8n`, `CLRNet`, `YOLOP`) e por um marcador da sua cor, com o resultado (número de objetos, número de linhas, percentagem da imagem que é área circulável) e o tempo da etapa; no fim, as imagens processadas por segundo e o ritmo da gravação.
+     * **Cores fixas**, as mesmas em todas as imagens (definidas no `visual.py`):
+
+       | Modelo (nome no painel) | Deteta | Desenho | Cor |
+       |---|---|---|---|
+       | `YOLOP` | área circulável | área semitransparente com o contorno a cheio | verde |
+       | `CLRNet` | linhas da estrada | todas as linhas, com um contorno escuro fino | amarelo |
+       | `YOLOv8n` | objetos | caixa fina com os cantos reforçados e etiqueta `classe confiança%` | uma cor por classe: `car` azul, `truck` índigo, `bus` roxo, `motorcycle` rosa, `bicycle` rosa-claro, `person` vermelho, `traffic light` laranja, `stop sign` laranja-claro |
+
+       As classes de objetos não usam o verde nem o amarelo, para não se confundirem com a estrada e as linhas. Outras classes (com `--classes-objetos todas`) têm também uma cor fixa, escolhida pelo nome.
+     * Quando há muitos objetos juntos, as etiquetas que se sobreporiam a outras (ou ao painel) não são escritas; a caixa é sempre desenhada.
+     * O texto usa uma fonte do sistema (Segoe UI no Windows; Ubuntu ou DejaVu Sans no Linux), através do `pillow`.
 
 5. **Sair do ambiente virtual (Quando terminar o trabalho):**
    ```bash
@@ -167,7 +182,7 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    ```
 
 ### Passo 3: Desempenho (velocidade) e GPU
-No vídeo aparece uma linha com o tempo de cada etapa, por exemplo `objetos 60 ms | linhas 340 ms | estrada 400 ms | 1.2 img/s (gravado a 30)`; no fim, o terminal mostra a média.
+No painel do vídeo aparece o tempo de cada etapa (à direita de cada deteção) e, em baixo, as imagens processadas por segundo, por exemplo `1.2 img/s · gravado a 30 img/s`; no fim, o terminal mostra a média.
 * **Em CPU, o processamento é bastante mais lento do que a gravação** (30 imagens por segundo = 33 ms por imagem). A etapa mais pesada é a deteção de linhas (CLRNet, cerca de 100 a 350 ms por imagem, conforme o processador), seguida do YOLO. O vídeo não perde imagens: só passa mais devagar.
 * **Com GPU** (medido numa NVIDIA RTX 3050 Ti Laptop, imagens de 640 px de largura): objetos cerca de 20 ms, linhas cerca de 37 ms e estrada cerca de 62 ms por imagem; com as três deteções, cerca de 7 a 8 imagens por segundo. Para ir mais depressa, desligue as deteções de que não precisa (tabela do Passo 2).
 * O script espera apenas o que falta para acompanhar o ritmo da gravação; quando o processamento já é mais lento, não acrescenta espera.
@@ -183,7 +198,17 @@ No vídeo aparece uma linha com o tempo de cada etapa, por exemplo `objetos 60 m
     pip install "onnxruntime-gpu<1.27"
     ```
   * Confirme no terminal: `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), ...)`, `Deteção de linhas: ATIVADA (..., GPU (CUDA), ...)` e `Deteção da estrada: ATIVADA (..., GPU (CUDA), ...)`.
-  * Depois de trocar, não volte a correr `pip install -r requirements.txt` (reinstalaria o `onnxruntime` de CPU ao lado do de GPU).
+  > **Atenção: depois de instalar a versão GPU, não volte a correr `pip install -r requirements.txt`.** O `requirements.txt` tem o `onnxruntime` de CPU; o `pip` instala-o ao lado do `onnxruntime-gpu`, os dois ficam a usar os mesmos ficheiros e o CLRNet e o YOLOP passam a correr no CPU, sem erro nenhum (só ficam várias vezes mais lentos). Se o `requirements.txt` ganhar uma biblioteca nova, instale só essa: `pip install <nome>`.
+  * **Se ficar lento de repente** (por exemplo, linhas e estrada a mais de 150 ms por imagem com GPU):
+    1. Veja no terminal, no arranque, se as três deteções dizem `GPU` ou `CPU`.
+    2. Veja que versões do `onnxruntime` estão instaladas: `pip list | findstr onnxruntime` (Windows) ou `pip list | grep onnxruntime` (Linux).
+    3. Se aparecerem as duas (`onnxruntime` e `onnxruntime-gpu`), desinstale ambas e reinstale só a GPU (desinstalar só a de CPU pode estragar a outra, porque partilham ficheiros):
+       ```
+       pip uninstall -y onnxruntime onnxruntime-gpu
+       pip install "onnxruntime-gpu<1.27"
+       ```
+    4. Se o YOLO disser `CPU`, confirme o PyTorch: `python -c "import torch; print(torch.__version__, torch.cuda.is_available())"` deve mostrar uma versão `+cu126` e `True`; se não, repita a instalação do PyTorch acima.
+    5. Num portátil, ligue o carregador: só com bateria, a GPU fica muito mais lenta.
   * Não use o `onnxruntime-directml`: foi testado e falhou com este modelo na RTX 3050 Ti (a GPU deixou de responder).
   * Se a GPU falhar na deteção de linhas, o script avisa e continua em CPU; para voltar tudo ao CPU: `pip uninstall -y onnxruntime-gpu torch torchvision` e `pip install onnxruntime torch torchvision`.
 
@@ -258,7 +283,7 @@ python processar_bag.py <bag>.mcap --camara 5 --corte-linhas 0.5    # ignorar a 
 python processar_bag.py <bag>.mcap --camara 5 --conf-linhas 0.2     # mostrar linhas com menos confiança
 python processar_bag.py <bag>.mcap --camara 5 --sem-linhas          # sem as linhas (tecla L no vídeo)
 ```
-* No terminal aparece `Deteção de linhas: ATIVADA (CLRNet ResNet34, ..., CPU, corte do topo 46%, confiança mínima 0.4)` (ou `GPU (CUDA)`); no vídeo, as linhas aparecem coloridas e o contador `LINHAS: N`.
+* No terminal aparece `Deteção de linhas: ATIVADA (CLRNet ResNet34, ..., CPU, corte do topo 46%, confiança mínima 0.4)` (ou `GPU (CUDA)`); no vídeo, as linhas aparecem a amarelo e o painel mostra quantas foram detetadas.
 * Funciona em **Windows, Linux e macOS**, com ou sem GPU. Não precisa do UnLanedet, de PyTorch, nem de máquinas virtuais.
 * **`--corte-linhas`**: o modelo só analisa a parte de baixo da imagem (no CULane corta-se 46 % em cima). Se as linhas saírem mal posicionadas, experimente valores entre 0.3 e 0.6.
 * **`--conf-linhas`**: confiança mínima para mostrar uma linha (0.4 por omissão, o valor usado na avaliação do modelo). Com valores mais baixos (0.2 a 0.3) aparecem linhas que o modelo vê com dúvida, por exemplo em imagens fora das condições da secção 4.5, mas também mais linhas falsas. Abaixo de 0.1 não é útil.
@@ -374,7 +399,7 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-objetos         # sem objeto
 python processar_bag.py <bag>.mcap --camara 5 --classes-objetos "car,truck,traffic light"   # só estas classes
 python processar_bag.py <bag>.mcap --camara 5 --classes-objetos todas                       # as 80 classes
 ```
-* No terminal aparece `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), confiança mínima 0.25)` (ou `CPU`); no vídeo, cada objeto detetado aparece numa caixa com o nome da classe e a confiança, e o bloco de informação mostra `OBJETOS: N`.
+* No terminal aparece `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), confiança mínima 0.25)` (ou `CPU`); no vídeo, cada objeto detetado aparece numa caixa da cor da sua classe, com o nome da classe e a confiança, e o painel mostra quantos foram detetados.
 * **Classes detetadas:** por omissão, só **elementos de estrada**: `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. O terminal mostra a lista usada (`Classes: ...`).
   * Para mudar a lista de forma permanente, altere `CLASSES_ESTRADA` no início do `processar_bag.py`.
   * Para uma só execução, use `--classes-objetos` com os nomes em inglês do COCO, separados por vírgulas e entre aspas se algum tiver espaços (`"traffic light"`). Um nome errado dá erro e mostra a lista de nomes possíveis.
@@ -386,7 +411,7 @@ python processar_bag.py <bag>.mcap --camara 5 --classes-objetos todas           
 ### 5.2 Como funciona
 * **Modelo:** YOLOv8n ("nano"), a versão mais pequena e rápida do YOLOv8, pré-treinada no conjunto de dados COCO. Deteta as **80 classes do COCO**, entre elas `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. Foi escolhida a versão mais leve para o vídeo não ficar demasiado lento.
 * **Onde entra:** corre sobre a imagem **já corrigida** da distorção (secção 3), depois da deteção de linhas (que precisa da imagem limpa, sem caixas desenhadas).
-* **Desenho:** as caixas são desenhadas pela própria biblioteca (`resultados[0].plot()`); as linhas da estrada são desenhadas por cima.
+* **Desenho:** as caixas e as etiquetas são desenhadas pelo `visual.py` (não pelo `ultralytics`), com uma cor fixa por classe, por cima da estrada e das linhas.
 * **Formato:** ao contrário das linhas e da estrada (ONNX), o YOLO fica em PyTorch (`yolov8n.pt`), porque o `ultralytics` já trata de tudo (pré e pós-processamento, GPU) e funciona em qualquer sistema. Passar para ONNX só compensaria para retirar o PyTorch do `venv`; isso obrigaria a escrever o pré e o pós-processamento do YOLO (como no `linhas.py`), porque o `ultralytics` continua a precisar do PyTorch mesmo com um modelo ONNX.
 * **CPU ou GPU:** o `ultralytics` usa o PyTorch, instalado com ele. Com o PyTorch normal corre em CPU; com o PyTorch com CUDA usa a GPU NVIDIA (secção 2, Passo 3). O terminal mostra `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), ...)` ou `CPU`.
 
@@ -415,7 +440,7 @@ python processar_bag.py <bag>.mcap --camara 5                  # objetos + linha
 python processar_bag.py <bag>.mcap --camara 5 --conf-estrada 0.9   # só a estrada de que o modelo tem mais certeza
 python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estrada (tecla E no vídeo)
 ```
-* No terminal aparece `Deteção da estrada: ATIVADA (YOLOP, área circulável, CPU, classe mais provável)` (ou `GPU (CUDA)`); no vídeo, a estrada fica pintada de verde e aparece `ESTRADA: N% da imagem`.
+* No terminal aparece `Deteção da estrada: ATIVADA (YOLOP, área circulável, CPU, classe mais provável)` (ou `GPU (CUDA)`); no vídeo, a estrada fica pintada de verde (com o contorno a cheio) e o painel mostra a percentagem da imagem que é estrada.
 * **`--conf-estrada`**: o modelo dá a cada píxel uma pontuação de "estrada" de 0 a 1. Por omissão, um píxel é estrada quando essa pontuação é maior do que a de "não estrada" (como no YOLOP); com `--conf-estrada 0.9`, só quando é pelo menos 0.9. Valores mais altos limpam bordas duvidosas. O modelo dá pontuações muito extremas (quase sempre perto de 0 ou de 1), por isso o efeito é pequeno: num frame de teste, a área passou de 23% (omissão) para 16% da imagem com 0.99, e parte do passeio continuou marcada, porque o modelo "tem a certeza" de que é estrada. Estes erros resolvem-se com a câmara na posição certa (secção 6.3), não com o limiar.
 * Na linha de desempenho do vídeo aparece o tempo da etapa (`estrada X ms`). Em CPU, o vídeo fica cerca de duas vezes mais lento; com GPU, a estrada demora cerca de 60 ms por imagem (secção 2, Passo 3). Se não precisar dela, desligue-a com `--sem-estrada` ou a tecla **E**.
 
