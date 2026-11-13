@@ -169,7 +169,7 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
 ### Passo 3: Desempenho (velocidade) e GPU
 No vídeo aparece uma linha com o tempo de cada etapa, por exemplo `objetos 60 ms | linhas 340 ms | estrada 400 ms | 1.2 img/s (gravado a 30)`; no fim, o terminal mostra a média.
 * **Em CPU, o processamento é bastante mais lento do que a gravação** (30 imagens por segundo = 33 ms por imagem). A etapa mais pesada é a deteção de linhas (CLRNet, cerca de 100 a 350 ms por imagem, conforme o processador), seguida do YOLO. O vídeo não perde imagens: só passa mais devagar.
-* **Com GPU** (medido numa NVIDIA RTX 3050 Ti Laptop): linhas cerca de 37 ms e YOLO cerca de 59 ms por imagem, cerca de 10 imagens por segundo.
+* **Com GPU** (medido numa NVIDIA RTX 3050 Ti Laptop, imagens de 640 px de largura): objetos cerca de 20 ms, linhas cerca de 37 ms e estrada cerca de 62 ms por imagem; com as três deteções, cerca de 7 a 8 imagens por segundo. Para ir mais depressa, desligue as deteções de que não precisa (tabela do Passo 2).
 * O script espera apenas o que falta para acompanhar o ritmo da gravação; quando o processamento já é mais lento, não acrescenta espera.
 * **Para ir mais rápido, use a GPU** (opcional, no `venv`; o `requirements.txt` fica em CPU para funcionar em qualquer PC). Com GPU NVIDIA (testado numa RTX 3050 Ti Laptop):
   * **YOLO:** PyTorch com CUDA 12 (comando de [pytorch.org](https://pytorch.org/get-started/locally/) para o seu sistema):
@@ -417,7 +417,7 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 ```
 * No terminal aparece `Deteção da estrada: ATIVADA (YOLOP, área circulável, CPU, classe mais provável)` (ou `GPU (CUDA)`); no vídeo, a estrada fica pintada de verde e aparece `ESTRADA: N% da imagem`.
 * **`--conf-estrada`**: o modelo dá a cada píxel uma pontuação de "estrada" de 0 a 1. Por omissão, um píxel é estrada quando essa pontuação é maior do que a de "não estrada" (como no YOLOP); com `--conf-estrada 0.9`, só quando é pelo menos 0.9. Valores mais altos limpam bordas duvidosas. O modelo dá pontuações muito extremas (quase sempre perto de 0 ou de 1), por isso o efeito é pequeno: num frame de teste, a área passou de 23% (omissão) para 16% da imagem com 0.99, e parte do passeio continuou marcada, porque o modelo "tem a certeza" de que é estrada. Estes erros resolvem-se com a câmara na posição certa (secção 6.3), não com o limiar.
-* Na linha de desempenho do vídeo aparece o tempo da etapa (`estrada X ms`). O modelo é do tamanho do CLRNet, por isso, em CPU, o vídeo fica cerca de duas vezes mais lento; com GPU (secção 2, Passo 3) o efeito é pequeno.
+* Na linha de desempenho do vídeo aparece o tempo da etapa (`estrada X ms`). Em CPU, o vídeo fica cerca de duas vezes mais lento; com GPU, a estrada demora cerca de 60 ms por imagem (secção 2, Passo 3). Se não precisar dela, desligue-a com `--sem-estrada` ou a tecla **E**.
 
 ### 6.2 Como funciona
 * **Modelo:** [YOLOP](https://github.com/hustvl/YOLOP) (licença MIT), treinado no BDD100K (vídeos de condução em cidade e estrada, de dia e de noite). É uma rede com três saídas: objetos, área circulável e linhas. Aqui usa-se **só a área circulável**: os objetos já são detetados pelo YOLOv8 (secção 5) e as linhas pelo CLRNet (secção 4), que é mais preciso nas linhas.

@@ -4,7 +4,7 @@ meu_ambiente/
 __pycache__/
 *.pyc
 
-# Dados recolhidos (ROS bags) e vídeos gerados
+# Dados recolhidos (ROS bags), vídeos gerados e vídeos de teste
 data/
 *.mcap
 *.mp4
@@ -22,3 +22,10 @@ SimpleColorViewer-SFML
 pesos/
 *.pth
 modelos/teste_linhas.png
+
+# Código local do CLRNet original (já não é usado: o modelo está em modelos/linhas.onnx)
+CLRNet/
+
+# Scripts pessoais e de teste (ficam só no PC de quem os usa)
+corrigir_calibracao.py
+processar_video_teste.py
