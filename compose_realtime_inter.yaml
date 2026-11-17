@@ -1,0 +1,63 @@
+x-ros-realtime: &ros-realtime
+  build: 
+    context: .
+    dockerfile: Dockerfile_realtime_inter
+  network_mode: host
+  ipc: host
+
+services:
+  driver_camara5:
+    <<: *ros-realtime
+    privileged: true
+    command: >
+      ros2 run usb_cam usb_cam_node_exe --ros-args
+      -r __ns:=/camara5
+      -p video_device:=${DEV_CAMARA5:-/dev/video2}
+      -p frame_id:=camara5
+      -p camera_name:=astra_rgb_5
+
+  driver_camara8:
+    <<: *ros-realtime
+    privileged: true
+    command: >
+      ros2 run usb_cam usb_cam_node_exe --ros-args
+      -r __ns:=/camara8
+      -p video_device:=${DEV_CAMARA8:-/dev/video4}
+      -p frame_id:=camara8
+      -p camera_name:=astra_rgb_8
+
+  processador:
+    <<: *ros-realtime
+    depends_on:
+      - driver_camara5
+      - driver_camara8
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - CAMARAS_ATIVAS=${CAMARAS_ATIVAS}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - .:/workspace
+    working_dir: /workspace
+    command: python3 processar_tempo_real.py
+
+  gravador_bag:
+    <<: *ros-realtime
+    depends_on:
+      - processador
+    volumes:
+      - ./data_realtime_inter:/data:rw
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+    environment:
+      - CAMARAS_ATIVAS=${CAMARAS_ATIVAS}
+    command: >
+      bash -c '
+      TOPICOS=""
+      for cam in $$CAMARAS_ATIVAS; do
+        # Grava única e exclusivamente o tópico com o JSON das deteções
+        TOPICOS="$$TOPICOS /camara$$cam/processamento/dados_deteccoes"
+      done
+      sleep 4
+      ros2 bag record -s mcap -o /data/realtime_$$(date +%Y%m%d_%H%M%S) $$TOPICOS
+      '

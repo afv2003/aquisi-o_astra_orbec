@@ -1,0 +1,28 @@
+ARG BASE_IMAGE=ros:jazzy-ros-base
+FROM ${BASE_IMAGE}
+SHELL ["/bin/bash", "-c"]
+
+# Instalar ROS, driver da câmara e dependências para Python e OpenCV
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ros-jazzy-usb-cam \
+    python3-venv \
+    python3-pip \
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Criar ambiente virtual e colocar no PATH
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Instalar os requisitos de processamento
+COPY requirements.txt /tmp/
+RUN pip install -r /tmp/requirements.txt
+
+# Configurar o entrypoint do ROS
+RUN printf '%s\n' '#!/bin/bash' 'set -e' \
+    'source /opt/ros/jazzy/setup.bash' 'exec "$@"' \
+    > /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]
