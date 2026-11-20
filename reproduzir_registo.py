@@ -60,6 +60,11 @@ def descrever_trechos(ensaio):
         por_cam = t.get("imagens_por_camara") or {}
         extra = (" - " + ", ".join(f"câmara {c}: {n}" for c, n in por_cam.items())) if len(por_cam) > 1 else ""
         print(f"    trecho {t['n']}: {intervalo}  ({t['imagens']} imagens{extra})")
+        inicio = ensaio.get("bag", {}).get("inicio_ns") or 0
+        for c, ints in (t.get("intervalos_por_camara") or {}).items():
+            # registo juntado: onde cada câmara foi registada (fora disso, aparece escura)
+            txt = ", ".join(f"{(a - inicio) / 1e9:.1f}–{(b - inicio) / 1e9:.1f} s" for a, b in ints)
+            print(f"        câmara {c}: " + (f"registada em {txt}" if txt else "não registada (aparece escura)"))
 
 
 # --- Sem ensaio indicado (ou uma pasta com vários): listar os registos existentes ---
@@ -147,7 +152,7 @@ for t in trechos:
     caminho_video = pasta / f"trecho_{t['n']}{sufixo}.mp4"
     if args.exportar:
         dur = (t["fim_ns"] - t["inicio_ns"]) / 1e9
-        fps = (n_video - 1) / dur if dur > 0 and n_video > 1 else 30.0
+        fps = rep.fps(t)
     t_anterior = None
     n_img, sem_det = 0, 0
     for t_ns, frame, dados in rep.imagens(t):

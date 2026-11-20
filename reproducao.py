@@ -9,6 +9,8 @@ Os modelos não voltam a correr.
 
 Com um registo de duas câmaras, as imagens são juntadas lado a lado (5 à esquerda, 8 à direita),
 como no processar_bag.py; pode também escolher-se só uma das câmaras (camaras=["5"]).
+Num registo juntado (juntar_registos.py), cada trecho diz em que intervalos cada câmara foi
+registada ("intervalos_por_camara"); fora deles, o lado dessa câmara aparece escuro, com uma mensagem.
 """
 from pathlib import Path
 
@@ -106,16 +108,38 @@ class Reproducao:
         por_cam = self.imagens_por_camara(trecho)
         return max(self.camaras, key=lambda c: por_cam.get(c, 0))
 
+    def intervalos(self, trecho, cam):
+        """Intervalos [(início_ns, fim_ns), ...] em que a câmara foi registada no trecho (todo o trecho
+        num registo normal; num registo juntado, os trechos originais dessa câmara)."""
+        por_cam = trecho.get("intervalos_por_camara")
+        if not por_cam:
+            return [(trecho["inicio_ns"], trecho["fim_ns"])]
+        return [tuple(i) for i in por_cam.get(str(cam), [])]
+
+    def registada(self, trecho, cam, t_ns):
+        return any(a <= t_ns <= b for a, b in self.intervalos(trecho, cam))
+
+    def fps(self, trecho):
+        """Ritmo da gravação no trecho (imagens por segundo da câmara principal)."""
+        cam = self.camara_principal(trecho)
+        n = self.imagens_por_camara(trecho).get(cam, 0) or trecho["imagens"]
+        dur = sum(b - a for a, b in self.intervalos(trecho, cam)) / 1e9
+        return (n - 1) / dur if dur > 0 and n > 1 else 30.0
+
     def n_imagens(self, trecho):
-        """Número de imagens do vídeo do trecho (as da câmara principal)."""
-        return self.imagens_por_camara(trecho).get(self.camara_principal(trecho), 0) or trecho["imagens"]
+        """Número de imagens do vídeo do trecho (as da câmara principal; num registo juntado, uma
+        estimativa: o vídeo cobre o trecho todo, incluindo onde essa câmara não foi registada)."""
+        if not trecho.get("intervalos_por_camara"):
+            return self.imagens_por_camara(trecho).get(self.camara_principal(trecho), 0) or trecho["imagens"]
+        return int(round(self.fps(trecho) * (trecho["fim_ns"] - trecho["inicio_ns"]) / 1e9)) + 1
 
     def imagens(self, trecho, desenhar=True):
         """
         Imagens de um trecho, já com as deteções desenhadas e o painel, como no processar_bag.py
         (ou, com desenhar=False, só corrigidas da distorção, sem desenhos).
         Gera (instante_ns, imagem BGR, {câmara: dados das deteções ou None}); no dicionário só entram
-        as câmaras que já têm imagem.
+        as câmaras que já têm imagem e que foram registadas nesse instante (num registo juntado, uma
+        câmara fora dos seus intervalos aparece escura, com uma mensagem).
         Com duas câmaras, a imagem tem as câmaras lado a lado; sai uma imagem por cada imagem da
         câmara principal, com a imagem mais recente da outra câmara.
         """
@@ -130,6 +154,14 @@ class Reproducao:
             frame = leitura_bag.imagem_bgr(msg.ros_msg)
             if frame is None:
                 continue
+            if not self.registada(trecho, cam, msg.log_time_ns):
+                # câmara não registada neste intervalo (registo juntado): escuro, com uma mensagem
+                h, w = frame.shape[:2]
+                ultima[cam] = self._sem_registo(trecho, cam, msg.log_time_ns, w, h)
+                dados_cam.pop(cam, None)
+                if cam == principal:
+                    yield msg.log_time_ns, self.juntar(ultima, trecho, msg.log_time_ns), dict(dados_cam)
+                continue
             dados = self.deteccoes[cam].get(msg.log_time_ns)
             dados_cam[cam] = dados
             if desenhar:
@@ -138,15 +170,28 @@ class Reproducao:
                 ultima[cam] = self.corrigir(frame, dados, cam)
             if cam != principal:
                 continue
-            yield msg.log_time_ns, self.juntar(ultima), dict(dados_cam)
+            yield msg.log_time_ns, self.juntar(ultima, trecho, msg.log_time_ns), dict(dados_cam)
 
-    def juntar(self, ultima):
+    def _sem_registo(self, trecho, cam, t_ns, w, h):
+        """Lado escuro de uma câmara que não foi registada neste instante (registo juntado)."""
+        outras = [c for c in self.camaras if c != cam and self.registada(trecho, c, t_ns)]
+        return visual.imagem_espera(w, h, f"Câmara {cam}: sem registo neste intervalo",
+                                    (f"só a câmara {registo.texto_camaras(outras)} foi registada aqui" if outras
+                                     else "nenhuma câmara foi registada aqui"))
+
+    def juntar(self, ultima, trecho=None, t_ns=None):
         """Imagens das câmaras lado a lado (uma câmara ainda sem imagem aparece a escuro)."""
         ref = next(im for im in ultima.values() if im is not None)
         h, w = ref.shape[:2]
-        return visual.lado_a_lado([ultima[c] if ultima[c] is not None
-                                   else visual.imagem_espera(w, h, f"Câmara {c}: sem imagem ainda")
-                                   for c in self.camaras])
+        partes = []
+        for c in self.camaras:
+            if ultima[c] is not None:
+                partes.append(ultima[c])
+            elif trecho is not None and not self.registada(trecho, c, t_ns):
+                partes.append(self._sem_registo(trecho, c, t_ns, w, h))
+            else:
+                partes.append(visual.imagem_espera(w, h, f"Câmara {c}: sem imagem ainda"))
+        return visual.lado_a_lado(partes)
 
     def _corrigida(self, dados, cam):
         por_omissao = cam in self.corretor

@@ -392,6 +392,8 @@ class TabResumo(ctk.CTkFrame):
             ("Duração do bag", tempo_txt(bag.get("duracao_s"))),
             ("Correção", correcao),
             ("Processado em", (e.get("criado_em") or "—").replace("T", " ")),
+            *([("Juntado de", "\n".join(f"câmara {j['camara']}: {Path(j['pasta']).name}" for j in e["juntado_de"]))]
+              if e.get("juntado_de") else []),
             ("Trechos", "  ".join(f"{t['n']}: {t.get('inicio_s', 0):.1f}–{t.get('fim_s', 0):.1f} s"
                                   for t in e.get("trechos", []))),
             ("Selecionado", ("todos os trechos" if escolha == "Todos" else f"trecho {escolha}")

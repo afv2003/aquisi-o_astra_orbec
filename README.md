@@ -552,6 +552,19 @@ python reproduzir_registo.py data_offline/<viagem>/<ensaio> --camara 8  # regist
 * Os vídeos `.mp4` têm o ritmo da gravação (por exemplo, 30 imagens por segundo), qualquer que tenha sido a velocidade do processamento.
 * Os registos do tempo real (branch `novo_docker`) têm o mesmo formato de deteções (também um tópico por câmara), mas não guardam as imagens nem o `ensaio.json`; para os reproduzir assim, essa gravação teria de guardar também o tópico `/camara<N>/image_raw`.
 
+### 7.4 Juntar dois registos de uma câmara (`juntar_registos.py`)
+Se as duas câmaras de um bag forem processadas em sessões diferentes (`--camara 5` numa, `--camara 8` noutra), ficam dois registos separados. O `juntar_registos.py` junta-os num registo de duas câmaras, igual ao que sairia de as processar juntas, para se verem lado a lado no `reproduzir_registo.py` e na janela de resultados (secção 8):
+```bash
+python juntar_registos.py data_offline/<viagem>/camara5_<data_hora> data_offline/<viagem>/camara8_<data_hora>
+```
+* Cria `data_offline/<viagem>/camaras5e8_juntado_<data_hora>/` (com `deteccoes.mcap` e `ensaio.json`, como na secção 7.2). Os dois registos originais não são alterados.
+* Confirma que os dois registos são do mesmo bag (nome e tamanho) e de câmaras diferentes; se não forem, dá erro e não cria nada. Se os modelos ou limiares forem diferentes, avisa (ficam os dois no `ensaio.json`, em `modelos_por_camara`).
+* **Trechos: a união.** Os trechos das duas câmaras que se sobrepõem passam a ser um só trecho, do início mais cedo ao fim mais tarde; um trecho que só uma câmara registou fica como trecho dessa câmara. Cada trecho guarda em que intervalos cada câmara foi registada (`intervalos_por_camara`), e o script mostra-os no fim.
+  * Nas partes em que só uma câmara foi registada, o lado da outra aparece **escuro, com a mensagem `Câmara N: sem registo neste intervalo`** (no `reproduzir_registo.py`, no vídeo exportado e na janela de resultados).
+  * Nessas partes, os veículos por instante (resumo e cores do percurso) contam só a câmara registada.
+* Com `--registar-tudo`, ou o mesmo `--trechos` nas duas sessões, os trechos coincidem e o registo juntado fica igual ao de uma só execução com as duas câmaras. Com a tecla R, os trechos de cada câmara ficam ligeiramente diferentes, e as pontas aparecem só com uma câmara.
+* Na listagem do `reproduzir_registo.py` (sem argumentos) e no Resumo da janela («Juntado de»), um registo juntado indica os registos de origem e onde cada câmara foi registada.
+
 ---
 
 ## 8. Janela de resultados (`gui_resultados.py`)
@@ -571,7 +584,7 @@ python gui_resultados.py --pasta-registo outra_pasta  # registos noutra pasta
   * Vídeo e registo: as duas câmaras, a correção de cada uma e o número de imagens de cada uma;
   * Linhas e área circulável: um valor por câmara (`5: … · 8: …`);
   * Deteções por categoria: colunas com as deteções de cada câmara; média, máximo e % contam as imagens das duas;
-  * Veículos: **por instante**, somando as duas câmaras (cada imagem de uma câmara com a imagem da outra mais próxima no tempo, até 0,25 s), e a média de cada câmara.
+  * Veículos: **por instante**, somando as duas câmaras (cada imagem de uma câmara com a imagem da outra mais próxima no tempo, até 0,1 s), e a média de cada câmara.
 * **Vídeo e registo:** bag, câmara, duração, correção da distorção, data do processamento, trechos, e o número de imagens e a duração do que está selecionado.
 * **Modelos:** limiar de cada modelo, tempo médio por imagem, classes do YOLO e velocidade do processamento.
 * **Linhas e área circulável:** linhas por imagem e % de imagens sem linhas (CLRNet); área circulável média, mínima e máxima (YOLOP).

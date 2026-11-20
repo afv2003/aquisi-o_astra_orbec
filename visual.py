@@ -297,12 +297,18 @@ def ordenar_camaras(camaras):
     return sorted(camaras, key=chave)
 
 
-def imagem_espera(largura, altura, texto):
-    """Imagem escura com um texto ao centro (câmara que ainda não tem imagem)."""
+def imagem_espera(largura, altura, texto, subtexto=None):
+    """
+    Imagem escura com um texto ao centro (câmara que ainda não tem imagem, ou que não foi registada
+    nesse intervalo) e, opcionalmente, uma segunda linha mais pequena.
+    """
     base = Image.new("RGB", (int(largura), int(altura)), (20, 23, 28))
     d = ImageDraw.Draw(base)
     esc = max(0.8, min(1.6, largura / 800))
-    d.text((largura / 2, altura / 2), texto, font=fonte(int(15 * esc)), fill=(156, 163, 175), anchor="mm")
+    y = altura / 2 - (10 * esc if subtexto else 0)
+    d.text((largura / 2, y), texto, font=fonte(int(16 * esc), True), fill=(209, 213, 219), anchor="mm")
+    if subtexto:
+        d.text((largura / 2, y + 24 * esc), subtexto, font=fonte(int(13 * esc)), fill=(156, 163, 175), anchor="mm")
     return cv2.cvtColor(np.asarray(base), cv2.COLOR_RGB2BGR)
 
 

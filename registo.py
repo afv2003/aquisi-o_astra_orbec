@@ -306,14 +306,16 @@ def n_veiculos(dados):
     return sum(1 for o in dados.get("objetos", []) if o["classe"] in VEICULOS)
 
 
-def veiculos_por_instante(por_camara, inicio_ns=None, fim_ns=None, tolerancia_ns=250_000_000):
+def veiculos_por_instante(por_camara, inicio_ns=None, fim_ns=None, tolerancia_ns=100_000_000):
     """
     Veículos (VEICULOS) em cada instante, somando as câmaras: [(instante_ns, n), ...].
     por_camara: {câmara: {instante_ns: dados}} (só as câmaras a considerar). Com uma câmara, é o
     número de veículos de cada imagem. Com duas, cada imagem da câmara com mais imagens é somada com
     a imagem da outra câmara mais próxima no tempo (até tolerancia_ns de diferença; sem nenhuma tão
-    perto, essa câmara não conta nesse instante). Só entram imagens com os objetos ligados e, se
-    dados, entre inicio_ns (inclusive) e fim_ns (exclusive).
+    perto, essa câmara não conta nesse instante). As imagens de outra câmara sem nenhuma imagem da
+    câmara de referência por perto (por exemplo, num registo juntado em que só essa câmara foi
+    registada nesse intervalo) contam como instantes só dessa câmara. Só entram imagens com os
+    objetos ligados e, se dados, entre inicio_ns (inclusive) e fim_ns (exclusive).
     """
     def dentro(t):
         return (inicio_ns is None or t >= inicio_ns) and (fim_ns is None or t < fim_ns)
@@ -338,7 +340,15 @@ def veiculos_por_instante(por_camara, inicio_ns=None, fim_ns=None, tolerancia_ns
             if abs(mais_perto - t) <= tolerancia_ns:
                 n += n_veiculos(det[mais_perto])
         resultado.append((t, n))
-    return resultado
+    ts_ref = listas[ref][0]
+    for cam, (ts, det) in listas.items():
+        if cam == ref:
+            continue
+        for t in ts:
+            i = bisect.bisect_left(ts_ref, t)
+            if all(abs(ts_ref[j] - t) > tolerancia_ns for j in (i - 1, i) if 0 <= j < len(ts_ref)):
+                resultado.append((t, n_veiculos(det[t])))
+    return sorted(resultado)
 
 
 def estatisticas(lista_dados, gamas=None):
