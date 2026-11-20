@@ -2,6 +2,8 @@ ARG BASE_IMAGE=ros:jazzy-ros-base
 FROM ${BASE_IMAGE}
 SHELL ["/bin/bash", "-c"]
 
+ARG ONNX_PKG=onnxruntime
+
 # Instalar ROS, driver da câmara e dependências para Python e OpenCV
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-usb-cam \
@@ -15,9 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Instalar os requisitos de processamento
+# Instalar requisitos (ignora qualquer linha onnxruntime* do requirements.txt e usa ONNX_PKG)
 COPY requirements.txt /tmp/
-RUN pip install -r /tmp/requirements.txt
+RUN grep -Ev '^[[:space:]]*onnxruntime' /tmp/requirements.txt > /tmp/req_base.txt \
+    && pip install --no-cache-dir -r /tmp/req_base.txt "${ONNX_PKG}"
 
 # Configurar o entrypoint do ROS
 RUN printf '%s\n' '#!/bin/bash' 'set -e' \

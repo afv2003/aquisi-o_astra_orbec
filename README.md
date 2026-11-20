@@ -1,19 +1,20 @@
 # Aquisição e Processamento de Imagem em ROS 2 (Jazzy)
 
-Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e 8) em ROS 2 Jazzy, visualização em tempo real no RViz2 e gravação automática em formato ROS bag (`.mcap`), acompanhado de scripts em Python/OpenCV para processamento offline: correção da distorção da lente, deteção de objetos (YOLO), deteção de linhas da estrada (CLRNet) e deteção da estrada, ou área circulável (YOLOP).
+Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e 8) em ROS 2 Jazzy, com dois modos de operação: **gravação offline** (RViz2 + gravação dos vídeos em ROS bag `.mcap`, processados depois em Python/OpenCV) e **processamento online em tempo real** dentro do próprio Docker (com deteção automática de CPU ou GPU NVIDIA e gravação dos resultados em JSON). Os três modelos de deteção correm todos em formato ONNX (`onnxruntime`), sem necessidade de `ultralytics` nem PyTorch: deteção de objetos (YOLOv8n), linhas da estrada (CLRNet) e área circulável / estrada (YOLOP).
 
 | Secção | O quê | Onde |
 |---|---|---|
-| 1 | Aquisição (gravar bags) | Linux, com Docker |
+| 1 | Aquisição (gravar bags com vídeo bruto) | Linux, com Docker |
 | 2 | Processamento offline dos bags | Windows, Linux ou macOS, com `venv` |
 | 3 | Calibração das câmaras | Windows |
 | 4 | Deteção de linhas da estrada (CLRNet, modelo já incluído) | dentro do processamento |
 | 5 | Deteção de objetos (YOLO, modelo já incluído) | dentro do processamento |
 | 6 | Deteção da estrada (YOLOP, modelo já incluído) | dentro do processamento |
+| 7 | Processamento em tempo real / online (câmaras + deteção + gravação JSON) | Linux, com Docker (CPU ou GPU automática) |
 
 ## Pré-requisitos
-* Aquisição: Linux com Docker e Docker Compose instalados
-* Processamento e calibração: Python 3 (com suporte a `venv`)
+* Aquisição (Secção 1) e Processamento em tempo real (Secção 7): Linux com Docker e Docker Compose instalados *(opcional: placa gráfica NVIDIA + NVIDIA Container Toolkit para aceleração por GPU na Secção 7)*
+* Processamento offline (Secção 2) e calibração (Secção 3): Python 3 (com suporte a `venv`)
 
 ---
 
@@ -275,7 +276,7 @@ python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --sem-correcao  
 
 ## 4. Deteção de linhas da estrada (CLRNet)
 
-O `processar_bag.py` deteta as linhas da estrada em cada imagem, **sempre** (exceto com `-v` ou `--sem-linhas`), com o modelo **CLRNet ResNet34** treinado no conjunto de dados CULane, tal como disponibilizado pelo [UnLanedet](https://github.com/zkyntu/UnLanedet). O modelo está guardado em formato ONNX em `modelos/linhas.onnx` e corre com a biblioteca `onnxruntime` (incluída no `requirements.txt`).
+O `processar_bag.py` (e o `processar_tempo_real.py`) deteta as linhas da estrada em cada imagem com o modelo **CLRNet ResNet34** treinado no conjunto de dados CULane, tal como disponibilizado pelo [UnLanedet](https://github.com/zkyntu/UnLanedet). O modelo está guardado em formato ONNX em `modelos/linhas.onnx` e corre com a biblioteca `onnxruntime` (incluída no `requirements.txt`).
 
 > **Para usar a deteção de linhas basta a secção 4.1.** As secções 4.2 e 4.3 explicam como funciona e como o modelo foi gerado (registo do que foi feito, **não é preciso repetir**). A secção 4.4 só é precisa para gerar o modelo de novo (por exemplo, depois de o afinar).
 
@@ -392,7 +393,7 @@ O modelo foi treinado no CULane: imagens de uma câmara no carro, virada para a 
 
 ## 5. Deteção de objetos (YOLO)
 
-O `processar_bag.py` deteta objetos em cada imagem, **sempre** (exceto com `-v` ou `--sem-objetos`), com o modelo **YOLOv8n** exportado para ONNX (`modelos/objetos.onnx`). Corre com o mesmo `onnxruntime` usado nas linhas e na estrada — não precisa do `ultralytics` nem de PyTorch no `venv`.
+O `processar_bag.py` (e o `processar_tempo_real.py`) deteta objetos em cada imagem com o modelo **YOLOv8n** exportado para ONNX (`modelos/objetos.onnx`). Corre com o mesmo `onnxruntime` usado nas linhas e na estrada — não precisa do `ultralytics` nem de PyTorch no `venv` nem no Docker.
 
 ### 5.1 Utilização
 Não é preciso instalar nada além do `requirements.txt` (secção 2): o modelo `modelos/objetos.onnx` (cerca de 12,3 MB) já está incluído no repositório.
@@ -405,20 +406,20 @@ python processar_bag.py <bag>.mcap --camara 5 --classes-objetos todas           
 ```
 * No terminal aparece `Deteção de objetos: ATIVADA (YOLOv8n, GPU (CUDA), confiança mínima 0.25)` (ou `CPU`); no vídeo, cada objeto detetado aparece numa caixa da cor da sua classe, com o nome da classe e a confiança, e o painel mostra quantos foram detetados.
 * **Classes detetadas:** por omissão, só **elementos de estrada**: `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. O terminal mostra a lista usada (`Classes: ...`).
-  * Para mudar a lista de forma permanente, altere `CLASSES_ESTRADA` no início do `processar_bag.py`.
-  * Para uma só execução, use `--classes-objetos` com os nomes em inglês do COCO, separados por vírgulas e entre aspas se algum tiver espaços (`"traffic light"`). Um nome errado dá erro e mostra a lista de nomes possíveis.
+  * Para mudar a lista de forma permanente, altere `CLASSES_ESTRADA` no início do `processar_bag.py` (ou do `processar_tempo_real.py`, na secção 7).
+  * Para uma só execução offline, use `--classes-objetos` com os nomes em inglês do COCO, separados por vírgulas e entre aspas se algum tiver espaços (`"traffic light"`). Um nome errado dá erro e mostra a lista de nomes possíveis.
   * O filtro é aplicado no `objetos.py` antes do NMS: as outras classes são descartadas de imediato e não são desenhadas.
 * **`--conf-objetos`**: confiança mínima de um objeto (0.25 por omissão, padrão do YOLOv8). Por exemplo, 0.5 esconde as deteções duvidosas (como `car 0.32` em carros distantes).
 * Se o `modelos/objetos.onnx` não existir ou o `onnxruntime` não estiver instalado, o script avisa e continua sem a deteção de objetos.
 
 ### 5.2 Como funciona
 * **Modelo:** YOLOv8n ("nano"), a versão mais pequena e rápida do YOLOv8, pré-treinada no conjunto de dados COCO. Deteta as **80 classes do COCO**, entre elas `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. Foi escolhida a versão mais leve para o vídeo não ficar demasiado lento.
-* **Formato e código:** tal como as linhas (`linhas.py`) e a estrada (`estrada.py`), o YOLO corre em formato ONNX (`modelos/objetos.onnx`) através do módulo `objetos.py`, usando apenas `onnxruntime`, `numpy` e `opencv-python`. Isto permite manter o `venv` leve, sem precisar de `ultralytics` nem de PyTorch.
+* **Formato e código:** tal como as linhas (`linhas.py`) e a estrada (`estrada.py`), o YOLO corre em formato ONNX (`modelos/objetos.onnx`) através do módulo `objetos.py`, usando apenas `onnxruntime`, `numpy` e `opencv-python`. Isto permite manter o `venv` e o Docker leves, sem precisar de `ultralytics` nem de PyTorch.
 * **Pipeline no `objetos.py`:**
   1. **Pré-processamento:** redimensiona mantendo a proporção e completa com cinzento até 640×640 (*letterbox*), converte BGR → RGB e divide por 255.
   2. **Rede (ONNX):** devolve 8400 propostas, cada uma com 84 valores (4 coordenadas da caixa e a pontuação das 80 classes do COCO).
   3. **Pós-processamento:** filtra pela confiança mínima e pelas classes escolhidas, aplica NMS separado por classe (`cv2.dnn.NMSBoxes`) e converte as coordenadas para o tamanho da imagem original. Os nomes das classes são lidos dos metadados gravados no próprio ficheiro ONNX.
-* **Onde entra:** corre sobre a imagem **já corrigida** da distorção (secção 3), depois da deteção de linhas e da estrada e ainda antes de se desenhar qualquer coisa na imagem.
+* **Onde entra:** no processamento offline, corre sobre a imagem **já corrigida** da distorção (secção 3), depois da deteção de linhas e da estrada e ainda antes de se desenhar qualquer coisa na imagem.
 * **Desenho:** as caixas e as etiquetas são desenhadas pelo `visual.py`, com uma cor fixa por classe, por cima da estrada e das linhas.
 * **CPU ou GPU:** usa o mesmo `onnxruntime` / `onnxruntime-gpu` dos outros modelos (secção 2, Passo 3), com passagem automática para CPU caso a GPU falhe. O terminal mostra `Deteção de objetos: ATIVADA (YOLOv8n, GPU (CUDA), ...)` ou `CPU`.
 
@@ -428,7 +429,7 @@ Para mais precisão (e menos velocidade), pode exportar outra variante do YOLOv8
 pip install ultralytics onnx onnxslim
 python -c "from ultralytics import YOLO; YOLO('yolov8s.pt').export(format='onnx', imgsz=640, opset=17, simplify=True)"
 ```
-Depois, mova o ficheiro `.onnx` gerado para `modelos/objetos.onnx` (substituindo o anterior). Não é preciso alterar código no `objetos.py` nem no `processar_bag.py`.
+Depois, mova o ficheiro `.onnx` gerado para `modelos/objetos.onnx` (substituindo o anterior). Não é preciso alterar código no `objetos.py`, no `processar_bag.py` nem no `processar_tempo_real.py`.
 
 ### 5.4 Condições de utilização e limitações
 * **Posição da câmara:** qualquer. O COCO tem fotografias tiradas de todos os ângulos, por isso o YOLO não exige a câmara virada para a frente (ao contrário da deteção de linhas).
@@ -438,13 +439,13 @@ Depois, mova o ficheiro `.onnx` gerado para `modelos/objetos.onnx` (substituindo
 * **Luz:** pouca luz, contraluz e reflexos pioram a deteção.
 * O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
 * Só conhece as 80 classes do COCO, e por omissão mostra apenas as de estrada (secção 5.1). Não deteta, por exemplo, sinais de trânsito além do `stop sign`, nem marcas no chão (essas são tratadas pela deteção de linhas, secção 4). Para outros sinais seria preciso outro modelo, treinado com eles.
-* Os resultados não são gravados: apenas mostrados no vídeo.
+* No processamento offline (`processar_bag.py`), os resultados são apenas mostrados no vídeo; para gravar as deteções em tempo real num bag `.mcap`, use o modo online (secção 7).
 
 ---
 
 ## 6. Deteção da estrada (YOLOP)
 
-O `processar_bag.py` deteta em cada imagem a **área circulável** (a estrada por onde o veículo pode seguir) e pinta-a de verde, **sempre** (exceto com `-v` ou `--sem-estrada`). Usa o **YOLOP** em ONNX (`modelos/estrada.onnx`), com o mesmo `onnxruntime` usado nos objetos e nas linhas: não é preciso instalar nada além do `requirements.txt`.
+O `processar_bag.py` (e o `processar_tempo_real.py`) deteta em cada imagem a **área circulável** (a estrada por onde o veículo pode seguir) e pinta-a de verde. Usa o **YOLOP** em ONNX (`modelos/estrada.onnx`), com o mesmo `onnxruntime` usado nos objetos e nas linhas: não é preciso instalar nada além do `requirements.txt`.
 
 ### 6.1 Utilização
 ```bash
@@ -461,7 +462,7 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 * **Ficheiro:** `modelos/estrada.onnx` é o `weights/yolop-640-640.onnx` publicado pelos autores do YOLOP, copiado sem alterações (entrada 640x640). Não foi preciso exportar nada.
 * **Pré-processamento** (igual ao `test_onnx.py` do YOLOP): a imagem é reduzida mantendo a proporção (640x480 fica igual) e completada com cinzento até 640x640; depois, RGB, divide por 255 e normaliza com a média e o desvio do ImageNet.
 * **Pós-processamento:** em cada píxel fica a classe mais provável (estrada ou não), retira-se a parte cinzenta e a máscara volta ao tamanho da imagem.
-* **Ordem:** corre sobre a imagem já corrigida da distorção e **antes** de se desenhar qualquer coisa (caixas do YOLO, linhas), para os desenhos não confundirem o modelo.
+* **Ordem:** corre antes de se desenhar qualquer coisa (caixas do YOLO, linhas), para os desenhos não confundirem o modelo.
 * **Saída usada:** `drive_area_seg`, 2 canais (não estrada, estrada) de 640x640, cada um com uma pontuação de 0 a 1 por píxel.
 * **Código:** `estrada.py`, com a mesma estrutura do `linhas.py` e do `objetos.py` (os três modelos partilham o mesmo motor `onnxruntime`: GPU se houver, CPU se não houver ou se a GPU falhar).
 
@@ -471,6 +472,165 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 * Funciona sem linhas pintadas, em cruzamentos e de noite, ao contrário da deteção de linhas; mas não diz em que faixa o veículo vai (isso é a deteção de linhas, secção 4).
 * As bordas da área são aproximadas (alguns píxeis), e a máscara pode "falhar" em sombras fortes ou em pisos muito diferentes do habitual (empedrado, terra).
 * O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
+
+---
+
+## 7. Processamento em Tempo Real / Online (Em Docker)
+
+Ao contrário das secções 1 e 2 (onde primeiro se grava o vídeo bruto e depois se processa offline num `venv`), este modo **capta a imagem das câmaras Astra, corre os três modelos de deteção em tempo real dentro do próprio Docker, mostra o vídeo anotado ao vivo e grava um ROS bag leve só com os dados das deteções em JSON**.
+
+Não precisa de ter ROS 2, Python, PyTorch nem `ultralytics` instalados no computador: tudo corre dentro dos contentores Docker através dos módulos ONNX (`objetos.py`, `linhas.py` e `estrada.py`).
+
+### Ficheiros e como funcionam
+* `Dockerfile_realtime_inter`: cria uma imagem Docker com ROS 2 Jazzy, o driver `usb_cam`, as bibliotecas do sistema para OpenCV e um ambiente Python (`/opt/venv`) instalado a partir do `requirements.txt` (sem `ultralytics` nem PyTorch). Recebe o argumento `ONNX_PKG` (por omissão `onnxruntime`, em CPU) para instalar automaticamente apenas a versão certa para o computador (CPU ou GPU).
+* `compose_realtime_inter.yaml`: configuração base do Docker Compose (sempre compatível com CPU) que lança 4 serviços na mesma rede:
+  * `driver_camara5` e `driver_camara8`: drivers `usb_cam` que publicam `/camara5/image_raw` e `/camara8/image_raw`;
+  * `processador`: corre o `processar_tempo_real.py` dentro do Docker (com a pasta atual montada em `/workspace`);
+  * `gravador_bag`: grava em `./data_realtime_inter/realtime_<data_hora>/` um ficheiro `.mcap` apenas com os tópicos JSON das deteções das câmaras ativas.
+* `compose_realtime_gpu.yaml`: ficheiro complementar (apenas algumas linhas) que dá acesso da placa gráfica NVIDIA ao contentor `processador`. **Não precisa de o editar**: é carregado automaticamente pelo `processar_inter.sh` apenas quando o PC tem GPU NVIDIA pronta para Docker.
+* `processar_inter.sh`: script que deve usar sempre para arrancar o sistema. Associa as câmaras (5 e/ou 8) aos `/dev/video`, **deteta automaticamente se deve usar GPU NVIDIA ou CPU** (por omissão usa CPU se não houver GPU configurada), aceita a opção `-i` (`--sem-interface`) para correr sem janelas gráficas, constrói a imagem se houver alterações e lança todos os contentores.
+* `processar_tempo_real.py`: nó ROS 2 que recebe as imagens das câmaras, corre os três modelos ONNX (`objetos.py`, `linhas.py`, `estrada.py`), desenha com `visual.py`, abre uma janela de vídeo por câmara (exceto no modo `-i`) e publica dois tópicos por câmara:
+  * `/camara<N>/processamento/dados_deteccoes` (`std_msgs/String` em formato JSON);
+  * `/camara<N>/processamento/imagem_anotada` (`sensor_msgs/Image`, imagem BGR com o desenho).
+
+### Passo 0: Preparar a GPU NVIDIA no Docker (Opcional — apenas se tiver placa NVIDIA)
+O sistema funciona **em CPU por omissão** em qualquer PC com Linux e Docker — se não tiver placa NVIDIA, salte diretamente para o **Passo 1**.
+
+Se o seu PC tem uma placa gráfica NVIDIA e quer usar aceleração por GPU em tempo real, o Docker precisa do **NVIDIA Container Toolkit** instalado (faz-se apenas uma vez no computador):
+
+1. **Verifique se o PC tem driver NVIDIA e se o Docker já o reconhece:**
+   ```bash
+   nvidia-smi
+   docker info | grep -i nvidia
+   ```
+   * Se o segundo comando já mostrar `Runtimes: ... nvidia`, está pronto — avance para o **Passo 1**.
+   * Se `nvidia-smi` funcionar mas `docker info | grep -i nvidia` não mostrar nada, siga os passos 2 a 4 abaixo.
+
+2. **Adicione o repositório oficial da NVIDIA (Ubuntu/Debian):**
+   ```bash
+   sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg2
+   curl -fsSL [https://nvidia.github.io/libnvidia-container/gpgkey](https://nvidia.github.io/libnvidia-container/gpgkey) | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+   curl -s -L [https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list](https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list) | \
+     sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+     sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+   ```
+
+3. **Instale o toolkit e ative o runtime no Docker:**
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y nvidia-container-toolkit
+   sudo nvidia-ctk runtime configure --runtime=docker
+   sudo systemctl restart docker
+   ```
+
+4. **Confirme que ficou ativo:**
+   ```bash
+   docker info | grep -i nvidia
+   ```
+   Deve aparecer `nvidia` na linha `Runtimes:`. A partir daqui, o `processar_inter.sh` deteta automaticamente a placa NVIDIA e a versão CUDA (CUDA 13+ usa `onnxruntime-gpu[cuda,cudnn]`; CUDA 12.x usa `onnxruntime-gpu[cuda,cudnn]<1.27`).
+
+### Passo 1: Ligar as câmaras e confirmar os `/dev/video`
+1. Ligue as câmaras Astra ao computador **antes** de arrancar o script (se ligar as duas, use portas USB de lados diferentes do portátil para evitar falta de largura de banda USB).
+2. Confirme que os dispositivos existem:
+   ```bash
+   ls /dev/video*
+   ```
+   Por omissão o script usa `/dev/video2` para a 1.ª câmara indicada e `/dev/video4` para a 2.ª. Se as suas câmaras ficarem noutros números, pode indicá-los ao arrancar (exemplo: `DEVS_VIDEO="/dev/video4 /dev/video6" bash processar_inter.sh 5 8`).
+
+### Passo 2: Autorizar o Docker a abrir janelas no ecrã (Uma vez por arranque do PC)
+Tal como na Secção 1, dê permissão para que as janelas de vídeo do OpenCV consigam abrir no ecrã *(se executar com `-i` para correr sem interface gráfica, este passo não é necessário)*:
+```bash
+xhost +local:root
+```
+
+### Passo 3: Iniciar o processamento em tempo real
+Abra o terminal na pasta do projeto e lance o `processar_inter.sh` indicando as câmaras pela ordem dos dispositivos `/dev/video`:
+```bash
+bash processar_inter.sh 5 8              # câmara 5 em /dev/video2, câmara 8 em /dev/video4
+bash processar_inter.sh 8 5              # se estiverem ao contrário
+bash processar_inter.sh 5                # apenas a câmara 5 em /dev/video2
+bash processar_inter.sh 5 8 -i           # sem interface gráfica (corre apenas no terminal/fundo)
+bash processar_inter.sh 5 -i             # apenas a câmara 5, sem interface gráfica
+USAR_GPU=0 bash processar_inter.sh 5 8   # forçar CPU mesmo num PC com GPU NVIDIA
+```
+* **Deteção automática de hardware:** logo no início, o terminal indica o que escolheu, por exemplo:
+  * `Hardware detetado: GPU NVIDIA (CUDA 13) -> onnxruntime-gpu[cuda,cudnn]`
+  * `Hardware detetado: CPU -> onnxruntime`
+  * ou `Hardware: GPU NVIDIA encontrada, mas falta o NVIDIA Container Toolkit no Docker -> a usar CPU` (neste caso, siga o Passo 0 se quiser usar a GPU).
+* **Na 1.ª vez** (ou quando alterna entre CPU e GPU), o Docker constrói a imagem e descarrega as bibliotecas Python (pode demorar alguns minutos, sobretudo com `onnxruntime-gpu[cuda,cudnn]`). Nas execuções seguintes, usa a cache do Docker e arranca em poucos segundos.
+* **Confirme no terminal** que os três modelos carregaram no dispositivo esperado:
+  ```text
+  Objetos (YOLOv8n): GPU (CUDA)
+  Linhas  (CLRNet):  GPU (CUDA)
+  Estrada (YOLOP):   GPU (CUDA)
+  ```
+  *(ou `CPU`, se estiver a correr sem GPU).*
+* Por omissão, abre uma janela OpenCV independente por cada câmara ativa (`Tempo Real - Camara 5`, `Tempo Real - Camara 8`) com a estrada, linhas e objetos desenhados ao vivo. Com a opção `-i` (ou `--sem-interface`), não abre janelas gráficas, mantendo o processamento, a publicação dos tópicos ROS e a gravação do `.mcap` a funcionar normalmente.
+* Passados 4 segundos, o `gravador_bag` começa automaticamente a gravar as deteções em `data_realtime_inter/realtime_AAAAMMDD_HHMMSS/`.
+
+### Passo 4: Terminar e guardar a gravação
+1. Para fechar, prima **`Q`** (ou `ESC`) na janela do vídeo ou prima **`Ctrl + C`** (apenas uma vez) no terminal *(no modo `-i`, sem interface, use `Ctrl + C`)*.
+2. Aguarde alguns segundos para o Docker encerrar os contentores em segurança e gravar o índice final do ficheiro `.mcap`.
+3. Os resultados ficam guardados na pasta `./data_realtime_inter/realtime_<data_hora>/`.
+
+### O que é gravado nos bags (`data_realtime_inter/`)
+Para evitar ficheiros gigantescos (como os 2 GB/min do vídeo bruto na Secção 1), o `gravador_bag` grava **apenas** os tópicos `/camara<N>/processamento/dados_deteccoes`. Cada mensagem é uma string JSON com esta estrutura:
+```json
+{
+  "objetos": [
+    {"classe": "car", "confianca": 0.87, "caixa": [120, 210, 290, 340]}
+  ],
+  "linhas": [
+    [[180.5, 479.0], [215.2, 420.0]]
+  ],
+  "estrada_percentagem": 0.34
+}
+```
+* As classes detetadas pelo YOLO em tempo real são, por omissão, as mesmas 8 classes de estrada do `processar_bag.py` (`CLASSES_ESTRADA` no topo do `processar_tempo_real.py`). Para detetar as 80 classes do COCO, altere essa linha para `CLASSES_ESTRADA = None`. Como a pasta do projeto está montada em `/workspace`, **não precisa de reconstruir a imagem Docker** quando edita ficheiros `.py`.
+* **Nota:** ao contrário do `processar_bag.py` (offline), o `processar_tempo_real.py` atual processa diretamente a imagem publicada pelo driver da câmara, sem aplicar a correção de distorção da lente (Secção 3).
+
+### Testar o build e os modelos sem câmaras ligadas (Opcional)
+Se quiser confirmar que o Docker constrói bem e que os três modelos ONNX correm em GPU ou CPU **sem ter as câmaras ligadas**:
+
+1. **Construir apenas a imagem:**
+   ```bash
+   # Para testar com GPU NVIDIA (CUDA 13+):
+   ONNX_PKG="onnxruntime-gpu[cuda,cudnn]" docker compose -f compose_realtime_inter.yaml build processador
+
+   # Para testar com GPU NVIDIA (CUDA 12.x):
+   ONNX_PKG="onnxruntime-gpu[cuda,cudnn]<1.27" docker compose -f compose_realtime_inter.yaml build processador
+
+   # Para testar em CPU:
+   docker compose -f compose_realtime_inter.yaml build processador
+   ```
+
+2. **Testar os três modelos numa imagem preta dentro do contentor:**
+   ```bash
+   # Teste em GPU (se construiu com onnxruntime-gpu e tem o toolkit NVIDIA ativo):
+   docker compose -f compose_realtime_inter.yaml -f compose_realtime_gpu.yaml run --rm --no-deps processador python3 -c "
+   import numpy as np, rclpy, objetos, linhas, estrada, visual
+   img = np.zeros((480, 640, 3), dtype=np.uint8)
+   for nome, det in [('Objetos', objetos.DetetorObjetos()), ('Linhas', linhas.DetetorLinhas()), ('Estrada', estrada.DetetorEstrada())]:
+       det.detetar(img)
+       print(f'{nome}: {det.dispositivo}')
+   "
+
+   # Teste em CPU (retira apenas o "-f compose_realtime_gpu.yaml"):
+   docker compose -f compose_realtime_inter.yaml run --rm --no-deps processador python3 -c "
+   import numpy as np, rclpy, objetos, linhas, estrada, visual
+   img = np.zeros((480, 640, 3), dtype=np.uint8)
+   for nome, det in [('Objetos', objetos.DetetorObjetos()), ('Linhas', linhas.DetetorLinhas()), ('Estrada', estrada.DetetorEstrada())]:
+       det.detetar(img)
+       print(f'{nome}: {det.dispositivo}')
+   "
+   ```
+   Deve imprimir `Objetos`, `Linhas` e `Estrada` com `GPU (CUDA)` (ou `CPU`), sem erros. Os avisos `The "CAMARAS_ATIVAS" variable is not set` e `Found orphan containers (extract-rviz-1)` são normais quando se corre o `docker compose` diretamente fora do `processar_inter.sh`.
+
+### Problemas comuns (Secção 7)
+* **`cannot open display` ou erro de janela gráfica:** esqueceu-se de executar `xhost +local:root` antes de lançar o script (Passo 2), ou pode adicionar `-i` ao comando se não precisar de abrir a interface gráfica.
+* **`could not select device driver "nvidia"`:** tentou usar `compose_realtime_gpu.yaml` sem o *NVIDIA Container Toolkit* instalado/configurado (ver Passo 0). Se usar sempre `bash processar_inter.sh`, o script deteta isto sozinho e arranca em CPU sem dar erro.
+* **Os modelos arrancam em `CPU` num PC com GPU:** confirme se correu `nvidia-smi` e `docker info | grep -i nvidia` (Passo 0) e confirme que não passou `USAR_GPU=0`.
+* **Erro `FileNotFoundError` ao carregar os modelos:** confirme que a pasta `modelos/` existe na raiz do repositório com `objetos.onnx`, `linhas.onnx`, `linhas.json` e `estrada.onnx`.
 
 ---
 

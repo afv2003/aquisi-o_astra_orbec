@@ -1,0 +1,10 @@
+# Carregado automaticamente pelo processar_inter.sh quando deteta GPU NVIDIA + NVIDIA Container Toolkit.
+services:
+  processador:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

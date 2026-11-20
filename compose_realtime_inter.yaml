@@ -1,7 +1,9 @@
 x-ros-realtime: &ros-realtime
-  build: 
+  build:
     context: .
     dockerfile: Dockerfile_realtime_inter
+    args:
+      ONNX_PKG: ${ONNX_PKG:-onnxruntime}
   network_mode: host
   ipc: host
 
@@ -35,6 +37,7 @@ services:
       - DISPLAY=${DISPLAY:-:0}
       - QT_X11_NO_MITSHM=1
       - CAMARAS_ATIVAS=${CAMARAS_ATIVAS}
+      - SEM_INTERFACE=${SEM_INTERFACE:-0}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - .:/workspace
