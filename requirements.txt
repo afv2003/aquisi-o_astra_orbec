@@ -1,7 +1,16 @@
 opencv-python
 numpy
 mcap-ros2-support
-ultralytics
 pyyaml
-onnxruntime
 pillow
+
+# --- Motor ONNX (escolher APENAS UMA das opções abaixo; nunca instalar as duas) ---
+
+# Opção 1: CPU (funciona em qualquer PC)
+onnxruntime
+
+# Opção 2: GPU NVIDIA (comenta a linha "onnxruntime" acima e descomenta uma destas)
+# - Drivers com CUDA 13.0+ (confirma o valor "CUDA Version" no comando: nvidia-smi):
+# onnxruntime-gpu[cuda,cudnn]
+# - Drivers mais antigos com CUDA 12.x:
+# onnxruntime-gpu[cuda,cudnn]==1.26.0

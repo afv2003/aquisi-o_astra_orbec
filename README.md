@@ -90,7 +90,7 @@ Os bags são ficheiros grandes (cerca de 2 GB por minuto) e estragam-se facilmen
 O tratamento das imagens com OpenCV ou a extração para vídeo é feito diretamente no computador através de um ambiente virtual Python (`venv`), sem necessidade de ligar a câmara ou o Docker. Funciona em **Linux e em Windows**; cada sistema precisa do seu próprio `venv` (um `venv` criado num sistema não funciona no outro).
 
 ### Passo 1: Criar o ambiente virtual `venv` (Apenas na 1.ª vez)
-Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `ultralytics`, `pyyaml`, `onnxruntime` e `pillow`):
+Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `pyyaml`, `pillow` e o motor `onnxruntime`):
 
 **Linux:**
 ```bash
@@ -106,8 +106,9 @@ venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
-* Isto instala tudo em versão de **CPU**, que funciona em qualquer PC. Para usar a GPU NVIDIA, siga depois o Passo 3.
-* **Se já instalou a versão GPU (Passo 3), não volte a correr `pip install -r requirements.txt`**: estragaria a instalação GPU (ver o aviso no Passo 3). Quando o `requirements.txt` ganhar uma biblioteca nova, instale só essa (`pip install <nome>`).
+* Por omissão, o `requirements.txt` vem configurado para **CPU** (`onnxruntime`), que funciona em qualquer PC.
+* **Para usar uma GPU NVIDIA**, o `requirements.txt` já inclui as opções respetivas comentadas (`onnxruntime-gpu[cuda,cudnn]` para drivers com CUDA 13.0+ ou `onnxruntime-gpu[cuda,cudnn]==1.26.0` para drivers com CUDA 12.x). Basta comentar a linha `onnxruntime` e descomentar a opção de GPU certa antes de instalar — veja as instruções no Passo 3.
+* **Nunca deixe `onnxruntime` e `onnxruntime-gpu` descomentados ao mesmo tempo** (nem volte a correr `pip install -r requirements.txt` com o `onnxruntime` de CPU ativo num `venv` de GPU): os dois pacotes entram em conflito e o processamento cai silenciosamente para CPU (ver o aviso no Passo 3).
 
 ### Passo 2: Como executar o programa Python (Utilização normal)
 Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado, siga esta sequência:
@@ -184,33 +185,36 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
 ### Passo 3: Desempenho (velocidade) e GPU
 No painel do vídeo aparece o tempo de cada etapa (à direita de cada deteção) e, em baixo, as imagens processadas por segundo, por exemplo `1.2 img/s · gravado a 30 img/s`; no fim, o terminal mostra a média.
 * **Em CPU, o processamento é bastante mais lento do que a gravação** (30 imagens por segundo = 33 ms por imagem). A etapa mais pesada é a deteção de linhas (CLRNet, cerca de 100 a 350 ms por imagem, conforme o processador), seguida do YOLO. O vídeo não perde imagens: só passa mais devagar.
-* **Com GPU** (medido numa NVIDIA RTX 3050 Ti Laptop, imagens de 640 px de largura): objetos cerca de 20 ms, linhas cerca de 37 ms e estrada cerca de 62 ms por imagem; com as três deteções, cerca de 7 a 8 imagens por segundo. Para ir mais depressa, desligue as deteções de que não precisa (tabela do Passo 2).
+* **Com GPU** (referência medida anteriormente numa NVIDIA RTX 3050 Ti Laptop, imagens de 640 px de largura, antes da passagem do YOLO para ONNX): objetos cerca de 20 ms, linhas cerca de 37 ms e estrada cerca de 62 ms por imagem; com as três deteções, cerca de 7 a 8 imagens por segundo. Para ir mais depressa, desligue as deteções de que não precisa (tabela do Passo 2).
 * O script espera apenas o que falta para acompanhar o ritmo da gravação; quando o processamento já é mais lento, não acrescenta espera.
-* **Para ir mais rápido, use a GPU** (opcional, no `venv`; o `requirements.txt` fica em CPU para funcionar em qualquer PC). Com GPU NVIDIA (testado numa RTX 3050 Ti Laptop):
-  * **YOLO:** PyTorch com CUDA 12 (comando de [pytorch.org](https://pytorch.org/get-started/locally/) para o seu sistema):
-    ```
-    pip uninstall -y torch torchvision
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
-    ```
-  * **Deteção de linhas:** `onnxruntime-gpu` numa versão compilada com CUDA 12 (anterior à 1.27, que já usa CUDA 13), para usar as mesmas bibliotecas CUDA que o PyTorch acima (não é preciso instalar o CUDA no sistema):
-    ```
-    pip uninstall -y onnxruntime onnxruntime-directml
-    pip install "onnxruntime-gpu<1.27"
-    ```
-  * Confirme no terminal: `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), ...)`, `Deteção de linhas: ATIVADA (..., GPU (CUDA), ...)` e `Deteção da estrada: ATIVADA (..., GPU (CUDA), ...)`.
-  > **Atenção: depois de instalar a versão GPU, não volte a correr `pip install -r requirements.txt`.** O `requirements.txt` tem o `onnxruntime` de CPU; o `pip` instala-o ao lado do `onnxruntime-gpu`, os dois ficam a usar os mesmos ficheiros e o CLRNet e o YOLOP passam a correr no CPU, sem erro nenhum (só ficam várias vezes mais lentos). Se o `requirements.txt` ganhar uma biblioteca nova, instale só essa: `pip install <nome>`.
-  * **Se ficar lento de repente** (por exemplo, linhas e estrada a mais de 150 ms por imagem com GPU):
-    1. Veja no terminal, no arranque, se as três deteções dizem `GPU` ou `CPU`.
-    2. Veja que versões do `onnxruntime` estão instaladas: `pip list | findstr onnxruntime` (Windows) ou `pip list | grep onnxruntime` (Linux).
-    3. Se aparecerem as duas (`onnxruntime` e `onnxruntime-gpu`), desinstale ambas e reinstale só a GPU (desinstalar só a de CPU pode estragar a outra, porque partilham ficheiros):
-       ```
-       pip uninstall -y onnxruntime onnxruntime-gpu
-       pip install "onnxruntime-gpu<1.27"
-       ```
-    4. Se o YOLO disser `CPU`, confirme o PyTorch: `python -c "import torch; print(torch.__version__, torch.cuda.is_available())"` deve mostrar uma versão `+cu126` e `True`; se não, repita a instalação do PyTorch acima.
-    5. Num portátil, ligue o carregador: só com bateria, a GPU fica muito mais lenta.
-  * Não use o `onnxruntime-directml`: foi testado e falhou com este modelo na RTX 3050 Ti (a GPU deixou de responder).
-  * Se a GPU falhar na deteção de linhas, o script avisa e continua em CPU; para voltar tudo ao CPU: `pip uninstall -y onnxruntime-gpu torch torchvision` e `pip install onnxruntime torch torchvision`.
+* **Para ir mais rápido, use a GPU NVIDIA** (opcional, no `venv`; o `requirements.txt` vem em CPU por omissão, com as opções de GPU já preparadas em comentário):
+  1. Confirme a versão CUDA suportada pelo driver da sua placa gráfica:
+     ```bash
+     nvidia-smi
+     ```
+     Veja o valor de `CUDA Version` no canto superior direito da tabela.
+  2. Abra o `requirements.txt`, comente a linha de CPU (`# onnxruntime`) e descomente **apenas uma** das linhas de GPU:
+     * **CUDA 13.0 ou superior:** `onnxruntime-gpu[cuda,cudnn]`
+     * **CUDA 12.x (drivers mais antigos):** `onnxruntime-gpu[cuda,cudnn]==1.26.0`
+     *(O extra `[cuda,cudnn]` instala automaticamente as bibliotecas CUDA e cuDNN via `pip`, sem ser preciso instalar o CUDA no sistema.)*
+  3. Se o `venv` ainda não existir, crie-o seguindo o Passo 1. Se já tinha instalado a versão CPU no mesmo `venv`, desinstale primeiro o `onnxruntime` antes de voltar a correr o `pip install -r requirements.txt`:
+     ```bash
+     pip uninstall -y onnxruntime onnxruntime-directml
+     pip install -r requirements.txt
+     ```
+  4. Confirme no terminal, ao arrancar o `processar_bag.py`: `Deteção de objetos: ATIVADA (YOLOv8n, GPU (CUDA), ...)`, `Deteção de linhas: ATIVADA (..., GPU (CUDA), ...)` e `Deteção da estrada: ATIVADA (..., GPU (CUDA), ...)`.
+  > **Atenção:** não deixe `onnxruntime` e `onnxruntime-gpu` ativos ao mesmo tempo no `requirements.txt`, nem corra `pip install -r requirements.txt` num `venv` de GPU depois de um `git pull` que volte a descomentar `onnxruntime`. O `pip` instala a versão de CPU ao lado da versão GPU, os dois partilham os mesmos ficheiros e os modelos passam a correr no CPU sem dar erro (só ficam várias vezes mais lentos).
+* **Se ficar lento de repente** (por exemplo, linhas e estrada a mais de 150 ms por imagem com GPU):
+  1. Veja no terminal, no arranque, se as três deteções dizem `GPU (CUDA)` ou `CPU`.
+  2. Veja que versões do `onnxruntime` estão instaladas: `pip list | findstr onnxruntime` (Windows) ou `pip list | grep onnxruntime` (Linux).
+  3. Se aparecerem as duas (`onnxruntime` e `onnxruntime-gpu`), desinstale ambas e reinstale só a versão GPU (desinstalar só a de CPU pode estragar a outra, porque partilham ficheiros):
+     ```bash
+     pip uninstall -y onnxruntime onnxruntime-gpu
+     pip install "onnxruntime-gpu[cuda,cudnn]"          # ou ==1.26.0 se o driver for CUDA 12.x
+     ```
+  4. Num portátil, ligue o carregador: só com bateria, a GPU fica muito mais lenta.
+* Não use o `onnxruntime-directml`: foi testado e falhou com o modelo de linhas na RTX 3050 Ti (a GPU deixou de responder).
+* Se a GPU falhar numa deteção, o script avisa e continua em CPU. Para voltar ao CPU de forma permanente: comente a linha `onnxruntime-gpu` no `requirements.txt`, descomente `onnxruntime`, corra `pip uninstall -y onnxruntime-gpu` e depois `pip install -r requirements.txt`.
 
 ---
 
@@ -326,12 +330,12 @@ O código do UnLanedet é clonado **fora** da pasta do repositório (para não i
 
 **Linux (Ubuntu):**
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh                 # instalar o uv (uma vez); abrir um terminal novo
-cd <pasta que contém o repositório> && git clone https://github.com/zkyntu/UnLanedet
+curl -LsSf [https://astral.sh/uv/install.sh](https://astral.sh/uv/install.sh) | sh                 # instalar o uv (uma vez); abrir um terminal novo
+cd <pasta que contém o repositório> && git clone [https://github.com/zkyntu/UnLanedet](https://github.com/zkyntu/UnLanedet)
 cd <pasta do repositório>
 uv venv --seed --python 3.10 .venv-exportar
 source .venv-exportar/bin/activate
-pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cpu
+pip install torch==2.3.1 torchvision==0.18.1 --index-url [https://download.pytorch.org/whl/cpu](https://download.pytorch.org/whl/cpu)
 pip install "setuptools<70" wheel
 pip install "numpy==1.23.1" "scipy==1.10.1" "protobuf==4.25.5"
 pip install fvcore cloudpickle omegaconf hydra-core "shapely==2.0.6" "scikit-image==0.21.0" "scikit-learn==1.3.2" "imgaug==0.4.0" p_tqdm tensorboard "timm==1.0.9" einops "opencv-python==4.8.1.78" "onnx==1.16.2" "onnxruntime==1.18.1" "numpy==1.23.1" "scipy==1.10.1" "protobuf==4.25.5"
@@ -345,11 +349,11 @@ deactivate
 ```
 pip install uv
 cd <pasta que contém o repositório>
-git clone https://github.com/zkyntu/UnLanedet
+git clone [https://github.com/zkyntu/UnLanedet](https://github.com/zkyntu/UnLanedet)
 cd <pasta do repositório>
 uv venv --seed --python 3.10 .venv-exportar
 .venv-exportar\Scripts\activate
-pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cpu
+pip install torch==2.3.1 torchvision==0.18.1 --index-url [https://download.pytorch.org/whl/cpu](https://download.pytorch.org/whl/cpu)
 pip install "setuptools<70" wheel
 pip install "numpy==1.23.1" "scipy==1.10.1" "protobuf==4.25.5"
 pip install fvcore cloudpickle omegaconf hydra-core "shapely==2.0.6" "scikit-image==0.21.0" "scikit-learn==1.3.2" "imgaug==0.4.0" p_tqdm tensorboard "timm==1.0.9" einops "opencv-python==4.8.1.78" "onnx==1.16.2" "onnxruntime==1.18.1" "numpy==1.23.1" "scipy==1.10.1" "protobuf==4.25.5"
@@ -388,10 +392,10 @@ O modelo foi treinado no CULane: imagens de uma câmara no carro, virada para a 
 
 ## 5. Deteção de objetos (YOLO)
 
-O `processar_bag.py` deteta objetos em cada imagem, **sempre** (exceto com `-v` ou `--sem-objetos`), com o modelo **YOLOv8n** da biblioteca [Ultralytics](https://github.com/ultralytics/ultralytics) (`ultralytics`, incluída no `requirements.txt`).
+O `processar_bag.py` deteta objetos em cada imagem, **sempre** (exceto com `-v` ou `--sem-objetos`), com o modelo **YOLOv8n** exportado para ONNX (`modelos/objetos.onnx`). Corre com o mesmo `onnxruntime` usado nas linhas e na estrada — não precisa do `ultralytics` nem de PyTorch no `venv`.
 
 ### 5.1 Utilização
-Não é preciso fazer nada além da secção 2: o modelo `yolov8n.pt` (cerca de 6,5 MB) já está no repositório.
+Não é preciso instalar nada além do `requirements.txt` (secção 2): o modelo `modelos/objetos.onnx` (cerca de 12,3 MB) já está incluído no repositório.
 ```bash
 python processar_bag.py <bag>.mcap --camara 5                       # com objetos (e linhas e estrada)
 python processar_bag.py <bag>.mcap --camara 5 --conf-objetos 0.5    # só objetos com confiança >= 0.5
@@ -399,28 +403,36 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-objetos         # sem objeto
 python processar_bag.py <bag>.mcap --camara 5 --classes-objetos "car,truck,traffic light"   # só estas classes
 python processar_bag.py <bag>.mcap --camara 5 --classes-objetos todas                       # as 80 classes
 ```
-* No terminal aparece `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), confiança mínima 0.25)` (ou `CPU`); no vídeo, cada objeto detetado aparece numa caixa da cor da sua classe, com o nome da classe e a confiança, e o painel mostra quantos foram detetados.
+* No terminal aparece `Deteção de objetos: ATIVADA (YOLOv8n, GPU (CUDA), confiança mínima 0.25)` (ou `CPU`); no vídeo, cada objeto detetado aparece numa caixa da cor da sua classe, com o nome da classe e a confiança, e o painel mostra quantos foram detetados.
 * **Classes detetadas:** por omissão, só **elementos de estrada**: `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. O terminal mostra a lista usada (`Classes: ...`).
   * Para mudar a lista de forma permanente, altere `CLASSES_ESTRADA` no início do `processar_bag.py`.
   * Para uma só execução, use `--classes-objetos` com os nomes em inglês do COCO, separados por vírgulas e entre aspas se algum tiver espaços (`"traffic light"`). Um nome errado dá erro e mostra a lista de nomes possíveis.
-  * O filtro é aplicado pelo próprio YOLO (opção `classes` do `ultralytics`): as outras classes não são detetadas nem desenhadas.
-* **`--conf-objetos`**: confiança mínima de um objeto (0.25 por omissão, o valor do `ultralytics`). Por exemplo, 0.5 esconde as deteções duvidosas (como `car 0.32` em carros distantes).
-* Corra o script a partir da pasta do repositório: o modelo é lido de `yolov8n.pt` nessa pasta.
-* Se a biblioteca `ultralytics` não estiver instalada, o script avisa e continua sem a deteção de objetos.
+  * O filtro é aplicado no `objetos.py` antes do NMS: as outras classes são descartadas de imediato e não são desenhadas.
+* **`--conf-objetos`**: confiança mínima de um objeto (0.25 por omissão, padrão do YOLOv8). Por exemplo, 0.5 esconde as deteções duvidosas (como `car 0.32` em carros distantes).
+* Se o `modelos/objetos.onnx` não existir ou o `onnxruntime` não estiver instalado, o script avisa e continua sem a deteção de objetos.
 
 ### 5.2 Como funciona
 * **Modelo:** YOLOv8n ("nano"), a versão mais pequena e rápida do YOLOv8, pré-treinada no conjunto de dados COCO. Deteta as **80 classes do COCO**, entre elas `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. Foi escolhida a versão mais leve para o vídeo não ficar demasiado lento.
-* **Onde entra:** corre sobre a imagem **já corrigida** da distorção (secção 3), depois da deteção de linhas (que precisa da imagem limpa, sem caixas desenhadas).
-* **Desenho:** as caixas e as etiquetas são desenhadas pelo `visual.py` (não pelo `ultralytics`), com uma cor fixa por classe, por cima da estrada e das linhas.
-* **Formato:** ao contrário das linhas e da estrada (ONNX), o YOLO fica em PyTorch (`yolov8n.pt`), porque o `ultralytics` já trata de tudo (pré e pós-processamento, GPU) e funciona em qualquer sistema. Passar para ONNX só compensaria para retirar o PyTorch do `venv`; isso obrigaria a escrever o pré e o pós-processamento do YOLO (como no `linhas.py`), porque o `ultralytics` continua a precisar do PyTorch mesmo com um modelo ONNX.
-* **CPU ou GPU:** o `ultralytics` usa o PyTorch, instalado com ele. Com o PyTorch normal corre em CPU; com o PyTorch com CUDA usa a GPU NVIDIA (secção 2, Passo 3). O terminal mostra `Deteção de objetos: ATIVADA (YOLOv8n, GPU (...), ...)` ou `CPU`.
+* **Formato e código:** tal como as linhas (`linhas.py`) e a estrada (`estrada.py`), o YOLO corre em formato ONNX (`modelos/objetos.onnx`) através do módulo `objetos.py`, usando apenas `onnxruntime`, `numpy` e `opencv-python`. Isto permite manter o `venv` leve, sem precisar de `ultralytics` nem de PyTorch.
+* **Pipeline no `objetos.py`:**
+  1. **Pré-processamento:** redimensiona mantendo a proporção e completa com cinzento até 640×640 (*letterbox*), converte BGR → RGB e divide por 255.
+  2. **Rede (ONNX):** devolve 8400 propostas, cada uma com 84 valores (4 coordenadas da caixa e a pontuação das 80 classes do COCO).
+  3. **Pós-processamento:** filtra pela confiança mínima e pelas classes escolhidas, aplica NMS separado por classe (`cv2.dnn.NMSBoxes`) e converte as coordenadas para o tamanho da imagem original. Os nomes das classes são lidos dos metadados gravados no próprio ficheiro ONNX.
+* **Onde entra:** corre sobre a imagem **já corrigida** da distorção (secção 3), depois da deteção de linhas e da estrada e ainda antes de se desenhar qualquer coisa na imagem.
+* **Desenho:** as caixas e as etiquetas são desenhadas pelo `visual.py`, com uma cor fixa por classe, por cima da estrada e das linhas.
+* **CPU ou GPU:** usa o mesmo `onnxruntime` / `onnxruntime-gpu` dos outros modelos (secção 2, Passo 3), com passagem automática para CPU caso a GPU falhe. O terminal mostra `Deteção de objetos: ATIVADA (YOLOv8n, GPU (CUDA), ...)` ou `CPU`.
 
 ### 5.3 Trocar de modelo
-Para mais precisão (e menos velocidade), pode trocar `yolov8n.pt` por `yolov8s.pt`, `yolov8m.pt`, etc., na linha `modelo_yolo = YOLO('yolov8n.pt')` do `processar_bag.py`; o `ultralytics` descarrega o novo modelo na primeira utilização.
+Para mais precisão (e menos velocidade), pode exportar outra variante do YOLOv8 (`yolov8s.pt`, `yolov8m.pt`, etc.) para ONNX num ambiente temporário (ou separado do `venv` principal) com `ultralytics`, `onnx` e `onnxslim`:
+```bash
+pip install ultralytics onnx onnxslim
+python -c "from ultralytics import YOLO; YOLO('yolov8s.pt').export(format='onnx', imgsz=640, opset=17, simplify=True)"
+```
+Depois, mova o ficheiro `.onnx` gerado para `modelos/objetos.onnx` (substituindo o anterior). Não é preciso alterar código no `objetos.py` nem no `processar_bag.py`.
 
 ### 5.4 Condições de utilização e limitações
 * **Posição da câmara:** qualquer. O COCO tem fotografias tiradas de todos os ângulos, por isso o YOLO não exige a câmara virada para a frente (ao contrário da deteção de linhas).
-* **Parâmetros:** confiança mínima 0.25 (ajustável com `--conf-objetos`) e imagem reduzida para 640 px de lado maior (a das Astra, 640x480, entra sem perda); são os valores por omissão do `ultralytics`.
+* **Parâmetros:** confiança mínima 0.25 (ajustável com `--conf-objetos`) e imagem reduzida para 640 px de lado maior (a das Astra, 640x480, entra sem perda); são os valores por omissão do YOLOv8.
 * **Tamanho dos objetos:** objetos pequenos ou distantes (menos de cerca de 30 px de altura) ou muito tapados são detetados pior, ou não são detetados.
 * **Classes parecidas** podem ser confundidas: por exemplo, uma carrinha pode aparecer como `truck` em vez de `car`.
 * **Luz:** pouca luz, contraluz e reflexos pioram a deteção.
@@ -432,7 +444,7 @@ Para mais precisão (e menos velocidade), pode trocar `yolov8n.pt` por `yolov8s.
 
 ## 6. Deteção da estrada (YOLOP)
 
-O `processar_bag.py` deteta em cada imagem a **área circulável** (a estrada por onde o veículo pode seguir) e pinta-a de verde, **sempre** (exceto com `-v` ou `--sem-estrada`). Usa o **YOLOP** em ONNX (`modelos/estrada.onnx`), com o mesmo `onnxruntime` da deteção de linhas: não é preciso instalar nada além do `requirements.txt`.
+O `processar_bag.py` deteta em cada imagem a **área circulável** (a estrada por onde o veículo pode seguir) e pinta-a de verde, **sempre** (exceto com `-v` ou `--sem-estrada`). Usa o **YOLOP** em ONNX (`modelos/estrada.onnx`), com o mesmo `onnxruntime` usado nos objetos e nas linhas: não é preciso instalar nada além do `requirements.txt`.
 
 ### 6.1 Utilização
 ```bash
@@ -451,7 +463,7 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 * **Pós-processamento:** em cada píxel fica a classe mais provável (estrada ou não), retira-se a parte cinzenta e a máscara volta ao tamanho da imagem.
 * **Ordem:** corre sobre a imagem já corrigida da distorção e **antes** de se desenhar qualquer coisa (caixas do YOLO, linhas), para os desenhos não confundirem o modelo.
 * **Saída usada:** `drive_area_seg`, 2 canais (não estrada, estrada) de 640x640, cada um com uma pontuação de 0 a 1 por píxel.
-* **Código:** `estrada.py`, com a mesma estrutura do `linhas.py` (GPU se houver, CPU se não houver ou se a GPU falhar).
+* **Código:** `estrada.py`, com a mesma estrutura do `linhas.py` e do `objetos.py` (os três modelos partilham o mesmo motor `onnxruntime`: GPU se houver, CPU se não houver ou se a GPU falhar).
 
 ### 6.3 Condições de utilização e limitações
 * **Câmara no veículo, virada para a frente**, como no BDD100K (câmara no tabliê). Noutras posições o resultado piora: num vídeo de teste, com a câmara num passeio virada na diagonal para uma passadeira, o modelo marcou parte do passeio como estrada.
@@ -467,5 +479,5 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 * Implementação e pesos: [UnLanedet](https://github.com/zkyntu/UnLanedet) (licença Apache 2.0).
 * Conjunto de dados de treino das linhas: CULane.
 * Deteção da estrada: [YOLOP](https://github.com/hustvl/YOLOP), Wu et al., *YOLOP: You Only Look Once for Panoptic Driving Perception* (licença MIT), treinado no BDD100K.
-* Deteção de objetos: [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (licença AGPL-3.0), pré-treinado no COCO.
+* Deteção de objetos: [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (licença AGPL-3.0), pré-treinado no COCO e utilizado em formato ONNX.
 * Verifique as condições de utilização do CULane, do BDD100K, do UnLanedet, do YOLOP e do Ultralytics antes de usar os modelos fora do contexto académico.

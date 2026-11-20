@@ -1,4 +1,4 @@
-import re
+﻿import re
 import sys
 import time
 import argparse
@@ -9,14 +9,9 @@ from mcap_ros2.reader import read_ros2_messages
 from mcap_ros2.decoder import DecoderFactory
 from mcap.reader import make_reader, NonSeekingReader
 
-# Tentar importar o YOLO
-try:
-    from ultralytics import YOLO
-except ImportError:
-    YOLO = None
-
-# Deteção de linhas da estrada (CLRNet em ONNX): módulo linhas.py, na mesma pasta deste script
+# Módulos locais (na mesma pasta deste script): todos correm em ONNX via onnxruntime
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import objetos
 import linhas
 import estrada
 import visual   # desenho dos resultados e do painel (cores fixas por modelo e por classe)
@@ -35,7 +30,7 @@ parser.add_argument("--sem-objetos", action="store_true", help="Não detetar obj
 parser.add_argument("--sem-linhas", action="store_true", help="Não detetar as linhas da estrada (CLRNet)")
 parser.add_argument("--sem-estrada", action="store_true", help="Não detetar a estrada (YOLOP)")
 parser.add_argument("--conf-objetos", type=float, default=0.25,
-                    help="Confiança mínima (0 a 1) para mostrar um objeto. Por omissão: 0.25 (a do ultralytics)")
+                    help="Confiança mínima (0 a 1) para mostrar um objeto. Por omissão: 0.25")
 parser.add_argument("--classes-objetos", type=str, default=None,
                     help="Classes do YOLO a detetar, separadas por vírgulas (ex.: \"car,truck,traffic light\"). "
                          "Por omissão: as de estrada (CLASSES_ESTRADA, no início do script). "
@@ -267,37 +262,30 @@ def corrigir_distorcao(img):
     return cv2.remap(img, m1, m2, cv2.INTER_LINEAR)
 
 # --- MODELOS: cada um é carregado só se não tiver sido desligado na linha de comandos ---
-# Objetos (YOLOv8n, ultralytics/PyTorch)
-modelo_yolo = None
+# Objetos (YOLOv8n, modelos/objetos.onnx com o onnxruntime)
+detetor_objetos = None
 if args.sem_objetos:
     print(f"Deteção de objetos: DESLIGADA ({'-v' if args.v else '--sem-objetos'})")
-elif YOLO is None:
-    print("Aviso: a biblioteca 'ultralytics' não está instalada; a deteção de objetos fica DESLIGADA. "
-          "Corre: pip install -r requirements.txt")
 else:
-    print("A carregar modelo YOLOv8n (poderá demorar um pouco na primeira vez)...")
-    modelo_yolo = YOLO('yolov8n.pt')   # versão "nano", a mais leve, para o vídeo não ficar lento
-    # Classes a detetar: nomes -> números do modelo (o YOLO só procura estas)
-    nomes_yolo = {nome: i for i, nome in modelo_yolo.names.items()}
     pedido = args.classes_objetos
     if pedido is not None and pedido.strip().lower() == "todas":
-        classes_yolo = None
+        lista_classes = None
     else:
-        lista = CLASSES_ESTRADA if pedido is None else [c.strip() for c in pedido.split(",") if c.strip()]
-        desconhecidas = [c for c in lista if c not in nomes_yolo]
-        if desconhecidas or not lista:
-            print(f"Erro: classe(s) desconhecida(s) para o YOLO: {', '.join(desconhecidas) or '(nenhuma)'}.")
-            print("Classes possíveis: " + ", ".join(modelo_yolo.names.values()))
-            sys.exit(1)
-        classes_yolo = sorted(nomes_yolo[c] for c in lista)
+        lista_classes = CLASSES_ESTRADA if pedido is None else [c.strip() for c in pedido.split(",") if c.strip()]
     try:
-        import torch
-        disp_yolo = 'GPU (' + torch.cuda.get_device_name(0) + ')' if torch.cuda.is_available() else 'CPU'
-    except Exception:
-        disp_yolo = "CPU"
-    print(f"Deteção de objetos: ATIVADA (YOLOv8n, {disp_yolo}, confiança mínima {args.conf_objetos:g})")
-    print("  Classes: " + ("todas (80 do COCO)" if classes_yolo is None
-                           else ", ".join(modelo_yolo.names[i] for i in classes_yolo)))
+        detetor_objetos = objetos.DetetorObjetos(confianca=args.conf_objetos, classes=lista_classes)
+        print(f"Deteção de objetos: ATIVADA (YOLOv8n, {detetor_objetos.dispositivo}, "
+              f"confiança mínima {args.conf_objetos:g})")
+        print("  Classes: " + ("todas (80 do COCO)" if detetor_objetos.classes_ids is None
+                               else ", ".join(detetor_objetos.nomes[i] for i in detetor_objetos.classes_ids)))
+    except ValueError as e:
+        print(f"Erro: {e}")
+        sys.exit(1)
+    except ImportError:
+        print("Aviso: a biblioteca 'onnxruntime' não está instalada; a deteção de objetos fica DESLIGADA. "
+              "Corre: pip install -r requirements.txt")
+    except FileNotFoundError as e:
+        print(f"Aviso: modelo de objetos não encontrado ({e}); a deteção de objetos fica DESLIGADA.")
 
 # Linhas da estrada (CLRNet, modelos/linhas.onnx com o onnxruntime)
 detetor_linhas = None
@@ -341,7 +329,7 @@ nome_modelo = {
 }
 
 # Estado de cada deteção durante o vídeo (as teclas O, L, E e V ligam/desligam)
-ativo = {"objetos": modelo_yolo is not None, "linhas": detetor_linhas is not None,
+ativo = {"objetos": detetor_objetos is not None, "linhas": detetor_linhas is not None,
          "estrada": detetor_estrada is not None}
 carregado = dict(ativo)
 
@@ -440,11 +428,8 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
     caixas = []   # (x1, y1, x2, y2, classe, confiança)
     if ativo["objetos"]:
         t0 = time.perf_counter()
-        resultados = modelo_yolo(frame, conf=args.conf_objetos, classes=classes_yolo, verbose=False)
+        caixas = detetor_objetos.detetar(frame)
         media("objetos", (time.perf_counter() - t0) * 1000)
-        caixas_yolo = resultados[0].boxes
-        caixas = [(*xyxy, modelo_yolo.names[int(c)], float(p)) for xyxy, c, p in
-                  zip(caixas_yolo.xyxy.tolist(), caixas_yolo.cls.tolist(), caixas_yolo.conf.tolist())]
 
     # Desenho (cores fixas, ver visual.py): estrada por baixo, linhas por cima, objetos por cima de tudo
     visual.desenhar_estrada(frame, mascara_estrada)
