@@ -6,7 +6,7 @@ Só trata da apresentação: as deteções (objetos, linhas, estrada) são feita
 chegam aqui já calculadas. Cores fixas por modelo e, nos objetos, por classe, para a mesma coisa
 ter sempre a mesma cor em todas as imagens.
 
-O texto é escrito com o Pillow (instalado com o ultralytics) e uma fonte do sistema, para ter
+O texto é escrito com o Pillow (ver requirements.txt) e uma fonte do sistema, para ter
 acentos e um aspeto mais limpo do que as fontes do OpenCV; se não houver nenhuma fonte, usa a
 fonte do Pillow.
 """
