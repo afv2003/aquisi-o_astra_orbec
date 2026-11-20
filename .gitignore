@@ -4,8 +4,10 @@ meu_ambiente/
 __pycache__/
 *.pyc
 
-# Dados recolhidos (ROS bags), vídeos gerados e vídeos de teste
+# Dados recolhidos (ROS bags), registos das deteções, vídeos gerados e vídeos de teste
 data/
+data_offline/
+data_realtime_inter/
 *.mcap
 *.mp4
 

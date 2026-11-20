@@ -138,7 +138,9 @@ def compor(img, caixas, info):
     """
     Escreve as etiquetas dos objetos e o painel de informação. info é um dicionário com:
       tempo, total (s); subtitulo (texto) e cor_subtitulo; modelos: lista de
-      (chave, nome do modelo, resultado, ms, ativo, carregado); rodape (texto).
+      (chave, nome do modelo, resultado, ms, ativo, carregado), com ms None quando não há tempo
+      (reprodução de um registo); rodape (texto); opcional: registo (texto do indicador vermelho
+      de registo no canto superior direito, ou None).
     Devolve a imagem BGR final.
     """
     imagem = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
@@ -213,7 +215,8 @@ def compor(img, caixas, info):
             dp.ellipse([x0, cy - r, x0 + 2 * r, cy + r], fill=_rgba(COR_MODELO[chave]))
             dp.text((x0 + 3 * r, cy), nome, font=f_txt, fill=(229, 231, 235, 255), anchor="lm")
             dp.text((x0 + int(88 * esc), cy), valor, font=f_val, fill=(255, 255, 255, 255), anchor="lm")
-            dp.text((x0 + barra_l, cy), f"{ms:.0f} ms", font=f_sub, fill=(156, 163, 175, 255), anchor="rm")
+            if ms is not None:
+                dp.text((x0 + barra_l, cy), f"{ms:.0f} ms", font=f_sub, fill=(156, 163, 175, 255), anchor="rm")
         else:
             dp.ellipse([x0, cy - r, x0 + 2 * r, cy + r], outline=_rgba(COR_DESLIGADO), width=max(1, int(1.5 * esc)))
             dp.text((x0 + 3 * r, cy), nome, font=f_txt, fill=_rgba(COR_DESLIGADO), anchor="lm")
@@ -223,7 +226,45 @@ def compor(img, caixas, info):
     dp.text((x0, y), rodape, font=f_sub, fill=(156, 163, 175, 255))
     imagem.paste(Image.alpha_composite(recorte, camada).convert("RGB"), zona_painel[:2])
 
+    # Indicador de registo (canto superior direito): ponto vermelho e texto, sobre fundo escuro
+    if info.get("registo"):
+        texto = info["registo"]
+        f_reg = fonte(int(13 * esc), negrito=True)
+        r = int(5 * esc)
+        tw = d.textlength(texto, font=f_reg)
+        lr, hr = int(tw + 4 * r + 2 * p), int(26 * esc)
+        zona = (largura - m - lr, m, largura - m, m + hr)
+        recorte = imagem.crop(zona).convert("RGBA")
+        camada = Image.new("RGBA", recorte.size, (0, 0, 0, 0))
+        dr = ImageDraw.Draw(camada)
+        dr.rounded_rectangle([0, 0, lr - 1, hr - 1], radius=hr // 2, fill=(15, 17, 21, 190))
+        cy = hr // 2
+        dr.ellipse([p, cy - r, p + 2 * r, cy + r], fill=(239, 68, 68, 255))
+        dr.text((p + 3 * r, cy), texto, font=f_reg, fill=(255, 255, 255, 255), anchor="lm")
+        imagem.paste(Image.alpha_composite(recorte, camada).convert("RGB"), zona[:2])
+
     return cv2.cvtColor(np.asarray(imagem), cv2.COLOR_RGB2BGR)
+
+
+def etiqueta_canto(img, texto):
+    """Pequena etiqueta escura no canto inferior direito (ex. a velocidade da reprodução). Altera img."""
+    base = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    d = ImageDraw.Draw(base)
+    largura, altura = base.size
+    esc = max(0.8, min(1.6, largura / 800))
+    f = fonte(int(12 * esc), negrito=True)
+    m, p = int(10 * esc), int(10 * esc)
+    tw = d.textlength(texto, font=f)
+    lr, hr = int(tw + 2 * p), int(22 * esc)
+    zona = (largura - m - lr, altura - m - hr, largura - m, altura - m)
+    recorte = base.crop(zona).convert("RGBA")
+    camada = Image.new("RGBA", recorte.size, (0, 0, 0, 0))
+    dc = ImageDraw.Draw(camada)
+    dc.rounded_rectangle([0, 0, lr - 1, hr - 1], radius=hr // 2, fill=(15, 17, 21, 180))
+    dc.text((lr / 2, hr / 2), texto, font=f, fill=(229, 231, 235, 255), anchor="mm")
+    base.paste(Image.alpha_composite(recorte, camada).convert("RGB"), zona[:2])
+    img[:] = cv2.cvtColor(np.asarray(base), cv2.COLOR_RGB2BGR)
+    return img
 
 
 def ecra_fim(img):

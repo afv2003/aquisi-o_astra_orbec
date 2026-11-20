@@ -1,13 +1,10 @@
-import re
 import sys
 import time
 import argparse
+import datetime
 from pathlib import Path
 import cv2
 import numpy as np
-from mcap_ros2.reader import read_ros2_messages
-from mcap_ros2.decoder import DecoderFactory
-from mcap.reader import make_reader, NonSeekingReader
 
 # Tentar importar o YOLO
 try:
@@ -19,7 +16,10 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import linhas
 import estrada
-import visual   # desenho dos resultados e do painel (cores fixas por modelo e por classe)
+import visual        # desenho dos resultados e do painel (cores fixas por modelo e por classe)
+import leitura_bag   # leitura dos bags e correção da distorção (também usado pelo reproduzir_registo.py)
+import registo       # registo das deteções (mesmo formato do processamento em tempo real)
+from teclado import TecladoTerminal
 
 # Classes do YOLO mostradas por omissão: só elementos de estrada (nomes do COCO, ver README, secção 5).
 # Para mudar a lista de forma permanente, altere-a aqui; para uma execução, use --classes-objetos.
@@ -56,7 +56,25 @@ parser.add_argument("--conf-linhas", type=float, default=None,
 parser.add_argument("--conf-estrada", type=float, default=None,
                     help="Confiança mínima (0.5 a 1) para um píxel ser estrada. Por omissão: a classe mais "
                          "provável (como no YOLOP). Valores mais altos marcam menos área")
+parser.add_argument("--sem-interface", action="store_true",
+                    help="Não mostrar o vídeo: processa o mais depressa possível e mostra o progresso no "
+                         "terminal (as teclas R, Espaço e Q funcionam no terminal)")
+parser.add_argument("--trechos", type=str, default=None,
+                    help="Registar estes trechos, em segundos desde o início do bag, ex.: \"10-20,35.5-50,60-\" "
+                         "(\"60-\" = do segundo 60 até ao fim). Sem esta opção, os trechos marcam-se com a tecla R")
+parser.add_argument("--registar-tudo", action="store_true",
+                    help="Registar o vídeo todo (o mesmo que --trechos 0-)")
+parser.add_argument("--pasta-registo", type=str, default="data_offline",
+                    help="Pasta onde os registos são guardados (por omissão: data_offline)")
 args = parser.parse_args()
+if args.registar_tudo:
+    args.trechos = "0-"
+trechos_pedidos = None
+if args.trechos:
+    try:
+        trechos_pedidos = registo.ler_trechos_texto(args.trechos)
+    except ValueError as e:
+        parser.error(f"--trechos: {e}")
 if args.v:
     args.sem_objetos = args.sem_linhas = args.sem_estrada = True
 for nome in ("conf_objetos", "conf_linhas", "conf_estrada"):
@@ -65,90 +83,14 @@ for nome in ("conf_objetos", "conf_linhas", "conf_estrada"):
         parser.error(f"--{nome.replace('_', '-')} tem de estar entre 0 e 1 (recebeu {valor})")
 
 mcap_file = Path(args.mcap_file)
-
-if not mcap_file.exists():
-    print(f"Erro: Ficheiro '{mcap_file}' não encontrado.")
-    sys.exit(1)
-
-# Um ficheiro MCAP começa sempre com estes 8 bytes; se não, está vazio, incompleto ou não é MCAP
-with open(mcap_file, "rb") as f:
-    inicio = f.read(8)
-if inicio != b"\x89MCAP0\r\n":
-    tamanho = mcap_file.stat().st_size
-    print(f"Erro: '{mcap_file}' não é um ficheiro MCAP válido ({tamanho} bytes).")
-    if tamanho < 1024:
-        print("O ficheiro está vazio: a gravação não gravou nada, ou a cópia falhou.")
+erro = leitura_bag.verificar_mcap(mcap_file)
+if erro:
+    print(f"Erro: {erro}")
     sys.exit(1)
 
 # Um MCAP tem no fim um índice (resumo), escrito quando a gravação termina corretamente.
-# Se a gravação foi interrompida (ou a cópia ficou incompleta), esse índice falta ou está
-# estragado; nesse caso o bag é lido sequencialmente, desde o início, sem o índice.
-def bag_tem_indice(caminho):
-    try:
-        with open(caminho, "rb") as f:
-            make_reader(f).get_summary()
-        return True
-    except Exception:
-        return False
-
-
-def ler_mensagens(caminho, topicos):
-    """
-    Mensagens dos tópicos indicados, em ordem de tempo.
-    * Bag com índice: os dados estão em blocos ("chunks"), cada um com um código de verificação
-      (CRC). Um bloco estragado (pontos coloridos na imagem, ou erro de leitura) é saltado e a
-      leitura continua no bloco seguinte.
-    * Bag sem índice (cortado no fim): lido sequencialmente até ao ponto onde foi cortado.
-    """
-    lidas = 0
-    if not indice_ok:
-        with open(caminho, "rb") as f:
-            leitor = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
-            try:
-                for m in read_ros2_messages(leitor, topics=topicos, log_time_order=False):
-                    lidas += 1
-                    yield m
-            except Exception as e:
-                print(f"\nAviso: o bag está cortado ou com dados estragados a partir deste ponto "
-                      f"({type(e).__name__}); foram lidas {lidas} mensagens.")
-        return
-
-    with open(caminho, "rb") as f:
-        leitor = make_reader(f, validate_crcs=True, decoder_factories=[DecoderFactory()])
-        resumo = leitor.get_summary()
-        canais = {cid for cid, c in resumo.channels.items() if c.topic in topicos}
-        blocos = sorted((c for c in resumo.chunk_indexes
-                         if not c.message_index_offsets or canais & set(c.message_index_offsets)),
-                        key=lambda c: (c.message_start_time, c.chunk_start_offset))
-        inicio, ultimo = None, -1
-        saltados, perdido_s = 0, 0.0
-        while True:
-            try:
-                for m in read_ros2_messages(leitor, topics=topicos, start_time=inicio):
-                    lidas += 1
-                    ultimo = m.log_time_ns
-                    yield m
-                break
-            except Exception as e:
-                # o bloco estragado é o primeiro que ainda não foi lido; continua-se depois dele
-                limite = max(ultimo, (inicio or 0) - 1)
-                restantes = [c for c in blocos if c.message_end_time > limite]
-                if not restantes:
-                    print(f"\nAviso: dados estragados no fim do bag ({type(e).__name__}); "
-                          f"foram lidas {lidas} mensagens.")
-                    break
-                mau = restantes[0]
-                inicio = mau.message_end_time + 1
-                saltados += 1
-                perdido_s += max(0.0, (mau.message_end_time - max(mau.message_start_time, limite)) / 1e9)
-                print(f"\nAviso: bloco estragado no bag ({type(e).__name__}); "
-                      f"saltado (cerca de {perdido_s:.1f} s perdidos até agora, {saltados} bloco(s)).")
-        if saltados:
-            print(f"\nBag com {saltados} bloco(s) estragado(s), saltado(s): cerca de {perdido_s:.1f} s "
-                  f"de vídeo em falta. O ficheiro foi danificado depois de gravado (cópia ou disco).")
-
-
-indice_ok = bag_tem_indice(mcap_file)
+# Se faltar (gravação interrompida ou cópia incompleta), o bag é lido sequencialmente, desde o início.
+indice_ok = leitura_bag.bag_tem_indice(mcap_file)
 if not indice_ok:
     print("Aviso: o bag não tem o índice no fim (gravação interrompida ou cópia incompleta). "
           "A ler as imagens sequencialmente, desde o início.")
@@ -157,24 +99,9 @@ if not indice_ok:
 # Bags novos (duas câmaras): cada câmara tem o seu tópico, /camara5/image_raw e /camara8/image_raw.
 # Bags antigos (uma câmara): tópico /image_raw; a câmara lê-se do nome da pasta (viagem_camara5_...)
 # ou de --camara.
-def topicos_do_bag(caminho):
-    try:
-        with open(caminho, "rb") as f:
-            resumo = make_reader(f).get_summary()
-        return sorted({c.topic for c in resumo.channels.values()}) if resumo else []
-    except Exception:
-        return []
-
-
-topicos = topicos_do_bag(mcap_file)
-cams_no_bag = {}
-for t in topicos:
-    m = re.fullmatch(r"/camara([0-9A-Za-z]+)/image_raw", t)
-    if m:
-        cams_no_bag[m.group(1)] = t
-
-encontradas = re.findall(r"camara([0-9A-Za-z]+?)(?=_|\.|$)", mcap_file.resolve().as_posix())
-camara_nome = encontradas[-1] if encontradas else None
+topicos = leitura_bag.topicos_do_bag(mcap_file)
+cams_no_bag = leitura_bag.camaras_no_bag(topicos)
+camara_nome = leitura_bag.camara_do_nome(mcap_file)
 
 if cams_no_bag:  # bag novo: uma ou duas câmaras, cada uma no seu tópico
     lista = " e ".join(sorted(cams_no_bag))
@@ -209,40 +136,13 @@ if args.calib is None:
 
 
 # --- CALIBRAÇÃO DA CÂMARA (correção da distorção da lente) ---
-def carregar_calibracao_yaml(caminho):
-    """Lê um camera_astra.yaml (formato ROS camera_info) -> (K, D, nova_K, (largura, altura))."""
-    import yaml
-    with open(caminho, encoding="utf-8") as f:
-        c = yaml.safe_load(f)
-    K = np.array(c["camera_matrix"]["data"], dtype=np.float64).reshape(3, 3)
-    D = np.array(c["distortion_coefficients"]["data"], dtype=np.float64)
-    P = np.array(c["projection_matrix"]["data"], dtype=np.float64).reshape(3, 4)
-    return K, D, P[:, :3], (int(c["image_width"]), int(c["image_height"]))
-
-
-def carregar_calibracao_bag(caminho_mcap):
-    """Alternativa: lê o 1.º /camera_info gravado no bag (se o usb_cam tiver calibração)."""
-    try:
-        for m in read_ros2_messages(str(caminho_mcap),
-                                    topics=['/camera_info'] + ([f'/camara{camara}/camera_info'] if camara else [])):
-            ci = m.ros_msg
-            K = np.array(ci.k, dtype=np.float64).reshape(3, 3)
-            if K[0, 0] == 0:  # usb_cam sem calibração publica zeros
-                return None
-            P = np.array(ci.p, dtype=np.float64).reshape(3, 4)
-            return K, np.array(ci.d, dtype=np.float64), P[:, :3], (ci.width, ci.height)
-    except Exception:
-        pass
-    return None
-
-
 calibracao = None
 if not args.sem_correcao:
     if Path(args.calib).exists():
-        calibracao = carregar_calibracao_yaml(args.calib)
+        calibracao = leitura_bag.carregar_calibracao_yaml(args.calib)
         origem_calib = args.calib
     else:
-        calibracao = carregar_calibracao_bag(mcap_file)
+        calibracao = leitura_bag.carregar_calibracao_bag(mcap_file, camara)
         origem_calib = "/camera_info do bag"
     if calibracao is None:
         print(f"Aviso: sem calibração ('{args.calib}' não existe e o bag não tem /camera_info). "
@@ -250,21 +150,7 @@ if not args.sem_correcao:
     else:
         print(f"Calibração carregada de: {origem_calib}")
 
-_mapas_correcao = {}
-
-
-def corrigir_distorcao(img):
-    """Remove a distorção da lente. Os mapas são calculados uma única vez por resolução."""
-    h, w = img.shape[:2]
-    if (w, h) not in _mapas_correcao:
-        K, D, nova_K, (wc, hc) = calibracao
-        if (w, h) != (wc, hc):
-            print(f"Aviso: calibração feita em {wc}x{hc} mas o bag é {w}x{h}; a escalar K.")
-            s = np.diag([w / wc, h / hc, 1.0])
-            K, nova_K = s @ K, s @ nova_K
-        _mapas_correcao[(w, h)] = cv2.initUndistortRectifyMap(K, D, None, nova_K, (w, h), cv2.CV_16SC2)
-    m1, m2 = _mapas_correcao[(w, h)]
-    return cv2.remap(img, m1, m2, cv2.INTER_LINEAR)
+corrigir_distorcao = leitura_bag.CorretorDistorcao(calibracao) if calibracao is not None else None
 
 # --- MODELOS: cada um é carregado só se não tiver sido desligado na linha de comandos ---
 # Objetos (YOLOv8n, ultralytics/PyTorch)
@@ -348,51 +234,91 @@ carregado = dict(ativo)
 # 1. Obter o tempo total lendo o índice do .mcap
 total_duration_sec = 0.0
 start_time_sec = 0.0
+start_time_ns = None
 if indice_ok:
-    try:
-        with open(mcap_file, "rb") as f:
-            reader = make_reader(f)
-            summary = reader.get_summary()
-            if summary and summary.statistics:
-                start_time_ns = summary.statistics.message_start_time
-                end_time_ns = summary.statistics.message_end_time
-                total_duration_sec = (end_time_ns - start_time_ns) / 1e9
-                start_time_sec = start_time_ns / 1e9
-    except Exception as e:
-        print(f"Aviso: Não foi possível calcular o tempo total: {e}")
+    start_time_ns, end_time_ns = leitura_bag.intervalo_do_bag(mcap_file)
+    if start_time_ns is not None:
+        total_duration_sec = (end_time_ns - start_time_ns) / 1e9
+        start_time_sec = start_time_ns / 1e9
 
 mins, secs = divmod(total_duration_sec, 60)
 print(f"A ler ROS bag sequencialmente: {mcap_file.name}")
 print(f"Tempo total do vídeo: {int(mins)}m {secs:.1f}s" if total_duration_sec > 0
       else "Tempo total do vídeo: desconhecido (o bag não tem índice)")
-print("\n--- CONTROLOS ---")
+
+# --- REGISTO DAS DETEÇÕES ---
+# Cada execução com registo é um "ensaio": uma pasta com um deteccoes.mcap (todas as imagens de
+# todos os trechos registados) e um ensaio.json (bag de origem, câmara, calibração, modelos e trechos).
+# A pasta só é criada quando começa o primeiro trecho.
+nome_viagem = mcap_file.resolve().parent.name if mcap_file.resolve().parent.name.startswith("viagem") \
+    else mcap_file.stem
+pasta_ensaio = (Path(args.pasta_registo) / nome_viagem /
+                f"camara{camara or 'X'}_{datetime.datetime.now():%Y%m%d_%H%M%S}")
+metadados = {
+    "processado_com": "processar_bag.py (offline)",
+    "criado_em": datetime.datetime.now().isoformat(timespec="seconds"),
+    "bag": {"ficheiro": str(mcap_file.resolve()), "nome": mcap_file.name,
+            "topico_imagem": None, "inicio_ns": start_time_ns,
+            "duracao_s": round(total_duration_sec, 3) if total_duration_sec else None,
+            "tamanho_bytes": mcap_file.stat().st_size},
+    "calibracao": leitura_bag.calibracao_para_dict(calibracao, origem_calib) if calibracao is not None else None,
+    "modelos": {
+        "objetos": {"nome": nome_modelo["objetos"], "carregado": carregado["objetos"],
+                    "confianca_minima": args.conf_objetos,
+                    "classes": ([modelo_yolo.names[i] for i in classes_yolo] if classes_yolo is not None
+                                else "todas") if modelo_yolo is not None else None},
+        "linhas": {"nome": nome_modelo["linhas"], "carregado": carregado["linhas"],
+                   "confianca_minima": detetor_linhas.cfg["conf_threshold"] if detetor_linhas else None,
+                   "corte_topo": detetor_linhas.cfg["corte_topo"] if detetor_linhas else None},
+        "estrada": {"nome": nome_modelo["estrada"], "carregado": carregado["estrada"],
+                    "confianca_minima": args.conf_estrada},
+    },
+    "trechos_pedidos": args.trechos,
+}
+registador = registo.Registador(pasta_ensaio, camara, metadados)
+
+com_interface = not args.sem_interface
+teclado = None
+if not com_interface:
+    teclado = TecladoTerminal()
+    if not teclado.ativo:
+        print("Aviso: a entrada do programa não é um terminal; as teclas não funcionam "
+              "(use --trechos ou --registar-tudo para registar).")
+
+print("\n--- CONTROLOS ---" + ("" if com_interface else " (teclas no terminal)"))
 print("[Espaço] : Pausar / Retomar")
-if calibracao is not None:
-    print("[C]      : Ligar / desligar a correção da distorção (para comparar)")
-if carregado["objetos"]:
-    print("[O]      : Ligar / desligar a deteção de objetos (YOLO)")
-if carregado["linhas"]:
-    print("[L]      : Ligar / desligar a deteção de linhas (CLRNet)")
-if carregado["estrada"]:
-    print("[E]      : Ligar / desligar a deteção da estrada (YOLOP)")
-if any(carregado.values()):
-    print("[V]      : Desligar todas as deteções (só vídeo) / voltar a ligá-las")
-print("[Q]      : Fechar o visualizador")
+if trechos_pedidos is None:
+    print("[R]      : Começar / terminar um trecho do registo (pode haver vários)")
+else:
+    print(f"Registo automático dos trechos: {args.trechos} s (a tecla R não é usada)")
+if com_interface:
+    if calibracao is not None:
+        print("[C]      : Ligar / desligar a correção da distorção (para comparar)")
+    if carregado["objetos"]:
+        print("[O]      : Ligar / desligar a deteção de objetos (YOLO)")
+    if carregado["linhas"]:
+        print("[L]      : Ligar / desligar a deteção de linhas (CLRNet)")
+    if carregado["estrada"]:
+        print("[E]      : Ligar / desligar a deteção da estrada (YOLOP)")
+    if any(carregado.values()):
+        print("[V]      : Desligar todas as deteções (só vídeo) / voltar a ligá-las")
+print("[Q]      : Terminar" + (" e fechar o visualizador" if com_interface else ""))
 corrigir = calibracao is not None
 
 janela_nome = "Visualizador OpenCV - Leitura em Tempo Real"
-cv2.namedWindow(janela_nome)
+if com_interface:
+    cv2.namedWindow(janela_nome)
 
 paused = False
 saiu_cedo = False
 ultimo_frame = None
 
-# Lê as mensagens à medida que o vídeo avança
 # Tempos de cada etapa (média móvel, em ms) e ritmo da gravação, para mostrar no vídeo
 tempos = {"linhas": 0.0, "estrada": 0.0, "objetos": 0.0, "total": 0.0}
 soma = {"linhas": 0.0, "estrada": 0.0, "objetos": 0.0, "total": 0.0}
 contagem = {"linhas": 0, "estrada": 0, "objetos": 0, "total": 0}   # imagens em que cada etapa correu
 t_msg_anterior = None
+t_progresso = 0.0
 
 
 def media(chave, valor_ms):
@@ -401,23 +327,39 @@ def media(chave, valor_ms):
     contagem[chave] += 1
 
 
-for msg in ler_mensagens(mcap_file, topicos_leitura):
-    t_inicio = time.perf_counter()
-    ros_msg = msg.ros_msg
-    width, height = ros_msg.width, ros_msg.height
-    
-    # Processa a cor
-    if ros_msg.encoding == 'yuv422_yuy2':
-        frame_yuv = np.frombuffer(ros_msg.data, dtype=np.uint8).reshape((height, width, 2))
-        frame = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR_YUYV)
-    elif ros_msg.encoding in ['rgb8', 'bgr8']:
-        frame = np.frombuffer(ros_msg.data, dtype=np.uint8).reshape((height, width, 3)).copy()
-        if ros_msg.encoding == 'rgb8':
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+def alternar_trecho():
+    """Tecla R: começa um trecho novo ou termina o que está a ser registado."""
+    if registador.a_registar:
+        trecho = registador.terminar_trecho()
+        if trecho:
+            print(f"\nRegisto: trecho {trecho['n']} terminado ({trecho['imagens']} imagens).")
     else:
-        continue
+        registador.iniciar_trecho()
+        print(f"\nRegisto: trecho {registador.trecho['n']} iniciado.")
 
-    # --- CORREÇÃO DA DISTORÇÃO (antes do YOLO, para trabalhar já na imagem corrigida) ---
+
+def tempo_txt(seg):
+    m_, s_ = divmod(max(0.0, seg), 60)
+    return f"{int(m_):02d}:{s_:04.1f}"
+
+
+for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
+    t_inicio = time.perf_counter()
+    frame = leitura_bag.imagem_bgr(msg.ros_msg)
+    if frame is None:
+        continue
+    height, width = frame.shape[:2]
+    t_msg = msg.log_time.timestamp()
+    if start_time_sec == 0:  # bag sem índice: conta-se a partir da primeira imagem
+        start_time_sec = t_msg
+    t_rel = t_msg - start_time_sec
+    if metadados["bag"]["topico_imagem"] is None:
+        metadados["bag"]["topico_imagem"] = msg.channel.topic
+        metadados["imagem"] = {"largura": width, "altura": height}
+        if metadados["bag"]["inicio_ns"] is None:
+            metadados["bag"]["inicio_ns"] = msg.log_time_ns
+
+    # --- CORREÇÃO DA DISTORÇÃO (antes das deteções, para trabalharem já na imagem corrigida) ---
     if corrigir:
         frame = corrigir_distorcao(frame)
 
@@ -446,75 +388,113 @@ for msg in ler_mensagens(mcap_file, topicos_leitura):
         caixas = [(*xyxy, modelo_yolo.names[int(c)], float(p)) for xyxy, c, p in
                   zip(caixas_yolo.xyxy.tolist(), caixas_yolo.cls.tolist(), caixas_yolo.conf.tolist())]
 
-    # Desenho (cores fixas, ver visual.py): estrada por baixo, linhas por cima, objetos por cima de tudo
-    visual.desenhar_estrada(frame, mascara_estrada)
-    visual.desenhar_linhas(frame, linhas_frame)
-    visual.desenhar_caixas(frame, caixas)
-
-    ultimo_frame = frame.copy()
+    # --- REGISTO: trechos automáticos (--trechos) ou marcados com a tecla R ---
+    if trechos_pedidos is not None:
+        dentro = any(a <= t_rel <= b for a, b in trechos_pedidos)
+        if dentro != registador.a_registar:
+            alternar_trecho()
+    if registador.a_registar:
+        registador.escrever(msg.log_time_ns, registo.dados_deteccoes(
+            caixas, linhas_frame, mascara_estrada, msg.log_time_ns, trecho=registador.trecho["n"],
+            corrigida=bool(corrigir), modelos_ativos=dict(ativo)))
 
     # Ritmo: intervalo entre imagens na gravação vs. tempo que o processamento demorou
-    t_msg = msg.log_time.timestamp()
     intervalo_ms = (t_msg - t_msg_anterior) * 1000 if t_msg_anterior is not None else 33.0
     intervalo_ms = intervalo_ms if 0 < intervalo_ms < 1000 else 33.0
     t_msg_anterior = t_msg
     ritmo_ms = intervalo_ms if contagem["total"] == 0 else 0.95 * ritmo_ms + 0.05 * intervalo_ms  # média, para não oscilar
     media("total", (time.perf_counter() - t_inicio) * 1000)
     img_s = 1000 / max(tempos["total"], 1e-3)
+    texto_registo = None
+    if registador.a_registar:
+        inicio_trecho = registador.trecho["inicio_ns"]
+        dur = (msg.log_time_ns - inicio_trecho) / 1e9 if inicio_trecho else 0.0
+        texto_registo = f"REGISTO  ·  trecho {registador.trecho['n']}  ·  {tempo_txt(dur)}"
 
-    # Painel no canto superior esquerdo (tempo, câmara, um marcador por modelo, desempenho)
-    if start_time_sec == 0:  # bag sem índice: conta-se a partir da primeira imagem
-        start_time_sec = t_msg
-    texto_cam = f"Câmara {camara}" if camara else "Câmara não indicada"
-    if calibracao is None:
-        subtitulo, cor_sub = f"{texto_cam}  ·  sem calibração", "#F59E0B"
-    elif corrigir:
-        subtitulo, cor_sub = f"{texto_cam}  ·  corrigida", "#9CA3AF"
+    if com_interface:
+        # Desenho (cores fixas, ver visual.py): estrada por baixo, linhas por cima, objetos por cima de tudo
+        visual.desenhar_estrada(frame, mascara_estrada)
+        visual.desenhar_linhas(frame, linhas_frame)
+        visual.desenhar_caixas(frame, caixas)
+        ultimo_frame = frame.copy()
+
+        # Painel no canto superior esquerdo (tempo, câmara, um marcador por modelo, desempenho)
+        texto_cam = f"Câmara {camara}" if camara else "Câmara não indicada"
+        if calibracao is None:
+            subtitulo, cor_sub = f"{texto_cam}  ·  sem calibração", "#F59E0B"
+        elif corrigir:
+            subtitulo, cor_sub = f"{texto_cam}  ·  corrigida", "#9CA3AF"
+        else:
+            subtitulo, cor_sub = f"{texto_cam}  ·  original (sem correção)", "#F59E0B"
+        n_obj, n_lin = len(caixas), len(linhas_frame)
+        valores = {"objetos": f"{n_obj} objeto" + ("" if n_obj == 1 else "s"),
+                   "linhas": f"{n_lin} linha" + ("" if n_lin == 1 else "s"),
+                   "estrada": f"{mascara_estrada.mean():.0%} da imagem" if mascara_estrada is not None else ""}
+        info = {"tempo": t_rel, "total": total_duration_sec,
+                "subtitulo": subtitulo, "cor_subtitulo": cor_sub,
+                "modelos": [(k, nome_modelo[k], valores[k], tempos[k], ativo[k], carregado[k])
+                            for k in ("objetos", "linhas", "estrada")],
+                "rodape": f"{img_s:.1f} img/s  ·  gravado a {1000 / ritmo_ms:.0f} img/s",
+                "registo": texto_registo}
+        frame = visual.compor(frame, caixas, info)
+        cv2.imshow(janela_nome, frame)
+
+        # Espera só o que falta para acompanhar o ritmo da gravação (nunca menos de 1 ms)
+        espera = max(1, int(intervalo_ms - (time.perf_counter() - t_inicio) * 1000))
+        key = cv2.waitKey(espera) & 0xFF
     else:
-        subtitulo, cor_sub = f"{texto_cam}  ·  original (sem correção)", "#F59E0B"
-    n_obj, n_lin = len(caixas), len(linhas_frame)
-    valores = {"objetos": f"{n_obj} objeto" + ("" if n_obj == 1 else "s"),
-               "linhas": f"{n_lin} linha" + ("" if n_lin == 1 else "s"),
-               "estrada": f"{mascara_estrada.mean():.0%} da imagem" if mascara_estrada is not None else ""}
-    info = {"tempo": t_msg - start_time_sec, "total": total_duration_sec,
-            "subtitulo": subtitulo, "cor_subtitulo": cor_sub,
-            "modelos": [(k, nome_modelo[k], valores[k], tempos[k], ativo[k], carregado[k])
-                        for k in ("objetos", "linhas", "estrada")],
-            "rodape": f"{img_s:.1f} img/s  ·  gravado a {1000 / ritmo_ms:.0f} img/s"}
-    frame = visual.compor(frame, caixas, info)
+        # Sem janela: progresso no terminal (2 vezes por segundo) e teclas lidas do terminal
+        if time.perf_counter() - t_progresso > 0.5:
+            t_progresso = time.perf_counter()
+            total_txt = f" / {tempo_txt(total_duration_sec)}" if total_duration_sec > 0 else ""
+            estado = texto_registo or "registo parado"
+            print(f"\r{tempo_txt(t_rel)}{total_txt}  ·  {img_s:.1f} img/s  ·  {estado}".ljust(70), end="", flush=True)
+        c = teclado.tecla() if teclado else None
+        key = ord(c) if c else 255
 
-    cv2.imshow(janela_nome, frame)
-
-    # Espera só o que falta para acompanhar o ritmo da gravação (nunca menos de 1 ms)
-    espera = max(1, int(intervalo_ms - (time.perf_counter() - t_inicio) * 1000))
-    key = cv2.waitKey(espera) & 0xFF
-    
     if key == ord('q') or key == 27:
         saiu_cedo = True
         break
     elif key == ord(' '):
         paused = True
-    elif key == ord('c') and calibracao is not None:
+    elif key == ord('r') and trechos_pedidos is None:
+        alternar_trecho()
+    elif key == ord('c') and calibracao is not None and com_interface:
         corrigir = not corrigir
-    elif key in (ord('o'), ord('l'), ord('e')):
+    elif key in (ord('o'), ord('l'), ord('e')) and com_interface:
         chave = {ord('o'): "objetos", ord('l'): "linhas", ord('e'): "estrada"}[key]
         if carregado[chave]:
             ativo[chave] = not ativo[chave]
-    elif key == ord('v') and any(carregado.values()):
+    elif key == ord('v') and any(carregado.values()) and com_interface:
         ligar = not any(ativo.values())   # se alguma estiver ligada, desliga todas; senão, liga todas
         ativo = {k: ligar and carregado[k] for k in ativo}
 
+    if paused and not com_interface:
+        print("\nEm pausa (Espaço para retomar, R para começar/terminar um trecho, Q para terminar).")
     while paused:
-        key_pause = cv2.waitKey(0) & 0xFF 
+        if com_interface:
+            key_pause = cv2.waitKey(0) & 0xFF
+        else:
+            c = teclado.tecla() if teclado else None
+            key_pause = ord(c) if c else 255
+            if c is None:
+                time.sleep(0.05)
         if key_pause == ord('q') or key_pause == 27:
             saiu_cedo = True
             paused = False
             break
         elif key_pause == ord(' '):
             paused = False
-            
+        elif key_pause == ord('r') and trechos_pedidos is None:
+            alternar_trecho()
+
     if saiu_cedo:
         break
+
+if not com_interface:
+    print()
+    if teclado:
+        teclado.fechar()
 
 if contagem["total"]:
     partes = [f"{k} {soma[k] / contagem[k]:.0f} ms" for k in ("objetos", "linhas", "estrada", "total")
@@ -523,14 +503,32 @@ if contagem["total"]:
     print("\nTempo médio por imagem (nas imagens em que cada deteção esteve ligada): "
           + " | ".join(partes) + f" ({img_s_media:.1f} imagens/s)")
 
-if not saiu_cedo and ultimo_frame is not None:
+# Fecha o registo (o trecho em curso termina na última imagem processada)
+registador.fechar()
+if registador.trechos:
+    n_img = sum(t["imagens"] for t in registador.trechos)
+    pasta_ensaio = registador.pasta
+    print(f"\nRegisto guardado em: {pasta_ensaio}")
+    for t in registador.trechos:
+        ini, fim = t.get("inicio_s"), t.get("fim_s")
+        intervalo = f"{ini:.1f} s a {fim:.1f} s" if ini is not None else ""
+        print(f"  trecho {t['n']}: {intervalo} ({t['imagens']} imagens)")
+    print(f"  total: {len(registador.trechos)} trecho(s), {n_img} imagens")
+    print(f"Para ver ou exportar um trecho: python reproduzir_registo.py \"{pasta_ensaio}\"")
+elif trechos_pedidos is not None:
+    print("\nNenhuma imagem dentro dos trechos pedidos; não foi criado registo.")
+
+if com_interface and not saiu_cedo and ultimo_frame is not None:
     print("\nFim do vídeo alcançado!")
     ultimo_frame = visual.ecra_fim(ultimo_frame)
     cv2.imshow(janela_nome, ultimo_frame)
-    
+
     while True:
         if (cv2.waitKey(0) & 0xFF) in [ord('q'), 27]:
             break
+elif not com_interface and not saiu_cedo:
+    print("\nFim do vídeo alcançado!")
 
-cv2.destroyAllWindows()
+if com_interface:
+    cv2.destroyAllWindows()
 print("Processamento terminado.")

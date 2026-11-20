@@ -10,6 +10,7 @@ Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e
 | 4 | Deteção de linhas da estrada (CLRNet, modelo já incluído) | dentro do processamento |
 | 5 | Deteção de objetos (YOLO, modelo já incluído) | dentro do processamento |
 | 6 | Deteção da estrada (YOLOP, modelo já incluído) | dentro do processamento |
+| 7 | Registo das deteções e vídeos dos trechos registados | dentro do processamento + `reproduzir_registo.py` |
 
 ## Pré-requisitos
 * Aquisição: Linux com Docker e Docker Compose instalados
@@ -157,7 +158,8 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
 
      * Uma deteção desligada com a tecla deixa também de ser calculada, por isso o vídeo fica mais rápido; no painel, o marcador fica vazio e aparece `desligado`.
      * Uma deteção desligada na linha de comandos nem é carregada (arranque mais rápido), e a sua tecla não faz nada.
-     * Outras teclas: **Espaço** pausa, **C** liga/desliga a correção da distorção, **Q** fecha.
+     * Outras teclas: **Espaço** pausa, **C** liga/desliga a correção da distorção, **R** começa/termina um trecho do registo (secção 7), **Q** fecha.
+   * **Sem janela:** `--sem-interface` processa sem mostrar o vídeo, o mais depressa possível, e mostra o progresso no terminal; serve sobretudo para registar (secção 7).
      * **Confiança mínima:** um número de 0 a 1. Mais alto mostra menos deteções, mas mais seguras; mais baixo mostra mais, incluindo erradas.
    * Se o `.mcap` estiver vazio (por exemplo, uma cópia que falhou), o script avisa: `não é um ficheiro MCAP válido (0 bytes)`.
    * Se a gravação foi interrompida (Docker parado à força, `Ctrl + C` duas vezes, disco cheio) ou a cópia ficou incompleta, falta o índice que o MCAP guarda no fim do ficheiro. O script avisa (`o bag não tem o índice no fim`), lê as imagens sequencialmente desde o início e para no ponto onde o ficheiro foi cortado; o tempo total aparece como desconhecido.
@@ -459,6 +461,66 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 * Funciona sem linhas pintadas, em cruzamentos e de noite, ao contrário da deteção de linhas; mas não diz em que faixa o veículo vai (isso é a deteção de linhas, secção 4).
 * As bordas da área são aproximadas (alguns píxeis), e a máscara pode "falhar" em sombras fortes ou em pisos muito diferentes do habitual (empedrado, terra).
 * O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
+
+---
+
+## 7. Registo das deteções e vídeos dos trechos registados
+
+O `processar_bag.py` pode guardar as deteções de cada imagem num ficheiro, para serem usadas depois sem voltar a correr os modelos. O formato é **o mesmo do processamento em tempo real** (`processar_tempo_real.py`, branch `novo_docker`), para os registos offline e online se lerem da mesma forma. A partir de um registo, o `reproduzir_registo.py` refaz o vídeo de qualquer trecho (no ecrã ou em `.mp4`), juntando as imagens do bag original com as deteções guardadas.
+
+### 7.1 Registar
+O registo é feito por **trechos**: só se guardam as imagens entre o início e o fim de cada trecho. Pode haver vários trechos na mesma execução; ficam todos no mesmo registo (o mesmo "ensaio").
+```bash
+python processar_bag.py <bag>.mcap --camara 5                                   # tecla R: começa/termina cada trecho
+python processar_bag.py <bag>.mcap --camara 5 --sem-interface                   # sem janela; tecla R no terminal
+python processar_bag.py <bag>.mcap --camara 5 --sem-interface --registar-tudo   # o vídeo todo, sem teclas
+python processar_bag.py <bag>.mcap --camara 5 --sem-interface --trechos "10-20,35.5-50,60-"
+```
+* **Tecla R** (com ou sem janela): a primeira vez começa um trecho, a seguinte termina-o, e assim sucessivamente. Com janela, aparece no canto superior direito o indicador vermelho `REGISTO · trecho N · tempo`; sem janela, o estado aparece na linha de progresso do terminal. Se o vídeo acabar (ou carregar em Q) com um trecho aberto, o trecho termina na última imagem processada.
+* **`--trechos`**: os trechos em segundos desde o início do bag (`60-` = do segundo 60 até ao fim). Dá sempre os mesmos trechos, ao contrário da tecla; com esta opção a tecla R não é usada. `--registar-tudo` é o mesmo que `--trechos 0-`.
+* **`--sem-interface`**: sem janela, o processamento não espera pelo ritmo da gravação (vai o mais depressa possível) e não desenha nada, por isso é a forma mais rápida de registar. As teclas são lidas do terminal (**R**, **Espaço**, **Q**). Se a entrada não for um terminal (por exemplo, num contentor sem `-it`), as teclas não funcionam e o script avisa: use `--trechos` ou `--registar-tudo`.
+* O que fica registado é o que foi calculado em cada imagem: se desligar um modelo com O/L/E, ou a correção com C, durante um trecho, o registo indica-o imagem a imagem.
+
+### 7.2 Onde fica e formato
+Cada execução com pelo menos um trecho cria uma pasta (um **ensaio**):
+```
+data_offline/<viagem>/camara<N>_<data_hora>/
+    deteccoes.mcap    as deteções de todas as imagens de todos os trechos
+    ensaio.json       bag de origem, câmara, calibração usada, modelos e limiares, e a lista de trechos
+    trecho_<N>.mp4    (só depois de exportar com o reproduzir_registo.py)
+```
+* **`deteccoes.mcap`**: um ROS bag (MCAP), como o do tempo real, com uma mensagem por imagem no tópico `/camara<N>/processamento/dados_deteccoes`, do tipo `std_msgs/msg/String`, com um JSON:
+
+  | Campo | Conteúdo | Também no tempo real |
+  |---|---|---|
+  | `objetos` | `[{"classe": "car", "confianca": 0.84, "caixa": [x1, y1, x2, y2]}, ...]` | sim |
+  | `linhas` | pontos de cada linha, `[[[x, y], ...], ...]` | sim |
+  | `estrada_percentagem` | fração da imagem que é área circulável (0 a 1) | sim |
+  | `stamp_ns` | instante da imagem no bag original (ns): é o que liga a deteção à imagem | não |
+  | `trecho` | número do trecho | não |
+  | `corrigida` | se a imagem estava corrigida da distorção (as coordenadas são dessa imagem) | não |
+  | `modelos_ativos` | que modelos correram nessa imagem | não |
+  | `estrada_contornos`, `estrada_buracos` | contorno da área circulável, para a voltar a desenhar | não |
+
+  Os campos extra não incomodam quem só lê os três primeiros. O instante de cada mensagem no MCAP é também o da imagem original (no tempo real é o instante do processamento).
+* **`ensaio.json`**: texto legível, com tudo o que é preciso para refazer os vídeos: caminho do bag, tópico da imagem, calibração usada (K, D), nomes e limiares dos modelos, e para cada trecho o início e o fim (em ns e em segundos desde o início do bag) e o número de imagens. É atualizado sempre que um trecho termina, por isso não se perde se o programa parar.
+* **Tamanho:** cerca de 3 KB por imagem (cerca de 300 MB por hora de vídeo a 30 imagens por segundo, com os três modelos ligados).
+* A pasta `data_offline/` não vai para o git (está no `.gitignore`), tal como `data/`.
+
+### 7.3 Ver ou exportar um trecho (`reproduzir_registo.py`)
+```bash
+python reproduzir_registo.py                                     # lista os registos e os seus trechos
+python reproduzir_registo.py data_offline/<viagem>/<ensaio>             # mostra todos os trechos, por ordem
+python reproduzir_registo.py data_offline/<viagem>/<ensaio> --trecho 2  # só o trecho 2 (pode repetir: --trecho 1 --trecho 3)
+python reproduzir_registo.py data_offline/<viagem>/<ensaio> --exportar  # grava trecho_<N>.mp4 na pasta do ensaio
+python reproduzir_registo.py data_offline/<viagem>/<ensaio> --exportar --sem-interface   # só grava, sem janela
+```
+* **Como funciona:** lê do bag original só as imagens entre o início e o fim de cada trecho e junta a cada uma as deteções com o mesmo instante (`stamp_ns`). Aplica a mesma correção da distorção (com a calibração guardada no `ensaio.json`) e desenha com o mesmo aspeto do `processar_bag.py` (`visual.py`). Os modelos **não** voltam a correr.
+* **Teclas:** **Espaço** pausa, **N** passa ao trecho seguinte, **Q** sai.
+* **Velocidade (só na janela):** **1** tempo real, **2** duas vezes mais lento, **3** três vezes mais lento; **-** e **+** abrandam ou aceleram em passos de 0.5x, entre 1x e 3x. A velocidade aparece no canto inferior direito. O vídeo exportado (`--exportar`) fica sempre em tempo real, qualquer que seja a velocidade escolhida.
+* **Bag original:** é procurado onde estava no processamento e em `data/<viagem>/`. Se o mudou de sítio, use `--bag <caminho do .mcap>`. O script avisa se o tamanho não for o do bag processado.
+* Os vídeos `.mp4` têm o ritmo da gravação (por exemplo, 30 imagens por segundo), qualquer que tenha sido a velocidade do processamento.
+* Os registos do tempo real (branch `novo_docker`) têm o mesmo formato de deteções, mas não guardam as imagens nem o `ensaio.json`; para os reproduzir assim, essa gravação teria de guardar também o tópico `/camara<N>/image_raw`.
 
 ---
 
