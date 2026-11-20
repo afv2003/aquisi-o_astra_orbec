@@ -355,7 +355,7 @@ for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
     t_rel = t_msg - start_time_sec
     if metadados["bag"]["topico_imagem"] is None:
         metadados["bag"]["topico_imagem"] = msg.channel.topic
-        metadados["imagem"] = {"largura": width, "altura": height}
+        registador.metadados["imagem"] = {"largura": width, "altura": height}
         if metadados["bag"]["inicio_ns"] is None:
             metadados["bag"]["inicio_ns"] = msg.log_time_ns
 
@@ -503,7 +503,16 @@ if contagem["total"]:
     print("\nTempo médio por imagem (nas imagens em que cada deteção esteve ligada): "
           + " | ".join(partes) + f" ({img_s_media:.1f} imagens/s)")
 
-# Fecha o registo (o trecho em curso termina na última imagem processada)
+# Fecha o registo (o trecho em curso termina na última imagem processada); guarda também como correu
+# o processamento (para o resumo do gui_resultados.py)
+registador.metadados["processamento"] = {
+    "imagens_processadas": contagem["total"],
+    "tempo_medio_ms": {k: round(soma[k] / contagem[k], 1) for k in ("objetos", "linhas", "estrada", "total")
+                       if contagem[k]},
+    "imagens_por_segundo": round(1000 * contagem["total"] / max(soma["total"], 1e-3), 2) if contagem["total"] else None,
+    "com_interface": com_interface,
+    "terminado_antes_do_fim": saiu_cedo,
+}
 registador.fechar()
 if registador.trechos:
     n_img = sum(t["imagens"] for t in registador.trechos)
@@ -515,6 +524,7 @@ if registador.trechos:
         print(f"  trecho {t['n']}: {intervalo} ({t['imagens']} imagens)")
     print(f"  total: {len(registador.trechos)} trecho(s), {n_img} imagens")
     print(f"Para ver ou exportar um trecho: python reproduzir_registo.py \"{pasta_ensaio}\"")
+    print("Para ver o resumo e o percurso: python gui_resultados.py")
 elif trechos_pedidos is not None:
     print("\nNenhuma imagem dentro dos trechos pedidos; não foi criado registo.")
 

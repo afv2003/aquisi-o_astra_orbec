@@ -238,3 +238,65 @@ def ler_deteccoes(caminho_mcap):
         except Exception as e:
             print(f"Aviso: o registo está incompleto ({type(e).__name__}); foram lidas {len(deteccoes)} mensagens.")
     return deteccoes
+
+
+# --------------------------------------------------------------------------- #
+# Estatísticas (resumo de um registo, ou de um trecho)
+# --------------------------------------------------------------------------- #
+VEICULOS = ("car", "motorcycle", "bicycle", "bus", "truck")   # classes do COCO contadas como veículos
+
+
+def n_veiculos(dados):
+    return sum(1 for o in dados.get("objetos", []) if o["classe"] in VEICULOS)
+
+
+def estatisticas(lista_dados, gamas=None):
+    """
+    Resumo de uma lista de mensagens de deteções (as de um trecho, ou de vários):
+      imagens; por classe do YOLO: deteções (somadas imagem a imagem), imagens com pelo menos uma,
+      máximo numa só imagem e confiança média; linhas: média por imagem e % de imagens sem linhas;
+      estrada: % média, mínima e máxima da imagem; veículos por imagem: média, máximo e, se forem
+      dadas gamas [(mín, máx, rótulo), ...], a % de imagens em cada gama.
+    Só entram nas médias de cada modelo as imagens em que esse modelo estava ligado.
+    """
+    n = len(lista_dados)
+    classes, n_obj = {}, 0
+    linhas_por_img, estrada_pct, veic = [], [], []
+    for d in lista_dados:
+        ativos = d.get("modelos_ativos") or {"objetos": True, "linhas": True, "estrada": True}
+        if ativos.get("objetos", True):
+            n_obj += 1
+            contagem = {}
+            for o in d.get("objetos", []):
+                c = classes.setdefault(o["classe"], {"deteccoes": 0, "imagens": 0, "maximo": 0, "soma_conf": 0.0})
+                c["deteccoes"] += 1
+                c["soma_conf"] += o["confianca"]
+                contagem[o["classe"]] = contagem.get(o["classe"], 0) + 1
+            for nome, k in contagem.items():
+                classes[nome]["imagens"] += 1
+                classes[nome]["maximo"] = max(classes[nome]["maximo"], k)
+            veic.append(n_veiculos(d))
+        if ativos.get("linhas", True):
+            linhas_por_img.append(len(d.get("linhas", [])))
+        if ativos.get("estrada", True):
+            estrada_pct.append(float(d.get("estrada_percentagem", 0.0)))
+    for c in classes.values():
+        c["confianca_media"] = c.pop("soma_conf") / c["deteccoes"] if c["deteccoes"] else 0.0
+        c["media_por_imagem"] = c["deteccoes"] / n_obj if n_obj else 0.0
+        c["pct_imagens"] = c["imagens"] / n_obj if n_obj else 0.0
+    res = {
+        "imagens": n,
+        "objetos": {"imagens": n_obj, "classes": dict(sorted(classes.items(), key=lambda kv: -kv[1]["deteccoes"]))},
+        "linhas": {"imagens": len(linhas_por_img),
+                   "media": float(np.mean(linhas_por_img)) if linhas_por_img else None,
+                   "pct_sem_linhas": (sum(1 for x in linhas_por_img if x == 0) / len(linhas_por_img))
+                   if linhas_por_img else None},
+        "estrada": {"imagens": len(estrada_pct),
+                    "media": float(np.mean(estrada_pct)) if estrada_pct else None,
+                    "minimo": float(np.min(estrada_pct)) if estrada_pct else None,
+                    "maximo": float(np.max(estrada_pct)) if estrada_pct else None},
+        "veiculos": {"media": float(np.mean(veic)) if veic else None, "maximo": max(veic) if veic else None},
+    }
+    if gamas and veic:
+        res["veiculos"]["gamas"] = [(rotulo, sum(1 for v in veic if a <= v <= b) / len(veic)) for a, b, rotulo in gamas]
+    return res

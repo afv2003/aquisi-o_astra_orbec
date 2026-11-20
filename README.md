@@ -11,6 +11,7 @@ Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e
 | 5 | Deteção de objetos (YOLO, modelo já incluído) | dentro do processamento |
 | 6 | Deteção da estrada (YOLOP, modelo já incluído) | dentro do processamento |
 | 7 | Registo das deteções e vídeos dos trechos registados | dentro do processamento + `reproduzir_registo.py` |
+| 8 | Janela de resultados: resumo e percurso no mapa (`gui_resultados.py`) | Windows, Linux ou macOS, com `venv` |
 
 ## Pré-requisitos
 * Aquisição: Linux com Docker e Docker Compose instalados
@@ -91,7 +92,7 @@ Os bags são ficheiros grandes (cerca de 2 GB por minuto) e estragam-se facilmen
 O tratamento das imagens com OpenCV ou a extração para vídeo é feito diretamente no computador através de um ambiente virtual Python (`venv`), sem necessidade de ligar a câmara ou o Docker. Funciona em **Linux e em Windows**; cada sistema precisa do seu próprio `venv` (um `venv` criado num sistema não funciona no outro).
 
 ### Passo 1: Criar o ambiente virtual `venv` (Apenas na 1.ª vez)
-Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `ultralytics`, `pyyaml`, `onnxruntime` e `pillow`):
+Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `ultralytics`, `pyyaml`, `onnxruntime`, `pillow`, e `customtkinter` e `tkintermapview` para a janela de resultados, secção 8):
 
 **Linux:**
 ```bash
@@ -524,10 +525,66 @@ python reproduzir_registo.py data_offline/<viagem>/<ensaio> --exportar --sem-int
 
 ---
 
+## 8. Janela de resultados (`gui_resultados.py`)
+
+Uma janela, à parte do processamento, para ver os registos feitos pelo `processar_bag.py` (secção 7):
+```bash
+python gui_resultados.py                              # registos em data_offline
+python gui_resultados.py --pasta-registo outra_pasta  # registos noutra pasta
+```
+* **Bibliotecas:** `customtkinter` (aspeto da janela) e `tkintermapview` (mapa), no `requirements.txt`. Num `venv` que já existia (sobretudo com a versão GPU, secção 2, Passo 3), instale só estas: `pip install customtkinter tkintermapview`.
+* Os registos são lidos de `data_offline`. Se a pasta não existir ou não tiver registos, a janela avisa e a tab **Percurso** fica indisponível.
+
+### 8.1 Tab Resumo
+* Escolhe-se o registo (por omissão, o mais recente) e o **trecho** (todos, ou um só); tudo o que é mostrado se refere à escolha.
+* **Vídeo e registo:** bag, câmara, duração, correção da distorção, data do processamento, trechos, e o número de imagens e a duração do que está selecionado.
+* **Modelos:** limiar de cada modelo, tempo médio por imagem, classes do YOLO e velocidade do processamento.
+* **Linhas e área circulável:** linhas por imagem e % de imagens sem linhas (CLRNet); área circulável média, mínima e máxima (YOLOP).
+* **Deteções por categoria (YOLO):** para cada classe, deteções, média por imagem, máximo numa imagem, % de imagens com a classe e confiança média. As deteções são somadas imagem a imagem (o mesmo veículo visto em 30 imagens conta 30 vezes): sem seguimento dos objetos, não se sabe quantos veículos diferentes passaram.
+* **Veículos por imagem:** média, máximo e a % de imagens em cada gama de cores do mapa (tab Percurso).
+
+### 8.2 Tab Percurso
+Sem GPS, a ligação entre o vídeo e o mapa faz-se à mão, em três passos por trecho.
+
+0. **Registo, trecho e intervalo:** escolhe-se o registo (da lista, ou noutra pasta com «Outra pasta…»), um trecho ou «Todos os trechos», e o intervalo entre referências (5 s por omissão).
+1. **Trajeto** (a forma do caminho): escrevem-se as coordenadas de início (`latitude, longitude`, por exemplo `40.6405, -8.6538`, como o Google Maps as copia) e carrega-se em **Ir**; depois clica-se no mapa ponto a ponto, pela ordem em que foi feito, com pontos suficientes para seguir as curvas. «Desfazer ponto» e «Limpar» corrigem. Arrastar move o mapa; a roda do rato aproxima.
+2. **Pontos de referência** (onde estava o carro em instantes fixos): a janela mostra a imagem do vídeo em cada instante múltiplo do intervalo, contado desde o início da gravação (5, 10, 15 s…; num trecho de 12,3 a 31,0 s: 15, 20, 25 e 30 s), e clica-se no mapa onde o carro está. O ponto é encostado ao trajeto e fica marcado com um pequeno círculo branco.
+   * **Saltar:** se não reconhecer o sítio nesse instante; os dois intervalos vizinhos juntam-se.
+   * **Pontos de curva:** se o trajeto cortar uma esquina, escolha **«Acrescentar curva»** (em cima, ao lado de «Marcar referência») e clique no mapa por onde a rua passa; o ponto entra no troço do trajeto mais perto e as referências são reencostadas. Volte a «Marcar referência» para continuar. O botão direito no mapa («Acrescentar ponto de curva ao trajeto aqui») faz o mesmo.
+   * Se o trecho for mais curto do que o intervalo, não há referências a marcar: aparece a primeira imagem do trecho e pode passar ao passo seguinte.
+   * Uma referência não pode ficar antes da anterior no trajeto; o início e o fim do trecho ficam ligados ao início e ao fim do trajeto.
+3. **Mapa, vídeo e intervalos lado a lado:** à esquerda o trajeto, ao meio o vídeo do trecho (com as deteções registadas), à direita a tabela de **intervalos** (entre referências): tempo, coordenadas da referência de início, média de veículos e drift, cada linha com o fundo da cor do intervalo e o intervalo em curso a negrito; em baixo, o resumo do trecho (distância, duração, velocidade média, veículos por imagem, referências e drift). **Run** começa e **Parar** pára; com vários trechos, passam seguidos.
+
+**Cores:** cada intervalo é pintado com a cor da **média de veículos por imagem** nesse intervalo (`car`, `motorcycle`, `bicycle`, `bus`, `truck`; pessoas e sinais não contam). A cor só aparece quando o vídeo passa por esse intervalo.
+
+| Média de veículos (arredondada) | 0 | 1–2 | 3–5 | 6 ou mais |
+|---|---|---|---|---|
+| Cor | verde | amarelo | laranja | vermelho |
+
+As gamas e as cores estão em `GAMAS_VEICULOS`, no início do `gui_resultados.py`; o intervalo por omissão em `INTERVALO_REFERENCIAS_S`.
+
+**Posição e drift:** dentro de cada intervalo, a posição parte da referência de início e avança à velocidade média do trecho (comprimento do trajeto a dividir pela duração), sem nunca passar a referência seguinte. No início do intervalo seguinte, salta para a referência seguinte. O **drift** de cada intervalo é a diferença entre onde a estimativa chegou e a referência seguinte: negativo, a estimativa ficou aquém e o troço que faltava fica **cinzento** no mapa (é o drift visível); positivo, a estimativa chegaria à referência antes do tempo (o carro foi mais devagar do que a média). Não há marcador de posição: só o trajeto pintado.
+
+**Guardar e carregar:** o trajeto e as referências guardam-se em ficheiros separados, cada um no seu passo («Guardar trajeto…» / «Carregar trajeto…» no passo 1; «Guardar referências…» / «Carregar referências…» no passo 2). Por omissão ficam na pasta do ensaio, com os nomes `trajeto_trecho<N>.json` e `referencias_trecho<N>.json`. As referências só se carregam com o mesmo intervalo com que foram marcadas; ao carregar ficheiros de outro trecho ou registo, a janela avisa.
+
+* **Internet:** o mapa (OpenStreetMap) é descarregado da internet. Sem ligação, aparece um aviso em vez do mapa, com um botão para tentar de novo.
+* **Sair da tab:** pode-se ir para o Resumo a qualquer momento; ao voltar, tudo recomeça (os ficheiros guardados servem para não repetir os cliques).
+
+---|---|---|---|---|
+   | Cor | verde | amarelo | laranja | vermelho |
+
+   As gamas e as cores estão em `GAMAS_VEICULOS`, no início do `gui_resultados.py`.
+* **Posição no percurso:** não há GPS, por isso assume-se que o percurso desenhado foi feito a velocidade constante durante o trecho (a meio do vídeo do trecho, a cor chega a meio do percurso). Não há marcador de posição: só o percurso desenhado.
+* **Internet:** o mapa (OpenStreetMap) é descarregado da internet. Sem ligação, aparece um aviso em vez do mapa, com um botão para tentar de novo.
+* **Sair da tab:** pode-se ir para o Resumo a qualquer momento; ao voltar, tudo recomeça (registo, trecho, coordenadas e percurso).
+
+---
+
 ## Créditos
 * CLRNet: Zheng et al., *CLRNet: Cross Layer Refinement Network for Lane Detection*, CVPR 2022.
 * Implementação e pesos: [UnLanedet](https://github.com/zkyntu/UnLanedet) (licença Apache 2.0).
 * Conjunto de dados de treino das linhas: CULane.
 * Deteção da estrada: [YOLOP](https://github.com/hustvl/YOLOP), Wu et al., *YOLOP: You Only Look Once for Panoptic Driving Perception* (licença MIT), treinado no BDD100K.
+* Mapa da janela de resultados: [OpenStreetMap](https://www.openstreetmap.org/copyright) (© contribuidores do OpenStreetMap), com o [TkinterMapView](https://github.com/TomSchimansky/TkinterMapView); janela com o [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter).
 * Deteção de objetos: [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (licença AGPL-3.0), pré-treinado no COCO.
 * Verifique as condições de utilização do CULane, do BDD100K, do UnLanedet, do YOLOP e do Ultralytics antes de usar os modelos fora do contexto académico.

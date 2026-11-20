@@ -18,12 +18,11 @@ import time
 from pathlib import Path
 
 import cv2
-import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import leitura_bag
 import registo
 import visual
+from reproducao import Reproducao, ErroRegisto
 
 parser = argparse.ArgumentParser(description="Refaz o vídeo de um registo de deteções do processar_bag.py.")
 parser.add_argument("ensaio", nargs="?", default=None,
@@ -73,16 +72,13 @@ if args.ensaio is None:
     print("\nPara ver um registo: python reproduzir_registo.py <pasta> [--trecho N] [--exportar]")
     sys.exit(0)
 
-# --- Ler o ensaio e as deteções ---
-pasta = registo.pasta_do_ensaio(args.ensaio)
-ensaio = registo.ler_ensaio(pasta)
-if ensaio is None:
-    print(f"Erro: '{pasta}' não tem ensaio.json (não é uma pasta de registo do processar_bag.py).")
+# --- Ler o ensaio, as deteções e encontrar o bag original (reproducao.py) ---
+try:
+    rep = Reproducao(args.ensaio, bag=args.bag)
+except ErroRegisto as e:
+    print(f"Erro: {e}")
     sys.exit(1)
-trechos = ensaio.get("trechos", [])
-if not trechos:
-    print("Erro: o registo não tem trechos.")
-    sys.exit(1)
+pasta, ensaio, trechos = rep.pasta, rep.ensaio, rep.trechos
 if args.trecho:
     pedidos = set(args.trecho)
     desconhecidos = pedidos - {t["n"] for t in trechos}
@@ -91,44 +87,11 @@ if args.trecho:
         descrever_trechos(ensaio)
         sys.exit(1)
     trechos = [t for t in trechos if t["n"] in pedidos]
-
-deteccoes = registo.ler_deteccoes(pasta / ensaio.get("ficheiro_deteccoes", "deteccoes.mcap"))
 print(f"Registo: {pasta}")
-print(f"  {len(deteccoes)} imagens com deteções; trechos a mostrar: {', '.join(str(t['n']) for t in trechos)}")
-
-# --- Encontrar o bag original ---
-candidatos = [Path(args.bag)] if args.bag else [
-    Path(ensaio["bag"]["ficheiro"]),                                   # onde estava no processamento
-    Path("data") / Path(ensaio["bag"]["ficheiro"]).parent.name / ensaio["bag"]["nome"],   # data/<viagem>/
-]
-bag = next((c for c in candidatos if c.exists()), None)
-if bag is None:
-    print("Erro: não encontrei o bag original. Procurei em:")
-    for c in candidatos:
-        print(f"  {c}")
-    print("Indique onde está com --bag <caminho do .mcap>.")
-    sys.exit(1)
-erro = leitura_bag.verificar_mcap(bag)
-if erro:
-    print(f"Erro: {erro}")
-    sys.exit(1)
-tamanho = ensaio["bag"].get("tamanho_bytes")
-if tamanho and bag.stat().st_size != tamanho:
-    print(f"Aviso: o bag '{bag}' não tem o mesmo tamanho que o processado ({tamanho} bytes); "
-          "pode não ser o mesmo ficheiro.")
-print(f"  bag original: {bag}")
-indice_ok = leitura_bag.bag_tem_indice(bag)
-topico = ensaio["bag"]["topico_imagem"]
-inicio_bag_ns = ensaio["bag"].get("inicio_ns") or min(t["inicio_ns"] for t in ensaio["trechos"])
-duracao_bag = ensaio["bag"].get("duracao_s") or 0.0
-
-corretor = None
-if ensaio.get("calibracao"):
-    corretor = leitura_bag.CorretorDistorcao(leitura_bag.calibracao_de_dict(ensaio["calibracao"]))
-modelos = ensaio.get("modelos", {})
-nome_modelo = {k: modelos.get(k, {}).get("nome", k) for k in ("objetos", "linhas", "estrada")}
-carregado = {k: bool(modelos.get(k, {}).get("carregado", True)) for k in ("objetos", "linhas", "estrada")}
-camara = ensaio.get("camara")
+print(f"  {len(rep.deteccoes)} imagens com deteções; trechos a mostrar: {', '.join(str(t['n']) for t in trechos)}")
+if rep.aviso_tamanho:
+    print(f"Aviso: o bag '{rep.bag}' não tem o mesmo tamanho que o processado; pode não ser o mesmo ficheiro.")
+print(f"  bag original: {rep.bag}")
 
 janela = "Reproducao do registo"
 if not args.sem_interface:
@@ -166,46 +129,11 @@ for t in trechos:
         fps = (t["imagens"] - 1) / dur if dur > 0 and t["imagens"] > 1 else 30.0
     t_anterior = None
     n_img, sem_det = 0, 0
-    for msg in leitura_bag.ler_mensagens(bag, [topico], indice_ok, t["inicio_ns"], t["fim_ns"]):
+    for t_ns, frame, dados in rep.imagens(t):
         t0 = time.perf_counter()
-        frame = leitura_bag.imagem_bgr(msg.ros_msg)
-        if frame is None:
-            continue
-        dados = deteccoes.get(msg.log_time_ns)
         if dados is None:
             sem_det += 1
-        corrigida = bool(dados.get("corrigida", corretor is not None)) if dados else corretor is not None
-        if corrigida and corretor is not None:
-            frame = corretor(frame)
         h, w = frame.shape[:2]
-
-        # Deteções registadas -> mesmos desenhos do processar_bag.py
-        caixas, linhas_pts, mascara = [], [], None
-        ativos = dict(carregado)
-        if dados:
-            ativos = {k: bool(v) for k, v in (dados.get("modelos_ativos") or carregado).items()}
-            caixas = [(*o["caixa"], o["classe"], o["confianca"]) for o in dados.get("objetos", [])]
-            linhas_pts = [np.array(l, dtype=np.float32) for l in dados.get("linhas", []) if len(l) > 1]
-            if ativos.get("estrada") and dados.get("estrada_contornos") is not None:
-                mascara = registo.mascara_dos_contornos(dados["estrada_contornos"], dados.get("estrada_buracos", []), w, h)
-        visual.desenhar_estrada(frame, mascara)
-        visual.desenhar_linhas(frame, linhas_pts)
-        visual.desenhar_caixas(frame, caixas)
-
-        n_obj, n_lin = len(caixas), len(linhas_pts)
-        pct = dados.get("estrada_percentagem", 0.0) if dados else 0.0
-        valores = {"objetos": f"{n_obj} objeto" + ("" if n_obj == 1 else "s"),
-                   "linhas": f"{n_lin} linha" + ("" if n_lin == 1 else "s"),
-                   "estrada": f"{pct:.0%} da imagem"}
-        t_rel = (msg.log_time_ns - inicio_bag_ns) / 1e9
-        info = {"tempo": t_rel, "total": duracao_bag,
-                "subtitulo": (f"Registo  ·  câmara {camara}  ·  trecho {t['n']}"
-                              + ("" if dados else "  ·  sem deteções")),
-                "cor_subtitulo": "#9CA3AF" if dados else "#F59E0B",
-                "modelos": [(k, nome_modelo[k], valores[k], None, ativos.get(k, False), carregado[k])
-                            for k in ("objetos", "linhas", "estrada")],
-                "rodape": f"{pasta.name}  ·  " + ("corrigida" if corrigida and corretor is not None else "original")}
-        frame = visual.compor(frame, caixas, info)
         n_img += 1
 
         if args.exportar:
@@ -220,9 +148,9 @@ for t in trechos:
         # indicador da velocidade (só na janela; o vídeo exportado já foi escrito sem ele)
         visual.etiqueta_canto(frame, "tempo real" if abrandar == 1 else f"{abrandar:g}x mais lento")
         cv2.imshow(janela, frame)
-        intervalo_ms = (msg.log_time_ns - t_anterior) / 1e6 if t_anterior else 33.0
+        intervalo_ms = (t_ns - t_anterior) / 1e6 if t_anterior else 33.0
         intervalo_ms = intervalo_ms if 0 < intervalo_ms < 1000 else 33.0
-        t_anterior = msg.log_time_ns
+        t_anterior = t_ns
         espera = max(1, int(intervalo_ms * abrandar - (time.perf_counter() - t0) * 1000))
         tecla = cv2.waitKey(espera) & 0xFF
         tecla_velocidade(tecla)

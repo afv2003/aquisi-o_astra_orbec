@@ -5,3 +5,5 @@ ultralytics
 pyyaml
 onnxruntime
 pillow
+customtkinter
+tkintermapview
