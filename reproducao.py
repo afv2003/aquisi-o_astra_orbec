@@ -6,6 +6,9 @@ Usado pelo reproduzir_registo.py (vídeo no ecrã ou em .mp4) e pelo gui_resulta
 GUI), para os dois mostrarem exatamente o mesmo: as imagens lidas e corrigidas como no
 processar_bag.py (leitura_bag.py) e as deteções registadas desenhadas com o visual.py.
 Os modelos não voltam a correr.
+
+Com um registo de duas câmaras, as imagens são juntadas lado a lado (5 à esquerda, 8 à direita),
+como no processar_bag.py; pode também escolher-se só uma das câmaras (camaras=["5"]).
 """
 from pathlib import Path
 
@@ -23,7 +26,7 @@ class ErroRegisto(Exception):
 
 
 class Reproducao:
-    def __init__(self, pasta_ensaio, bag=None):
+    def __init__(self, pasta_ensaio, bag=None, camaras=None):
         self.pasta = registo.pasta_do_ensaio(pasta_ensaio)
         self.ensaio = registo.ler_ensaio(self.pasta)
         if self.ensaio is None:
@@ -31,7 +34,22 @@ class Reproducao:
         self.trechos = self.ensaio.get("trechos", [])
         if not self.trechos:
             raise ErroRegisto("O registo não tem trechos.")
-        self.deteccoes = registo.ler_deteccoes(self.pasta / self.ensaio.get("ficheiro_deteccoes", "deteccoes.mcap"))
+
+        # Câmaras do registo e as escolhidas (por omissão, todas), pela ordem do ecrã
+        self.info_camaras = {c["camara"]: c for c in registo.camaras_do_ensaio(self.ensaio)}
+        self.camaras_registo = list(self.info_camaras)
+        if camaras:
+            camaras = [str(c) for c in camaras]
+            fora = [c for c in camaras if c not in self.info_camaras]
+            if fora:
+                raise ErroRegisto(f"O registo não tem a(s) câmara(s) {', '.join(fora)} "
+                                  f"(tem: {registo.texto_camaras(self.camaras_registo)}).")
+            self.camaras = visual.ordenar_camaras(camaras)
+        else:
+            self.camaras = list(self.camaras_registo)
+
+        todas = registo.ler_deteccoes(self.pasta / self.ensaio.get("ficheiro_deteccoes", "deteccoes.mcap"))
+        self.deteccoes = {c: todas.get(c, {}) for c in self.camaras}      # {câmara: {instante_ns: dados}}
 
         # Bag original: onde estava no processamento, ou em data/<viagem>/ (ou o indicado)
         info_bag = self.ensaio["bag"]
@@ -50,49 +68,100 @@ class Reproducao:
         tamanho = info_bag.get("tamanho_bytes")
         self.aviso_tamanho = (tamanho is not None and self.bag.stat().st_size != tamanho)
         self.indice_ok = leitura_bag.bag_tem_indice(self.bag)
-        self.topico = info_bag["topico_imagem"]
+        self.topico = {}                                                   # câmara -> tópico da imagem
+        for c in self.camaras:
+            t = self.info_camaras[c].get("topico_imagem") or info_bag.get("topico_imagem")
+            if not t:
+                raise ErroRegisto(f"O registo não diz em que tópico do bag estão as imagens da câmara {c}.")
+            self.topico[c] = t
+        self.camara_do_topico = {t: c for c, t in self.topico.items()}
         self.inicio_bag_ns = info_bag.get("inicio_ns") or min(t["inicio_ns"] for t in self.trechos)
         self.duracao_bag = info_bag.get("duracao_s") or 0.0
 
-        self.corretor = None
-        if self.ensaio.get("calibracao"):
-            self.corretor = leitura_bag.CorretorDistorcao(leitura_bag.calibracao_de_dict(self.ensaio["calibracao"]))
+        self.corretor = {}
+        for c in self.camaras:
+            calib = self.info_camaras[c].get("calibracao")
+            if calib:
+                self.corretor[c] = leitura_bag.CorretorDistorcao(leitura_bag.calibracao_de_dict(calib))
         modelos = self.ensaio.get("modelos", {})
         self.nome_modelo = {k: modelos.get(k, {}).get("nome", k) for k in MODELOS}
         self.carregado = {k: bool(modelos.get(k, {}).get("carregado", True)) for k in MODELOS}
-        self.camara = self.ensaio.get("camara")
+
+    @property
+    def duas(self):
+        return len(self.camaras) > 1
 
     def trecho(self, n):
         return next(t for t in self.trechos if t["n"] == n)
+
+    def imagens_por_camara(self, trecho):
+        """{câmara: número de imagens no trecho} das câmaras escolhidas."""
+        por_cam = trecho.get("imagens_por_camara")
+        if not por_cam:                                    # registos antigos: uma câmara
+            return {self.camaras[0]: trecho["imagens"]}
+        return {c: por_cam.get(str(c), 0) for c in self.camaras}
+
+    def camara_principal(self, trecho):
+        """A câmara que marca o ritmo do vídeo (a que tem mais imagens no trecho)."""
+        por_cam = self.imagens_por_camara(trecho)
+        return max(self.camaras, key=lambda c: por_cam.get(c, 0))
+
+    def n_imagens(self, trecho):
+        """Número de imagens do vídeo do trecho (as da câmara principal)."""
+        return self.imagens_por_camara(trecho).get(self.camara_principal(trecho), 0) or trecho["imagens"]
 
     def imagens(self, trecho, desenhar=True):
         """
         Imagens de um trecho, já com as deteções desenhadas e o painel, como no processar_bag.py
         (ou, com desenhar=False, só corrigidas da distorção, sem desenhos).
-        Gera (instante_ns, imagem BGR, dados das deteções ou None).
+        Gera (instante_ns, imagem BGR, {câmara: dados das deteções ou None}); no dicionário só entram
+        as câmaras que já têm imagem.
+        Com duas câmaras, a imagem tem as câmaras lado a lado; sai uma imagem por cada imagem da
+        câmara principal, com a imagem mais recente da outra câmara.
         """
-        for msg in leitura_bag.ler_mensagens(self.bag, [self.topico], self.indice_ok,
+        principal = self.camara_principal(trecho)
+        ultima = {c: None for c in self.camaras}
+        dados_cam = {}
+        for msg in leitura_bag.ler_mensagens(self.bag, list(self.topico.values()), self.indice_ok,
                                              trecho["inicio_ns"], trecho["fim_ns"]):
+            cam = self.camara_do_topico.get(msg.channel.topic)
+            if cam is None and msg.channel.topic not in self.camara_do_topico:
+                continue
             frame = leitura_bag.imagem_bgr(msg.ros_msg)
             if frame is None:
                 continue
-            dados = self.deteccoes.get(msg.log_time_ns)
-            if not desenhar:
-                yield msg.log_time_ns, self.corrigir(frame, dados), dados
+            dados = self.deteccoes[cam].get(msg.log_time_ns)
+            dados_cam[cam] = dados
+            if desenhar:
+                ultima[cam] = self.desenhar(frame, dados, trecho, msg.log_time_ns, cam)
+            else:
+                ultima[cam] = self.corrigir(frame, dados, cam)
+            if cam != principal:
                 continue
-            yield msg.log_time_ns, self.desenhar(frame, dados, trecho, msg.log_time_ns), dados
+            yield msg.log_time_ns, self.juntar(ultima), dict(dados_cam)
 
-    def corrigir(self, frame, dados):
+    def juntar(self, ultima):
+        """Imagens das câmaras lado a lado (uma câmara ainda sem imagem aparece a escuro)."""
+        ref = next(im for im in ultima.values() if im is not None)
+        h, w = ref.shape[:2]
+        return visual.lado_a_lado([ultima[c] if ultima[c] is not None
+                                   else visual.imagem_espera(w, h, f"Câmara {c}: sem imagem ainda")
+                                   for c in self.camaras])
+
+    def _corrigida(self, dados, cam):
+        por_omissao = cam in self.corretor
+        return (bool(dados.get("corrigida", por_omissao)) if dados else por_omissao) and cam in self.corretor
+
+    def corrigir(self, frame, dados, cam=None):
         """Correção da distorção, como estava no processamento dessa imagem."""
-        por_omissao = self.corretor is not None
-        corrigida = bool(dados.get("corrigida", por_omissao)) if dados else por_omissao
-        return self.corretor(frame) if corrigida and self.corretor is not None else frame
+        cam = self.camaras[0] if cam is None else cam
+        return self.corretor[cam](frame) if self._corrigida(dados, cam) else frame
 
-    def desenhar(self, frame, dados, trecho, t_ns):
-        por_omissao = self.corretor is not None
-        corrigida = bool(dados.get("corrigida", por_omissao)) if dados else por_omissao
-        if corrigida and self.corretor is not None:
-            frame = self.corretor(frame)
+    def desenhar(self, frame, dados, trecho, t_ns, cam=None):
+        cam = self.camaras[0] if cam is None else cam
+        corrigida = self._corrigida(dados, cam)
+        if corrigida:
+            frame = self.corretor[cam](frame)
         h, w = frame.shape[:2]
 
         caixas, linhas_pts, mascara = [], [], None
@@ -112,12 +181,12 @@ class Reproducao:
         valores = {"objetos": f"{n_obj} objeto" + ("" if n_obj == 1 else "s"),
                    "linhas": f"{n_lin} linha" + ("" if n_lin == 1 else "s"),
                    "estrada": f"{pct:.0%} da imagem"}
+        texto_cam = f"câmara {cam}" if cam is not None else "câmara não indicada"
         info = {"tempo": (t_ns - self.inicio_bag_ns) / 1e9, "total": self.duracao_bag,
-                "subtitulo": (f"Registo  ·  câmara {self.camara}  ·  trecho {trecho['n']}"
+                "subtitulo": (f"Registo  ·  {texto_cam}  ·  trecho {trecho['n']}"
                               + ("" if dados else "  ·  sem deteções")),
                 "cor_subtitulo": "#9CA3AF" if dados else "#F59E0B",
                 "modelos": [(k, self.nome_modelo[k], valores[k], None, ativos.get(k, False), self.carregado[k])
                             for k in MODELOS],
-                "rodape": f"{self.pasta.name}  ·  " + ("corrigida" if corrigida and self.corretor is not None
-                                                        else "original")}
+                "rodape": f"{self.pasta.name}  ·  " + ("corrigida" if corrigida else "original")}
         return visual.compor(frame, caixas, info)

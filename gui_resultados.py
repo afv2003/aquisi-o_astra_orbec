@@ -15,6 +15,10 @@ Duas tabs:
 Os registos são lidos de data_offline (ou da pasta indicada com --pasta-registo). Se não houver
 registos, a tab Percurso fica indisponível.
 
+Registos de duas câmaras: no Resumo escolhe-se «Ambas» ou uma câmara (com «Ambas», as tabelas
+mostram também os valores de cada câmara); no Percurso escolhe-se as duas (vídeo lado a lado, 5 à
+esquerda e 8 à direita, e cor pela soma dos veículos das duas câmaras) ou só uma.
+
   python gui_resultados.py
   python gui_resultados.py --pasta-registo outra_pasta
 
@@ -95,7 +99,27 @@ def pct(x):
 def descricao_ensaio(pasta):
     e = registo.ler_ensaio(pasta)
     n = len(e.get("trechos", [])) if e else 0
-    return f"{Path(pasta).parent.name}  ·  {Path(pasta).name}  ({n} trecho{'s' if n != 1 else ''})"
+    cams = [c["camara"] for c in registo.camaras_do_ensaio(e)] if e else []
+    txt_cams = f", câmaras {registo.texto_camaras(cams)}" if len(cams) > 1 else ""
+    return f"{Path(pasta).parent.name}  ·  {Path(pasta).name}  ({n} trecho{'s' if n != 1 else ''}{txt_cams})"
+
+
+def texto_imagens(trecho):
+    """'360 imagens' ou, com duas câmaras, '360 + 358 imagens (câmaras 5 e 8)'."""
+    por_cam = trecho.get("imagens_por_camara") or {}
+    if len(por_cam) > 1:
+        return (" + ".join(str(n) for n in por_cam.values()) + " imagens (câmaras "
+                + registo.texto_camaras(list(por_cam)) + ")")
+    return f"{trecho['imagens']} imagens"
+
+
+def resumo_veiculos(instantes, gamas=GAMAS_VEICULOS):
+    """Média, máximo e % de instantes em cada gama, a partir de [(instante, n de veículos), ...]."""
+    v = [n for _, n in instantes]
+    if not v:
+        return {"media": None, "maximo": None, "gamas": [(r, 0.0) for _, _, r, _ in gamas]}
+    return {"media": sum(v) / len(v), "maximo": max(v),
+            "gamas": [(r, sum(1 for x in v if a <= x <= b) / len(v)) for a, b, r, _ in gamas]}
 
 
 def internet_para_mapa(timeout=4):
@@ -288,6 +312,13 @@ class TabResumo(ctk.CTkFrame):
         ctk.CTkLabel(barra, text="Trecho", text_color=TEXTO_2).pack(side="left", padx=(24, 8))
         self.filtro = ctk.CTkSegmentedButton(barra, values=["Todos"], command=lambda _: self._mostrar())
         self.filtro.pack(side="left")
+        # filtro de câmara: só aparece nos registos com duas câmaras
+        self.zona_camara = ctk.CTkFrame(barra, fg_color="transparent")
+        self.zona_camara.pack(side="left")
+        ctk.CTkLabel(self.zona_camara, text="Câmara", text_color=TEXTO_2).pack(side="left", padx=(24, 8))
+        self.filtro_camara = ctk.CTkSegmentedButton(self.zona_camara, values=["Ambas"],
+                                                    command=lambda _: self._mostrar())
+        self.filtro_camara.pack(side="left")
         self.corpo = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.corpo.pack(fill="both", expand=True)
         self._carregar()
@@ -295,15 +326,24 @@ class TabResumo(ctk.CTkFrame):
     def _carregar(self):
         self.pasta = Path(self.mapa_ensaios[self.escolha.get()])
         self.ensaio = registo.ler_ensaio(self.pasta)
-        det = registo.ler_deteccoes(self.pasta / self.ensaio.get("ficheiro_deteccoes", "deteccoes.mcap"))
-        self.por_trecho = {}
-        for t_ns in sorted(det):
-            d = det[t_ns]
-            self.por_trecho.setdefault(d.get("trecho"), []).append(d)
+        self.info_cams = registo.camaras_do_ensaio(self.ensaio)
+        self.cams = [c["camara"] for c in self.info_cams]
+        self.det = registo.ler_deteccoes(self.pasta / self.ensaio.get("ficheiro_deteccoes", "deteccoes.mcap"))
         valores = ["Todos"] + [str(t["n"]) for t in self.ensaio.get("trechos", [])]
         self.filtro.configure(values=valores)
         self.filtro.set("Todos")
+        if len(self.cams) > 1:
+            self.filtro_camara.configure(values=["Ambas"] + [f"Câmara {c}" for c in self.cams])
+            self.filtro_camara.set("Ambas")
+            self.zona_camara.pack(side="left")
+        else:
+            self.zona_camara.pack_forget()
         self._mostrar()
+
+    def _escolha_camaras(self):
+        if len(self.cams) < 2 or self.filtro_camara.get() == "Ambas":
+            return list(self.cams)
+        return [self.filtro_camara.get().replace("Câmara ", "")]
 
     def _mostrar(self):
         for w in self.corpo.winfo_children():
@@ -312,26 +352,50 @@ class TabResumo(ctk.CTkFrame):
         trechos = e.get("trechos", [])
         if escolha != "Todos":
             trechos = [t for t in trechos if str(t["n"]) == escolha]
-        dados = [d for t in trechos for d in self.por_trecho.get(t["n"], [])]
-        est = registo.estatisticas(dados, [(a, b, r) for a, b, r, _ in GAMAS_VEICULOS])
+        nums = {t["n"] for t in trechos}
+        cams = self._escolha_camaras()
+        duas = len(cams) > 1
+        # deteções das câmaras e trechos escolhidos: {câmara: {instante: dados}}
+        sel = {c: {t: d for t, d in self.det.get(c, {}).items() if d.get("trecho") in nums} for c in cams}
+        dados = [sel[c][t] for c in cams for t in sorted(sel[c])]
+        gamas = [(a, b, r) for a, b, r, _ in GAMAS_VEICULOS]
+        est = registo.estatisticas(dados, gamas)
+        est_cam = {c: registo.estatisticas(list(sel[c].values())) for c in cams} if duas else {}
+        veic = resumo_veiculos(registo.veiculos_por_instante(sel))
         dur = sum((t["fim_ns"] - t["inicio_ns"]) / 1e9 for t in trechos)
+
+        def por_camara(f):
+            """'5: x  ·  8: y' (um valor por câmara)."""
+            return "  ·  ".join(f"{c}: {f(est_cam[c])}" for c in cams)
 
         self.corpo.grid_columnconfigure((0, 1, 2), weight=1, uniform="c")
         # --- Vídeo / registo ---
         c = cartao(self.corpo, "Vídeo e registo")
         c.grid(row=0, column=0, sticky="nsew", padx=6, pady=6)
         bag, proc = e.get("bag", {}), e.get("processamento", {})
-        calib = e.get("calibracao")
+        info = {i["camara"]: i for i in self.info_cams}
+        if duas:
+            txt_cam = registo.texto_camaras(cams) + "  (vídeo: " + ", ".join(
+                f"{c_} à {'esquerda' if k == 0 else 'direita'}" for k, c_ in enumerate(cams)) + ")"
+            correcao = "  ·  ".join(f"{c_}: " + ("sim" if info[c_].get("calibracao") else "não") for c_ in cams)
+            n_img = f"{len(dados)} imagens (" + " + ".join(str(len(sel[c_])) for c_ in cams) + ")"
+        else:
+            txt_cam = str(cams[0]) if cams[0] is not None else "—"
+            if len(self.cams) > 1:
+                txt_cam += f"  (do registo com as câmaras {registo.texto_camaras(self.cams)})"
+            calib = info[cams[0]].get("calibracao")
+            correcao = f"sim ({calib['origem']})" if calib else "não"
+            n_img = f"{len(dados)} imagens"
         linhas_chave_valor(c, [
             ("Bag", bag.get("nome", "—")),
-            ("Câmara", str(e.get("camara", "—"))),
+            ("Câmaras" if duas else "Câmara", txt_cam),
             ("Duração do bag", tempo_txt(bag.get("duracao_s"))),
-            ("Correção", f"sim ({calib['origem']})" if calib else "não"),
+            ("Correção", correcao),
             ("Processado em", (e.get("criado_em") or "—").replace("T", " ")),
             ("Trechos", "  ".join(f"{t['n']}: {t.get('inicio_s', 0):.1f}–{t.get('fim_s', 0):.1f} s"
                                   for t in e.get("trechos", []))),
             ("Selecionado", ("todos os trechos" if escolha == "Todos" else f"trecho {escolha}")
-             + f"  ·  {len(dados)} imagens  ·  {tempo_txt(dur)}"),
+             + f"  ·  {n_img}  ·  {tempo_txt(dur)}"),
         ])
         # --- Modelos e processamento ---
         c = cartao(self.corpo, "Modelos")
@@ -352,48 +416,71 @@ class TabResumo(ctk.CTkFrame):
         if isinstance(classes, list):
             pares.append(("Classes", ", ".join(classes)))
         if proc.get("imagens_por_segundo"):
-            pares.append(("Velocidade", f"{proc['imagens_por_segundo']:.1f} imagens/s "
-                                        f"({'com' if proc.get('com_interface') else 'sem'} janela)"))
+            txt = (f"{proc['imagens_por_segundo']:.1f} imagens/s "
+                   f"({'com' if proc.get('com_interface') else 'sem'} janela)")
+            if len(self.cams) > 1:
+                txt += " - somando as duas câmaras"
+            pares.append(("Velocidade", txt))
         linhas_chave_valor(c, pares)
-        # --- CLRNet e YOLOP ---
+        # --- CLRNet e YOLOP (com duas câmaras: um valor por câmara) ---
         c = cartao(self.corpo, "Linhas e área circulável")
         c.grid(row=0, column=2, sticky="nsew", padx=6, pady=6)
         li, es = est["linhas"], est["estrada"]
-        linhas_chave_valor(c, [
-            (mod.get("linhas", {}).get("nome", "Linhas"), ""),
-            ("  Linhas por imagem", "—" if li["media"] is None else f"{li['media']:.2f}"),
-            ("  Imagens sem linhas", pct(li["pct_sem_linhas"])),
-            (mod.get("estrada", {}).get("nome", "Estrada"), ""),
-            ("  Área circulável média", pct(es["media"])),
-            ("  Mínima / máxima", f"{pct(es['minimo'])} / {pct(es['maximo'])}"),
-        ])
-        # --- Objetos por categoria ---
-        c = cartao(self.corpo, f"{mod.get('objetos', {}).get('nome', 'YOLO')}  ·  deteções por categoria")
+        if duas:
+            fmt_l = lambda x: "—" if x["linhas"]["media"] is None else f"{x['linhas']['media']:.2f}"
+            linhas_chave_valor(c, [
+                (mod.get("linhas", {}).get("nome", "Linhas"), "por câmara"),
+                ("  Linhas por imagem", por_camara(fmt_l)),
+                ("  Imagens sem linhas", por_camara(lambda x: pct(x["linhas"]["pct_sem_linhas"]))),
+                (mod.get("estrada", {}).get("nome", "Estrada"), "por câmara"),
+                ("  Área circulável média", por_camara(lambda x: pct(x["estrada"]["media"]))),
+                ("  Mínima / máxima", por_camara(lambda x: f"{pct(x['estrada']['minimo'])} / {pct(x['estrada']['maximo'])}")),
+            ])
+        else:
+            linhas_chave_valor(c, [
+                (mod.get("linhas", {}).get("nome", "Linhas"), ""),
+                ("  Linhas por imagem", "—" if li["media"] is None else f"{li['media']:.2f}"),
+                ("  Imagens sem linhas", pct(li["pct_sem_linhas"])),
+                (mod.get("estrada", {}).get("nome", "Estrada"), ""),
+                ("  Área circulável média", pct(es["media"])),
+                ("  Mínima / máxima", f"{pct(es['minimo'])} / {pct(es['maximo'])}"),
+            ])
+        # --- Objetos por categoria (com duas câmaras: também as deteções de cada uma) ---
+        c = cartao(self.corpo, f"{mod.get('objetos', {}).get('nome', 'YOLO')}  ·  deteções por categoria"
+                   + ("  ·  câmaras " + registo.texto_camaras(cams) if duas else ""))
         c.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=6, pady=6)
-        colunas = ("classe", "det", "media", "max", "img", "conf")
+        colunas = ["classe", "det"] + [f"cam{c_}" for c_ in cams if duas] + ["media", "max", "img", "conf"]
         cab = {"classe": "Categoria", "det": "Deteções", "media": "Média por imagem",
                "max": "Máx. numa imagem", "img": "% imagens", "conf": "Confiança média"}
+        cab.update({f"cam{c_}": f"Câmara {c_}" for c_ in cams})
         tabela = ttk.Treeview(c, columns=colunas, show="headings",
                               height=max(3, min(9, len(est["objetos"]["classes"]))))
         for col in colunas:
             tabela.heading(col, text=cab[col])
-            tabela.column(col, width=self.app.px(210 if col == "classe" else 100),
+            tabela.column(col, width=self.app.px(210 if col == "classe" else (80 if col.startswith("cam") else 100)),
                           anchor="w" if col == "classe" else "center")
         for nome, v in est["objetos"]["classes"].items():
             rotulo = f"{nome} ({NOMES_CLASSES[nome]})" if nome in NOMES_CLASSES else nome
             if nome in registo.VEICULOS:
                 rotulo += "  · veículo"
-            tabela.insert("", "end", values=(rotulo, v["deteccoes"], f"{v['media_por_imagem']:.2f}", v["maximo"],
-                                             pct(v["pct_imagens"]), f"{v['confianca_media']:.2f}"))
+            por_cam = [est_cam[c_]["objetos"]["classes"].get(nome, {}).get("deteccoes", 0) for c_ in cams] if duas else []
+            tabela.insert("", "end", values=(rotulo, v["deteccoes"], *por_cam, f"{v['media_por_imagem']:.2f}",
+                                             v["maximo"], pct(v["pct_imagens"]), f"{v['confianca_media']:.2f}"))
         tabela.pack(fill="x", padx=14, pady=(0, 6))
-        ctk.CTkLabel(c, text="As deteções são somadas imagem a imagem: o mesmo veículo visto em 30 imagens conta 30 vezes.",
-                     text_color=TEXTO_3, font=ctk.CTkFont(size=11), anchor="w").pack(fill="x", padx=14, pady=(0, 10))
+        nota = "As deteções são somadas imagem a imagem: o mesmo veículo visto em 30 imagens conta 30 vezes."
+        if duas:
+            nota += " Média, máximo e % de imagens contam as imagens das duas câmaras."
+        ctk.CTkLabel(c, text=nota, text_color=TEXTO_3, font=ctk.CTkFont(size=11), anchor="w", justify="left",
+                     wraplength=self.app.px(760)).pack(fill="x", padx=14, pady=(0, 10))
         # --- Veículos por gama (as cores do mapa) ---
-        c = cartao(self.corpo, "Veículos por imagem")
+        c = cartao(self.corpo, "Veículos por instante (soma das câmaras)" if duas else "Veículos por imagem")
         c.grid(row=1, column=2, sticky="nsew", padx=6, pady=6)
-        ve = est["veiculos"]
-        linhas_chave_valor(c, [("Média / máximo", "—" if ve["media"] is None else f"{ve['media']:.2f} / {ve['maximo']}")])
-        for (a, b, rotulo, cor), (_, fr) in zip(GAMAS_VEICULOS, ve.get("gamas", [(None, 0)] * len(GAMAS_VEICULOS))):
+        pares = [("Média / máximo", "—" if veic["media"] is None else f"{veic['media']:.2f} / {veic['maximo']}")]
+        if duas:
+            pares.append(("Por câmara (média)", por_camara(
+                lambda x: "—" if x["veiculos"]["media"] is None else f"{x['veiculos']['media']:.2f}")))
+        linhas_chave_valor(c, pares)
+        for (a, b, rotulo, cor), (_, fr) in zip(GAMAS_VEICULOS, veic["gamas"]):
             lin = ctk.CTkFrame(c, fg_color="transparent")
             lin.pack(fill="x", padx=14, pady=2)
             ctk.CTkFrame(lin, width=10, height=10, corner_radius=5, fg_color=cor).pack(side="left", padx=(0, 6))
@@ -403,8 +490,9 @@ class TabResumo(ctk.CTkFrame):
             barra.set(fr)
             barra.pack(side="left", fill="x", expand=True, padx=8)
             ctk.CTkLabel(lin, text=pct(fr), text_color=TEXTO_2, width=40, font=ctk.CTkFont(size=12)).pack(side="left")
-        ctk.CTkLabel(c, text="% das imagens em cada gama (" + ", ".join(registo.VEICULOS) + ")",
-                     text_color=TEXTO_3, font=ctk.CTkFont(size=11), anchor="w", wraplength=360,
+        texto = ("% dos instantes em cada gama; em cada instante somam-se as duas câmaras ("
+                 if duas else "% das imagens em cada gama (") + ", ".join(registo.VEICULOS) + ")"
+        ctk.CTkLabel(c, text=texto, text_color=TEXTO_3, font=ctk.CTkFont(size=11), anchor="w", wraplength=360,
                      justify="left").pack(fill="x", padx=14, pady=(4, 12))
 
 
@@ -479,17 +567,22 @@ class TabPercurso(ctk.CTkFrame):
         ctk.CTkLabel(caixa, text="Trecho", text_color=TEXTO_2).grid(row=3, column=0, sticky="w", padx=(22, 10), pady=10)
         self.escolha_trecho = ctk.CTkOptionMenu(caixa, values=["—"], width=420)
         self.escolha_trecho.grid(row=3, column=1, sticky="w", pady=10)
-        ctk.CTkLabel(caixa, text="Referências a cada", text_color=TEXTO_2).grid(row=4, column=0, sticky="w", padx=(22, 10))
+        # câmaras: só nos registos com duas (as duas lado a lado, ou só uma)
+        self.rotulo_camaras = ctk.CTkLabel(caixa, text="Câmaras", text_color=TEXTO_2)
+        self.rotulo_camaras.grid(row=4, column=0, sticky="w", padx=(22, 10), pady=(0, 10))
+        self.escolha_camaras = ctk.CTkOptionMenu(caixa, values=["—"], width=420)
+        self.escolha_camaras.grid(row=4, column=1, sticky="w", pady=(0, 10))
+        ctk.CTkLabel(caixa, text="Referências a cada", text_color=TEXTO_2).grid(row=5, column=0, sticky="w", padx=(22, 10))
         linha = ctk.CTkFrame(caixa, fg_color="transparent")
-        linha.grid(row=4, column=1, sticky="w")
+        linha.grid(row=5, column=1, sticky="w")
         self.entrada_intervalo = ctk.CTkEntry(linha, width=60)
         self.entrada_intervalo.insert(0, f"{INTERVALO_REFERENCIAS_S:g}")
         self.entrada_intervalo.pack(side="left")
         ctk.CTkLabel(linha, text="segundos (contados desde o início da gravação)", text_color=TEXTO_3).pack(side="left", padx=8)
         self.msg = ctk.CTkLabel(caixa, text="", text_color="#F59E0B", wraplength=540, justify="left")
-        self.msg.grid(row=5, column=0, columnspan=3, sticky="w", padx=22, pady=(8, 0))
+        self.msg.grid(row=6, column=0, columnspan=3, sticky="w", padx=22, pady=(8, 0))
         ctk.CTkButton(caixa, text="Continuar", fg_color=ACENTO, command=self._continuar).grid(
-            row=6, column=1, columnspan=2, sticky="e", padx=22, pady=(8, 18))
+            row=7, column=1, columnspan=2, sticky="e", padx=22, pady=(8, 18))
         self._atualizar_trechos()
 
     def _outra_pasta(self):
@@ -510,9 +603,23 @@ class TabPercurso(ctk.CTkFrame):
         self.opcoes_trecho = {"Todos os trechos": [t["n"] for t in e.get("trechos", [])]}
         for t in e.get("trechos", []):
             self.opcoes_trecho[f"Trecho {t['n']}  ({t.get('inicio_s', 0):.1f}–{t.get('fim_s', 0):.1f} s, "
-                               f"{t['imagens']} imagens)"] = [t["n"]]
+                               f"{texto_imagens(t)})"] = [t["n"]]
         self.escolha_trecho.configure(values=list(self.opcoes_trecho))
         self.escolha_trecho.set("Todos os trechos" if len(self.opcoes_trecho) > 2 else list(self.opcoes_trecho)[-1])
+        cams = [c["camara"] for c in registo.camaras_do_ensaio(e)]
+        if len(cams) > 1:
+            self.opcoes_camaras = {f"{registo.texto_camaras(cams)}  (vídeo lado a lado, cor pela soma dos veículos)": cams}
+            for c in cams:
+                self.opcoes_camaras[f"Só a câmara {c}"] = [c]
+            self.escolha_camaras.configure(values=list(self.opcoes_camaras))
+            self.escolha_camaras.set(list(self.opcoes_camaras)[0])
+            self.rotulo_camaras.grid()
+            self.escolha_camaras.grid()
+        else:
+            self.opcoes_camaras = {"": None}
+            self.escolha_camaras.set("")
+            self.rotulo_camaras.grid_remove()
+            self.escolha_camaras.grid_remove()
         self.msg.configure(text="")
 
     def _continuar(self):
@@ -526,7 +633,8 @@ class TabPercurso(ctk.CTkFrame):
         self.msg.configure(text="A carregar o registo…")
         self.update_idletasks()
         try:
-            self.rep = Reproducao(self.mapa_ensaios[self.escolha_ensaio.get()])
+            self.rep = Reproducao(self.mapa_ensaios[self.escolha_ensaio.get()],
+                                  camaras=self.opcoes_camaras.get(self.escolha_camaras.get()))
         except ErroRegisto as e:
             self.msg.configure(text=str(e))
             return
@@ -579,8 +687,11 @@ class TabPercurso(ctk.CTkFrame):
         t = self.rep.trecho(n)
         ctk.CTkLabel(pai, text=f"Trecho {n}" + (f"  ({i + 1} de {len(self.ordem)})" if len(self.ordem) > 1 else ""),
                      font=ctk.CTkFont(size=17, weight="bold"), text_color=TEXTO, anchor="w").pack(fill="x", padx=18, pady=(16, 0))
-        ctk.CTkLabel(pai, text=f"{subtitulo}  ·  {t.get('inicio_s', 0):.1f} s a {t.get('fim_s', 0):.1f} s do vídeo",
-                     text_color=TEXTO_2, anchor="w").pack(fill="x", padx=18, pady=(2, 12))
+        cams = (f"  ·  câmaras {registo.texto_camaras(self.rep.camaras)}" if self.rep.duas
+                else (f"  ·  câmara {self.rep.camaras[0]}" if len(self.rep.camaras_registo) > 1 else ""))
+        ctk.CTkLabel(pai, text=f"{subtitulo}  ·  {t.get('inicio_s', 0):.1f} s a {t.get('fim_s', 0):.1f} s do vídeo{cams}",
+                     text_color=TEXTO_2, anchor="w", wraplength=self.app.px(520 if self.rep.duas else 400),
+                     justify="left").pack(fill="x", padx=18, pady=(2, 12))
 
     # ---------- ficheiros (trajeto e referências, em separado) ----------
     def _guardar_json(self, tipo, n, conteudo):
@@ -768,10 +879,13 @@ class TabPercurso(ctk.CTkFrame):
                                                    self._ponto_de_curva, pass_coords=True)
 
         # painel com barra de deslocamento: em ecrãs mais pequenos (ou com zoom), os botões continuam acessíveis
-        dir_ = ctk.CTkScrollableFrame(self, fg_color=CARTAO_2, corner_radius=10, width=440)
+        # com duas câmaras, as imagens ficam lado a lado: painel mais largo e imagem mais baixa
+        larg_img, alt_img = (560, 214) if self.rep.duas else (400, 240)
+        texto_larg = larg_img
+        dir_ = ctk.CTkScrollableFrame(self, fg_color=CARTAO_2, corner_radius=10, width=larg_img + 40)
         dir_.pack(side="right", fill="y")
         self._titulo_trecho(dir_, i, f"2. Pontos de referência (a cada {self.intervalo_s:g} s)")
-        moldura = ctk.CTkFrame(dir_, width=400, height=240, fg_color="#000000", corner_radius=6)
+        moldura = ctk.CTkFrame(dir_, width=larg_img, height=alt_img, fg_color="#000000", corner_radius=6)
         moldura.pack(padx=18)
         moldura.pack_propagate(False)
         self.ecra_ref = tk.Label(moldura, bg="#000000", bd=0)
@@ -784,13 +898,13 @@ class TabPercurso(ctk.CTkFrame):
                                                   selected_color=ACENTO, command=lambda _: self._explicar_modo())
         self.modo_clique.set("Marcar referência")
         self.modo_clique.pack(fill="x", padx=18, pady=(6, 2))
-        self.explicacao = ctk.CTkLabel(dir_, text="", text_color=TEXTO_2, anchor="w", wraplength=400, justify="left")
+        self.explicacao = ctk.CTkLabel(dir_, text="", text_color=TEXTO_2, anchor="w", wraplength=texto_larg, justify="left")
         self.explicacao.pack(fill="x", padx=18, pady=(2, 6))
         botoes = ctk.CTkFrame(dir_, fg_color="transparent")
         botoes.pack(fill="x", padx=18)
         self._botao_secundario(botoes, "Desfazer", self._desfazer_referencia).pack(side="left", expand=True, fill="x", padx=(0, 4))
         self._botao_secundario(botoes, "Saltar", self._saltar_referencia).pack(side="left", expand=True, fill="x", padx=(4, 0))
-        self.msg_passo = ctk.CTkLabel(dir_, text="", text_color="#F59E0B", anchor="w", wraplength=400, justify="left")
+        self.msg_passo = ctk.CTkLabel(dir_, text="", text_color="#F59E0B", anchor="w", wraplength=texto_larg, justify="left")
         self.msg_passo.pack(fill="x", padx=18, pady=(4, 0))
         self.tabela_refs = ttk.Treeview(dir_, columns=("t", "coord", "dist"), show="headings", height=4)
         for col, txt, larg in (("t", "Instante", 80), ("coord", "Referência (lat, lon)", 190), ("dist", "No trajeto", 90)):
@@ -866,7 +980,10 @@ class TabPercurso(ctk.CTkFrame):
                                            "no troço mais perto, para seguir a curva. Volte a «Marcar referência» "
                                            "para continuar.")
         else:
-            self.explicacao.configure(text="Clique no mapa onde o carro está nesta imagem; o ponto é encostado ao "
+            self.explicacao.configure(text="Clique no mapa onde o carro está nesta imagem"
+                                           + (" (câmaras " + " | ".join(self.rep.camaras) + ", lado a lado)"
+                                              if self.rep.duas else "")
+                                           + "; o ponto é encostado ao "
                                            "trajeto. Se não reconhecer o sítio, use «Saltar». (Botão direito no mapa "
                                            "também acrescenta um ponto de curva.)")
 
@@ -1016,10 +1133,12 @@ class TabPercurso(ctk.CTkFrame):
         marcos.append((t["fim_ns"], perc.total, self.trajetos[n][-1]))
         dur = (t["fim_ns"] - t["inicio_ns"]) / 1e9
         v_media = perc.total / dur if dur > 0 else 0.0           # velocidade média do trecho (m/s)
-        tempos = sorted(self.rep.deteccoes)
+        # veículos em cada instante (com duas câmaras, a soma das duas)
+        instantes = registo.veiculos_por_instante(self.rep.deteccoes, t["inicio_ns"], t["fim_ns"] + 1)
         intervalos = []
-        for (t0, d0, p0), (t1, d1, _) in zip(marcos, marcos[1:]):
-            veic = [registo.n_veiculos(self.rep.deteccoes[k]) for k in tempos if t0 <= k < t1]
+        for k_int, ((t0, d0, p0), (t1, d1, _)) in enumerate(zip(marcos, marcos[1:])):
+            ultimo = k_int == len(marcos) - 2                    # o último inclui o fim do trecho
+            veic = [n for k, n in instantes if t0 <= k < t1 or (ultimo and k == t1)]
             media = sum(veic) / len(veic) if veic else 0.0
             intervalos.append({"t0": t0, "t1": t1, "d0": d0, "d1": d1, "lat": p0[0], "lon": p0[1],
                                "veic_media": media, "veic_max": max(veic) if veic else 0,
@@ -1031,9 +1150,11 @@ class TabPercurso(ctk.CTkFrame):
         self._limpar()
         topo = ctk.CTkFrame(self, fg_color="transparent")
         topo.pack(fill="both", expand=True)
-        topo.grid_columnconfigure(0, weight=37, uniform="col")    # mapa
-        topo.grid_columnconfigure(1, weight=37, uniform="col")    # vídeo
-        topo.grid_columnconfigure(2, weight=26, uniform="col")    # intervalos
+        # com duas câmaras o vídeo (lado a lado) é mais largo: fica com mais espaço e o mapa com menos
+        larguras = (26, 48, 26) if self.rep.duas else (37, 37, 26)
+        topo.grid_columnconfigure(0, weight=larguras[0], uniform="col")    # mapa
+        topo.grid_columnconfigure(1, weight=larguras[1], uniform="col")    # vídeo
+        topo.grid_columnconfigure(2, weight=larguras[2], uniform="col")    # intervalos
         topo.grid_rowconfigure(0, weight=1)
         esq = ctk.CTkFrame(topo, fg_color="transparent")
         esq.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
@@ -1076,7 +1197,8 @@ class TabPercurso(ctk.CTkFrame):
                       command=self.reiniciar).pack(side="left", padx=8)
         legenda = ctk.CTkFrame(baixo, fg_color="transparent")
         legenda.pack(side="right")
-        ctk.CTkLabel(legenda, text="Média de veículos (YOLO):", text_color=TEXTO_2).pack(side="left", padx=(0, 8))
+        ctk.CTkLabel(legenda, text="Média de veículos (YOLO" + (", soma das câmaras" if self.rep.duas else "") + "):",
+                     text_color=TEXTO_2).pack(side="left", padx=(0, 8))
         for _, _, rotulo, cor in GAMAS_VEICULOS:
             ctk.CTkFrame(legenda, width=22, height=5, corner_radius=2, fg_color=cor).pack(side="left")
             ctk.CTkLabel(legenda, text=rotulo, text_color=TEXTO).pack(side="left", padx=(5, 14))
@@ -1100,15 +1222,16 @@ class TabPercurso(ctk.CTkFrame):
                 f"{it['veic_media']:.1f}", f"{it['drift']:+.0f} m"))
             self.linhas_int.append(ident)
         dur = (self.trecho["fim_ns"] - self.trecho["inicio_ns"]) / 1e9
-        todas = [registo.n_veiculos(self.rep.deteccoes[k]) for k in self.rep.deteccoes
-                 if self.trecho["inicio_ns"] <= k <= self.trecho["fim_ns"]]
+        todas = [n for _, n in registo.veiculos_por_instante(self.rep.deteccoes, self.trecho["inicio_ns"],
+                                                             self.trecho["fim_ns"] + 1)]
         drifts = [abs(it["drift"]) for it in self.intervalos[:-1]] or [0.0]
         n_ref = len([r for r in self.refs.get(self.trecho["n"], []) if not r["saltado"]])
         n_salt = len([r for r in self.refs.get(self.trecho["n"], []) if r["saltado"]])
         self.resumo_percurso.configure(text=(
             f"Trecho {self.trecho['n']}:  {self.percurso.total:.0f} m em {tempo_txt(dur)}\n"
             f"Velocidade média: {self.v_media * 3.6:.0f} km/h\n"
-            f"Veículos por imagem: {sum(todas) / len(todas) if todas else 0:.1f} (máx. {max(todas) if todas else 0})\n"
+            f"Veículos por {'instante (2 câmaras)' if self.rep.duas else 'imagem'}: "
+            f"{sum(todas) / len(todas) if todas else 0:.1f} (máx. {max(todas) if todas else 0})\n"
             f"Referências: {n_ref}" + (f" ({n_salt} saltada{'s' if n_salt != 1 else ''})" if n_salt else "") + "\n"
             f"Drift entre referências: médio {sum(drifts) / len(drifts):.0f} m, máximo {max(drifts):.0f} m\n"
             "(+ a estimativa passou a referência seguinte;\n − ficou aquém: troço cinzento no mapa)"))
@@ -1127,7 +1250,9 @@ class TabPercurso(ctk.CTkFrame):
             self.mapa.set_path(self.percurso.pontos, color=COR_PERCURSO_POR_FAZER, width=4)
         self._preencher_intervalos()
         self.i_int, self.seg_obj, self.seg_pts = -1, None, []
-        self.titulo_video.configure(text=f"Trecho {n}" + (f"  ({k + 1} de {len(self.ordem)})" if len(self.ordem) > 1 else ""))
+        self.titulo_video.configure(text=f"Trecho {n}" + (f"  ({k + 1} de {len(self.ordem)})" if len(self.ordem) > 1 else "")
+                                    + (f"  ·  câmaras {' | '.join(self.rep.camaras)}" if self.rep.duas else
+                                       (f"  ·  câmara {self.rep.camaras[0]}" if len(self.rep.camaras_registo) > 1 else "")))
         self.progresso.set(0)
         self.tempo.configure(text=f"00:00.0 / {tempo_txt((self.trecho['fim_ns'] - self.trecho['inicio_ns']) / 1e9)}")
         # Leitura num fio à parte (bag + desenho), para a janela não bloquear

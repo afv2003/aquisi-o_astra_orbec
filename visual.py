@@ -278,3 +278,48 @@ def ecra_fim(img):
     d.text((cx, cy + 22 * esc), "Prima Q para fechar", font=fonte(int(15 * esc)), fill=(209, 213, 219, 255), anchor="mm")
     final = Image.alpha_composite(base, camada).convert("RGB")
     return cv2.cvtColor(np.asarray(final), cv2.COLOR_RGB2BGR)
+
+
+# --------------------------------------------------------------------------- #
+# Duas câmaras: imagens lado a lado
+# --------------------------------------------------------------------------- #
+# Ordem no ecrã, da esquerda para a direita: câmara 5 à esquerda, câmara 8 à direita.
+# Outras câmaras (se houver) ficam a seguir, por ordem.
+ORDEM_CAMARAS = ("5", "8")
+SEPARADOR_PX = 4                       # faixa escura entre as imagens das câmaras
+
+
+def ordenar_camaras(camaras):
+    """Câmaras pela ordem em que aparecem no ecrã (esquerda -> direita)."""
+    def chave(c):
+        c = str(c) if c is not None else ""
+        return (ORDEM_CAMARAS.index(c) if c in ORDEM_CAMARAS else len(ORDEM_CAMARAS), c)
+    return sorted(camaras, key=chave)
+
+
+def imagem_espera(largura, altura, texto):
+    """Imagem escura com um texto ao centro (câmara que ainda não tem imagem)."""
+    base = Image.new("RGB", (int(largura), int(altura)), (20, 23, 28))
+    d = ImageDraw.Draw(base)
+    esc = max(0.8, min(1.6, largura / 800))
+    d.text((largura / 2, altura / 2), texto, font=fonte(int(15 * esc)), fill=(156, 163, 175), anchor="mm")
+    return cv2.cvtColor(np.asarray(base), cv2.COLOR_RGB2BGR)
+
+
+def lado_a_lado(imagens):
+    """
+    Junta as imagens (BGR) numa só, da esquerda para a direita, com a altura da primeira (as
+    outras são redimensionadas mantendo a proporção). Com uma só imagem, devolve-a tal como está.
+    """
+    if len(imagens) == 1:
+        return imagens[0]
+    altura = imagens[0].shape[0]
+    partes = []
+    for i, img in enumerate(imagens):
+        h, w = img.shape[:2]
+        if h != altura:
+            img = cv2.resize(img, (max(1, round(w * altura / h)), altura), interpolation=cv2.INTER_AREA)
+        if i:
+            partes.append(np.full((altura, SEPARADOR_PX, 3), 12, dtype=np.uint8))
+        partes.append(img)
+    return np.hstack(partes)

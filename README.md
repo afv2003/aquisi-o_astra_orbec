@@ -140,8 +140,20 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    ```bash
    python processar_bag.py data/<nome_da_pasta>/<nome_do_ficheiro>.mcap
    ```
-   *(Exemplo prático: `python processar_bag.py data/viagem_20261110_101500/viagem_20261110_101500_0.mcap --camara 5`)*
-   * Use `--camara 5` ou `--camara 8` para escolher a câmara a processar; cada câmara é processada separadamente.
+   *(Exemplo prático: `python processar_bag.py data/viagem_20261110_101500/viagem_20261110_101500_0.mcap`)*
+   * **Câmaras:** por omissão processam-se **todas as câmaras do bag**. Com as duas, o vídeo mostra-as **lado a lado, a 5 à esquerda e a 8 à direita**, cada uma com o seu painel; o registo (secção 7), a reprodução e a janela de resultados (secção 8) também tratam as duas juntas.
+
+     | Opção | Processa |
+     |---|---|
+     | (nenhuma) | todas as câmaras do bag (as duas, lado a lado, ou a única que tiver) |
+     | `--camara 5` / `--camara 8` | só essa câmara (exatamente como antes) |
+     | `--camara 5,8` | as duas (o mesmo que sem a opção, num bag com as duas) |
+
+     * Cada câmara usa a sua calibração (`config/camera_astra_5.yaml` e `config/camera_astra_8.yaml`); `--calib` só se usa com uma câmara.
+     * As imagens das duas câmaras vêm intercaladas no bag e são processadas pela ordem de gravação, cada uma com os mesmos modelos: **com as duas câmaras, o processamento demora o dobro** (passam o dobro das imagens). Para registar mais depressa, use `--sem-interface` (secção 7) ou desligue os modelos de que não precisa.
+     * As teclas (**C**, **O**, **L**, **E**, **V**, **R**, **Espaço**, **Q**) atuam nas duas câmaras ao mesmo tempo. A janela é larga (1284 px com as Astra) e pode ser redimensionada com o rato, mantendo a proporção.
+     * Antes de chegar a primeira imagem de uma câmara, o lado dela aparece escuro, com `à espera da primeira imagem`.
+     * Os bags antigos, de uma só câmara (tópico `/image_raw`), continuam a funcionar como antes: a câmara lê-se do nome da pasta (`viagem_camara5_...`) ou de `--camara`.
    * Em cada imagem, por esta ordem, o script:
      1. lê a imagem do tópico da câmara e converte-a para cores (BGR);
      2. corrige a distorção da lente com a calibração dessa câmara (secção 3);
@@ -167,7 +179,7 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    * Se a gravação foi interrompida (Docker parado à força, `Ctrl + C` duas vezes, disco cheio) ou a cópia ficou incompleta, falta o índice que o MCAP guarda no fim do ficheiro. O script avisa (`o bag não tem o índice no fim`), lê as imagens sequencialmente desde o início e para no ponto onde o ficheiro foi cortado; o tempo total aparece como desconhecido.
    * Se parte do ficheiro estiver estragada (por exemplo, numa cópia ou transferência), o script verifica cada bloco de dados do MCAP, salta os blocos estragados (avisa `bloco estragado no bag`) e continua; no fim indica quantos segundos de vídeo faltam. Se isto acontecer, copie de novo o ficheiro original e verifique-o (secção 1, Passo 6).
    * **Informação no vídeo:**
-     * **Painel** (canto superior esquerdo): tempo decorrido e total, com barra de progresso; câmara e estado da correção (a laranja quando a imagem não está corrigida); uma linha por modelo, identificado pelo nome (`YOLOv8n`, `CLRNet`, `YOLOP`) e por um marcador da sua cor, com o resultado (número de objetos, número de linhas, percentagem da imagem que é área circulável) e o tempo da etapa; no fim, as imagens processadas por segundo e o ritmo da gravação.
+     * **Painel** (canto superior esquerdo de cada câmara): tempo decorrido e total, com barra de progresso; câmara e estado da correção (a laranja quando a imagem não está corrigida); uma linha por modelo, identificado pelo nome (`YOLOv8n`, `CLRNet`, `YOLOP`) e por um marcador da sua cor, com o resultado (número de objetos, número de linhas, percentagem da imagem que é área circulável) e o tempo da etapa; no fim, as imagens processadas por segundo e o ritmo da gravação.
      * **Cores fixas**, as mesmas em todas as imagens (definidas no `visual.py`):
 
        | Modelo (nome no painel) | Deteta | Desenho | Cor |
@@ -262,7 +274,7 @@ config/camera_astra_8.yaml
 ```
 
 ### Passo 3: Usar
-O `processar_bag.py` usa automaticamente `config/camera_astra_<N>.yaml` da câmara processada (escolha da câmara: secção 2, Passo 2).
+O `processar_bag.py` usa automaticamente `config/camera_astra_<N>.yaml` de cada câmara processada (com as duas câmaras, cada uma com o seu ficheiro; escolha das câmaras: secção 2, Passo 2). `--calib` (outro ficheiro) só se usa com uma câmara.
 ```bash
 python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --calib outro.yaml   # outro ficheiro de calibração
 python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --sem-correcao       # sem correção
@@ -484,11 +496,13 @@ O `processar_bag.py` pode guardar as deteções de cada imagem num ficheiro, par
 ### 7.1 Registar
 O registo é feito por **trechos**: só se guardam as imagens entre o início e o fim de cada trecho. Pode haver vários trechos na mesma execução; ficam todos no mesmo registo (o mesmo "ensaio").
 ```bash
-python processar_bag.py <bag>.mcap --camara 5                                   # tecla R: começa/termina cada trecho
-python processar_bag.py <bag>.mcap --camara 5 --sem-interface                   # sem janela; tecla R no terminal
-python processar_bag.py <bag>.mcap --camara 5 --sem-interface --registar-tudo   # o vídeo todo, sem teclas
-python processar_bag.py <bag>.mcap --camara 5 --sem-interface --trechos "10-20,35.5-50,60-"
+python processar_bag.py <bag>.mcap                                   # tecla R: começa/termina cada trecho (as duas câmaras)
+python processar_bag.py <bag>.mcap --sem-interface                   # sem janela; tecla R no terminal
+python processar_bag.py <bag>.mcap --sem-interface --registar-tudo   # o vídeo todo, sem teclas
+python processar_bag.py <bag>.mcap --sem-interface --trechos "10-20,35.5-50,60-"
+python processar_bag.py <bag>.mcap --camara 5 --registar-tudo        # só a câmara 5
 ```
+* **Duas câmaras:** um só ensaio para as duas; os trechos são **comuns** (a tecla R ou `--trechos` marcam o mesmo intervalo de tempo nas duas câmaras) e cada câmara tem o seu tópico no `deteccoes.mcap`, como no tempo real.
 * **Tecla R** (com ou sem janela): a primeira vez começa um trecho, a seguinte termina-o, e assim sucessivamente. Com janela, aparece no canto superior direito o indicador vermelho `REGISTO · trecho N · tempo`; sem janela, o estado aparece na linha de progresso do terminal. Se o vídeo acabar (ou carregar em Q) com um trecho aberto, o trecho termina na última imagem processada.
 * **`--trechos`**: os trechos em segundos desde o início do bag (`60-` = do segundo 60 até ao fim). Dá sempre os mesmos trechos, ao contrário da tecla; com esta opção a tecla R não é usada. `--registar-tudo` é o mesmo que `--trechos 0-`.
 * **`--sem-interface`**: sem janela, o processamento não espera pelo ritmo da gravação (vai o mais depressa possível) e não desenha nada, por isso é a forma mais rápida de registar. As teclas são lidas do terminal (**R**, **Espaço**, **Q**). Se a entrada não for um terminal (por exemplo, num contentor sem `-it`), as teclas não funcionam e o script avisa: use `--trechos` ou `--registar-tudo`.
@@ -497,12 +511,12 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-interface --trechos "10-20,3
 ### 7.2 Onde fica e formato
 Cada execução com pelo menos um trecho cria uma pasta (um **ensaio**):
 ```
-data_offline/<viagem>/camara<N>_<data_hora>/
-    deteccoes.mcap    as deteções de todas as imagens de todos os trechos
-    ensaio.json       bag de origem, câmara, calibração usada, modelos e limiares, e a lista de trechos
-    trecho_<N>.mp4    (só depois de exportar com o reproduzir_registo.py)
+data_offline/<viagem>/camaras5e8_<data_hora>/     (duas câmaras; com uma: camara5_<data_hora>/ ou camara8_...)
+    deteccoes.mcap    as deteções de todas as imagens de todos os trechos (de todas as câmaras)
+    ensaio.json       bag de origem, câmaras, calibração de cada câmara, modelos e limiares, e a lista de trechos
+    trecho_<N>.mp4    (só depois de exportar com o reproduzir_registo.py; com as duas câmaras, lado a lado)
 ```
-* **`deteccoes.mcap`**: um ROS bag (MCAP), como o do tempo real, com uma mensagem por imagem no tópico `/camara<N>/processamento/dados_deteccoes`, do tipo `std_msgs/msg/String`, com um JSON:
+* **`deteccoes.mcap`**: um ROS bag (MCAP), como o do tempo real, com uma mensagem por imagem no tópico da sua câmara, `/camara5/processamento/dados_deteccoes` ou `/camara8/processamento/dados_deteccoes`, do tipo `std_msgs/msg/String`, com um JSON:
 
   | Campo | Conteúdo | Também no tempo real |
   |---|---|---|
@@ -510,14 +524,15 @@ data_offline/<viagem>/camara<N>_<data_hora>/
   | `linhas` | pontos de cada linha, `[[[x, y], ...], ...]` | sim |
   | `estrada_percentagem` | fração da imagem que é área circulável (0 a 1) | sim |
   | `stamp_ns` | instante da imagem no bag original (ns): é o que liga a deteção à imagem | não |
+  | `camara` | câmara da imagem (`"5"` ou `"8"`; também está no tópico) | não |
   | `trecho` | número do trecho | não |
   | `corrigida` | se a imagem estava corrigida da distorção (as coordenadas são dessa imagem) | não |
   | `modelos_ativos` | que modelos correram nessa imagem | não |
   | `estrada_contornos`, `estrada_buracos` | contorno da área circulável, para a voltar a desenhar | não |
 
   Os campos extra não incomodam quem só lê os três primeiros. O instante de cada mensagem no MCAP é também o da imagem original (no tempo real é o instante do processamento).
-* **`ensaio.json`**: texto legível, com tudo o que é preciso para refazer os vídeos: caminho do bag, tópico da imagem, calibração usada (K, D), nomes e limiares dos modelos, e para cada trecho o início e o fim (em ns e em segundos desde o início do bag) e o número de imagens. É atualizado sempre que um trecho termina, por isso não se perde se o programa parar.
-* **Tamanho:** cerca de 3 KB por imagem (cerca de 300 MB por hora de vídeo a 30 imagens por segundo, com os três modelos ligados).
+* **`ensaio.json`**: texto legível, com tudo o que é preciso para refazer os vídeos: caminho do bag; a lista `camaras`, com o tópico da imagem, o tópico das deteções, a calibração usada (K, D) e o tamanho da imagem de cada câmara; nomes e limiares dos modelos; e para cada trecho o início e o fim (em ns e em segundos desde o início do bag) e o número de imagens (total e `imagens_por_camara`). É atualizado sempre que um trecho termina, por isso não se perde se o programa parar. Os registos feitos antes (de uma câmara, sem a lista `camaras`) continuam a ser lidos pelo `reproduzir_registo.py` e pela janela de resultados.
+* **Tamanho:** cerca de 3 KB por imagem (cerca de 300 MB por hora de vídeo a 30 imagens por segundo, com os três modelos ligados; o dobro com as duas câmaras).
 * A pasta `data_offline/` não vai para o git (está no `.gitignore`), tal como `data/`.
 
 ### 7.3 Ver ou exportar um trecho (`reproduzir_registo.py`)
@@ -527,13 +542,15 @@ python reproduzir_registo.py data_offline/<viagem>/<ensaio>             # mostra
 python reproduzir_registo.py data_offline/<viagem>/<ensaio> --trecho 2  # só o trecho 2 (pode repetir: --trecho 1 --trecho 3)
 python reproduzir_registo.py data_offline/<viagem>/<ensaio> --exportar  # grava trecho_<N>.mp4 na pasta do ensaio
 python reproduzir_registo.py data_offline/<viagem>/<ensaio> --exportar --sem-interface   # só grava, sem janela
+python reproduzir_registo.py data_offline/<viagem>/<ensaio> --camara 8  # registo de duas câmaras: só a câmara 8
 ```
+* **Duas câmaras:** por omissão, as imagens aparecem lado a lado (5 à esquerda, 8 à direita), como no `processar_bag.py`, e o `.mp4` exportado também (`trecho_<N>.mp4`). Com `--camara 5` ou `--camara 8` mostra-se e exporta-se só essa câmara (`trecho_<N>_camara8.mp4`). O ritmo do vídeo é o da câmara com mais imagens no trecho; a outra câmara mostra sempre a sua imagem mais recente.
 * **Como funciona:** lê do bag original só as imagens entre o início e o fim de cada trecho e junta a cada uma as deteções com o mesmo instante (`stamp_ns`). Aplica a mesma correção da distorção (com a calibração guardada no `ensaio.json`) e desenha com o mesmo aspeto do `processar_bag.py` (`visual.py`). Os modelos **não** voltam a correr.
 * **Teclas:** **Espaço** pausa, **N** passa ao trecho seguinte, **Q** sai.
 * **Velocidade (só na janela):** **1** tempo real, **2** duas vezes mais lento, **3** três vezes mais lento; **-** e **+** abrandam ou aceleram em passos de 0.5x, entre 1x e 3x. A velocidade aparece no canto inferior direito. O vídeo exportado (`--exportar`) fica sempre em tempo real, qualquer que seja a velocidade escolhida.
 * **Bag original:** é procurado onde estava no processamento e em `data/<viagem>/`. Se o mudou de sítio, use `--bag <caminho do .mcap>`. O script avisa se o tamanho não for o do bag processado.
 * Os vídeos `.mp4` têm o ritmo da gravação (por exemplo, 30 imagens por segundo), qualquer que tenha sido a velocidade do processamento.
-* Os registos do tempo real (branch `novo_docker`) têm o mesmo formato de deteções, mas não guardam as imagens nem o `ensaio.json`; para os reproduzir assim, essa gravação teria de guardar também o tópico `/camara<N>/image_raw`.
+* Os registos do tempo real (branch `novo_docker`) têm o mesmo formato de deteções (também um tópico por câmara), mas não guardam as imagens nem o `ensaio.json`; para os reproduzir assim, essa gravação teria de guardar também o tópico `/camara<N>/image_raw`.
 
 ---
 
@@ -546,28 +563,34 @@ python gui_resultados.py --pasta-registo outra_pasta  # registos noutra pasta
 ```
 * **Bibliotecas:** `customtkinter` (aspeto da janela) e `tkintermapview` (mapa), no `requirements.txt`. Num `venv` que já existia (sobretudo com a versão GPU, secção 2, Passo 3), instale só estas: `pip install customtkinter tkintermapview`.
 * Os registos são lidos de `data_offline`. Se a pasta não existir ou não tiver registos, a janela avisa e a tab **Percurso** fica indisponível.
+* **Registos de uma ou de duas câmaras:** a janela adapta-se ao registo escolhido. Com uma câmara, tudo fica como antes. Com duas, aparece a escolha da câmara (abaixo) e, ao escolher as duas, o aspeto muda: tabelas com uma coluna/valor por câmara, vídeo lado a lado com mais espaço, e veículos contados por **instante** (soma das duas câmaras). Na lista, os registos de duas câmaras dizem `câmaras 5 e 8`.
 
 ### 8.1 Tab Resumo
 * Escolhe-se o registo (por omissão, o mais recente) e o **trecho** (todos, ou um só); tudo o que é mostrado se refere à escolha.
+* **Câmara** (só nos registos de duas câmaras): **Ambas**, **Câmara 5** ou **Câmara 8**. Com uma só, o resumo é igual ao de um registo de uma câmara. Com **Ambas**:
+  * Vídeo e registo: as duas câmaras, a correção de cada uma e o número de imagens de cada uma;
+  * Linhas e área circulável: um valor por câmara (`5: … · 8: …`);
+  * Deteções por categoria: colunas com as deteções de cada câmara; média, máximo e % contam as imagens das duas;
+  * Veículos: **por instante**, somando as duas câmaras (cada imagem de uma câmara com a imagem da outra mais próxima no tempo, até 0,25 s), e a média de cada câmara.
 * **Vídeo e registo:** bag, câmara, duração, correção da distorção, data do processamento, trechos, e o número de imagens e a duração do que está selecionado.
 * **Modelos:** limiar de cada modelo, tempo médio por imagem, classes do YOLO e velocidade do processamento.
 * **Linhas e área circulável:** linhas por imagem e % de imagens sem linhas (CLRNet); área circulável média, mínima e máxima (YOLOP).
 * **Deteções por categoria (YOLO):** para cada classe, deteções, média por imagem, máximo numa imagem, % de imagens com a classe e confiança média. As deteções são somadas imagem a imagem (o mesmo veículo visto em 30 imagens conta 30 vezes): sem seguimento dos objetos, não se sabe quantos veículos diferentes passaram.
-* **Veículos por imagem:** média, máximo e a % de imagens em cada gama de cores do mapa (tab Percurso).
+* **Veículos por imagem** (com as duas câmaras, **por instante**): média, máximo e a % de imagens (instantes) em cada gama de cores do mapa (tab Percurso).
 
 ### 8.2 Tab Percurso
 Sem GPS, a ligação entre o vídeo e o mapa faz-se à mão, em três passos por trecho.
 
-0. **Registo, trecho e intervalo:** escolhe-se o registo (da lista, ou noutra pasta com «Outra pasta…»), um trecho ou «Todos os trechos», e o intervalo entre referências (5 s por omissão).
+0. **Registo, trecho e intervalo:** escolhe-se o registo (da lista, ou noutra pasta com «Outra pasta…»), um trecho ou «Todos os trechos», e o intervalo entre referências (5 s por omissão). Num registo de duas câmaras escolhe-se também as **câmaras**: as duas (vídeo lado a lado e cor pela soma dos veículos das duas) ou só uma (tudo como num registo de uma câmara).
 1. **Trajeto** (a forma do caminho): escrevem-se as coordenadas de início (`latitude, longitude`, por exemplo `40.6405, -8.6538`, como o Google Maps as copia) e carrega-se em **Ir**; depois clica-se no mapa ponto a ponto, pela ordem em que foi feito, com pontos suficientes para seguir as curvas. «Desfazer ponto» e «Limpar» corrigem. Arrastar move o mapa; a roda do rato aproxima.
-2. **Pontos de referência** (onde estava o carro em instantes fixos): a janela mostra a imagem do vídeo em cada instante múltiplo do intervalo, contado desde o início da gravação (5, 10, 15 s…; num trecho de 12,3 a 31,0 s: 15, 20, 25 e 30 s), e clica-se no mapa onde o carro está. O ponto é encostado ao trajeto e fica marcado com um pequeno círculo branco.
+2. **Pontos de referência** (onde estava o carro em instantes fixos): a janela mostra a imagem do vídeo (com as duas câmaras, as duas lado a lado, o que ajuda a reconhecer o sítio) em cada instante múltiplo do intervalo, contado desde o início da gravação (5, 10, 15 s…; num trecho de 12,3 a 31,0 s: 15, 20, 25 e 30 s), e clica-se no mapa onde o carro está. O ponto é encostado ao trajeto e fica marcado com um pequeno círculo branco.
    * **Saltar:** se não reconhecer o sítio nesse instante; os dois intervalos vizinhos juntam-se.
    * **Pontos de curva:** se o trajeto cortar uma esquina, escolha **«Acrescentar curva»** (em cima, ao lado de «Marcar referência») e clique no mapa por onde a rua passa; o ponto entra no troço do trajeto mais perto e as referências são reencostadas. Volte a «Marcar referência» para continuar. O botão direito no mapa («Acrescentar ponto de curva ao trajeto aqui») faz o mesmo.
    * Se o trecho for mais curto do que o intervalo, não há referências a marcar: aparece a primeira imagem do trecho e pode passar ao passo seguinte.
    * Uma referência não pode ficar antes da anterior no trajeto; o início e o fim do trecho ficam ligados ao início e ao fim do trajeto.
-3. **Mapa, vídeo e intervalos lado a lado:** à esquerda o trajeto, ao meio o vídeo do trecho (com as deteções registadas), à direita a tabela de **intervalos** (entre referências): tempo, coordenadas da referência de início, média de veículos e drift, cada linha com o fundo da cor do intervalo e o intervalo em curso a negrito; em baixo, o resumo do trecho (distância, duração, velocidade média, veículos por imagem, referências e drift). **Run** começa e **Parar** pára; com vários trechos, passam seguidos.
+3. **Mapa, vídeo e intervalos lado a lado:** à esquerda o trajeto, ao meio o vídeo do trecho (com as deteções registadas; com as duas câmaras, lado a lado, e o vídeo fica com mais largura e o mapa com menos), à direita a tabela de **intervalos** (entre referências): tempo, coordenadas da referência de início, média de veículos e drift, cada linha com o fundo da cor do intervalo e o intervalo em curso a negrito; em baixo, o resumo do trecho (distância, duração, velocidade média, veículos por imagem, referências e drift). **Run** começa e **Parar** pára; com vários trechos, passam seguidos.
 
-**Cores:** cada intervalo é pintado com a cor da **média de veículos por imagem** nesse intervalo (`car`, `motorcycle`, `bicycle`, `bus`, `truck`; pessoas e sinais não contam). A cor só aparece quando o vídeo passa por esse intervalo.
+**Cores:** cada intervalo é pintado com a cor da **média de veículos por imagem** nesse intervalo (`car`, `motorcycle`, `bicycle`, `bus`, `truck`; pessoas e sinais não contam); com as duas câmaras, da média de veículos **por instante, somando as duas câmaras** (os veículos à volta do carro, dos dois lados). A cor só aparece quando o vídeo passa por esse intervalo.
 
 | Média de veículos (arredondada) | 0 | 1–2 | 3–5 | 6 ou mais |
 |---|---|---|---|---|

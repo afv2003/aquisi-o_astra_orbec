@@ -12,6 +12,7 @@ para os registos online e offline poderem ser lidos da mesma forma:
       "estrada_percentagem": 0.22                        (fração da imagem que é área circulável, 0 a 1)
 
 Campos acrescentados no registo offline (quem lê só os três campos acima não é afetado):
+      "camara":            câmara da imagem ("5" ou "8"; também está no nome do tópico);
       "stamp_ns":          instante da imagem no bag original (ns), para a encontrar depois;
       "trecho":            número do trecho (1, 2, ...) a que a imagem pertence;
       "corrigida":         se a imagem estava corrigida da distorção (as coordenadas são dessa imagem);
@@ -23,9 +24,16 @@ O instante de cada mensagem no MCAP (log_time) é também o da imagem original.
 
 Cada processamento com registo cria uma pasta (um "ensaio") com:
   deteccoes.mcap   as mensagens de todos os trechos registados;
-  ensaio.json      bag de origem, câmara, calibração usada, modelos e parâmetros, e a lista de trechos
-                   (início e fim de cada um), para se poder refazer o vídeo de qualquer trecho.
+  ensaio.json      bag de origem, câmara(s), calibração usada, modelos e parâmetros, e a lista de
+                   trechos (início e fim de cada um), para se poder refazer o vídeo de qualquer trecho.
+
+Duas câmaras: o ensaio é um só (os trechos são os mesmos para as duas) e o deteccoes.mcap tem um
+tópico por câmara (/camara5/processamento/dados_deteccoes e /camara8/...), como no tempo real.
+O ensaio.json tem a lista "camaras", com o tópico da imagem, o tópico das deteções, a calibração e
+o tamanho da imagem de cada câmara (camaras_do_ensaio lê também os ensaios antigos, de uma câmara).
 """
+import bisect
+import re
 import datetime
 import json
 from pathlib import Path
@@ -35,12 +43,18 @@ import numpy as np
 
 TIPO_MENSAGEM = "std_msgs/msg/String"
 DEFINICAO_MENSAGEM = "string data"
-VERSAO_FORMATO = 1
+VERSAO_FORMATO = 2      # 2: lista "camaras" no ensaio.json (uma ou duas câmaras no mesmo ensaio)
 
 
 def topico_deteccoes(camara):
     """Igual ao da branch novo_docker."""
     return f"/camara{camara}/processamento/dados_deteccoes" if camara else "/processamento/dados_deteccoes"
+
+
+def camara_do_topico(topico):
+    """'/camara5/processamento/dados_deteccoes' -> '5' (None se o tópico não tiver câmara)."""
+    m = re.match(r"/camara([0-9A-Za-z]+)/", topico)
+    return m.group(1) if m else None
 
 
 def contornos_da_mascara(mascara, area_minima=200, tolerancia_px=1.5):
@@ -68,7 +82,7 @@ def mascara_dos_contornos(exteriores, buracos, largura, altura):
 
 
 def dados_deteccoes(caixas, linhas_pontos, mascara_estrada, stamp_ns, trecho=None, corrigida=None,
-                    modelos_ativos=None):
+                    modelos_ativos=None, camara=None):
     """Mesmos campos (e arredondamentos) do processar_tempo_real.py, mais os campos offline."""
     exteriores, buracos = contornos_da_mascara(mascara_estrada)
     return {
@@ -79,6 +93,7 @@ def dados_deteccoes(caixas, linhas_pontos, mascara_estrada, stamp_ns, trecho=Non
         "linhas": [[[round(float(pt[0]), 1), round(float(pt[1]), 1)] for pt in linha] for linha in linhas_pontos],
         "estrada_percentagem": float(mascara_estrada.mean()) if mascara_estrada is not None else 0.0,
         "stamp_ns": int(stamp_ns),
+        "camara": camara,
         "trecho": trecho,
         "corrigida": corrigida,
         "modelos_ativos": modelos_ativos,
@@ -90,13 +105,19 @@ def dados_deteccoes(caixas, linhas_pontos, mascara_estrada, stamp_ns, trecho=Non
 class Registador:
     """
     Escreve o registo de um ensaio. A pasta só é criada quando começa o primeiro trecho.
-    Uso: iniciar_trecho(t) -> escrever(t, dados) por imagem -> terminar_trecho() -> ... -> fechar().
+    Uso: iniciar_trecho(t) -> escrever(t, dados, camara) por imagem -> terminar_trecho() -> ... -> fechar().
+    camaras: lista das câmaras do ensaio (ou uma só câmara, ou None); com duas, os trechos são comuns
+    e cada câmara escreve no seu tópico.
     """
 
-    def __init__(self, pasta, camara, metadados):
+    def __init__(self, pasta, camaras, metadados):
         self.pasta = Path(pasta)
-        self.camara = camara
-        self.topico = topico_deteccoes(camara)
+        if camaras is None or isinstance(camaras, str):
+            camaras = [camaras]
+        self.camaras = list(camaras)
+        self.camara = self.camaras[0]
+        self.topicos = {c: topico_deteccoes(c) for c in self.camaras}
+        self.topico = self.topicos[self.camara]
         self.metadados = dict(metadados)
         self.trechos = []
         self.trecho = None          # trecho em curso (dict) ou None
@@ -126,18 +147,23 @@ class Registador:
             return
         if self._escritor is None:
             self._abrir()
-        self.trecho = {"n": len(self.trechos) + 1, "inicio_ns": None, "fim_ns": None, "imagens": 0}
+        self.trecho = {"n": len(self.trechos) + 1, "inicio_ns": None, "fim_ns": None, "imagens": 0,
+                       "imagens_por_camara": {str(c): 0 for c in self.camaras}}
         if extra:
             self.trecho.update(extra)
 
-    def escrever(self, t_ns, dados):
+    def escrever(self, t_ns, dados, camara=None):
         if not self.a_registar:
             return
+        camara = self.camara if camara is None else camara
         if self.trecho["inicio_ns"] is None:
             self.trecho["inicio_ns"] = int(t_ns)
-        self.trecho["fim_ns"] = int(t_ns)
+        self.trecho["inicio_ns"] = min(self.trecho["inicio_ns"], int(t_ns))
+        self.trecho["fim_ns"] = max(self.trecho["fim_ns"] or 0, int(t_ns))
         self.trecho["imagens"] += 1
-        self._escritor.write_message(self.topico, self._esquema, {"data": json.dumps(dados, separators=(",", ":"))},
+        self.trecho["imagens_por_camara"][str(camara)] = self.trecho["imagens_por_camara"].get(str(camara), 0) + 1
+        self._escritor.write_message(self.topicos[camara], self._esquema,
+                                     {"data": json.dumps(dados, separators=(",", ":"))},
                                      log_time=int(t_ns), publish_time=int(t_ns))
 
     def terminar_trecho(self):
@@ -162,8 +188,9 @@ class Registador:
                                 "campos extra: stamp_ns, trecho, corrigida, modelos_ativos, "
                                 "estrada_contornos, estrada_buracos"},
             "atualizado_em": datetime.datetime.now().isoformat(timespec="seconds"),
-            "camara": self.camara,
-            "topico_deteccoes": self.topico,
+            # campos de uma câmara (como nos ensaios antigos); com duas, ver "camaras"
+            "camara": self.camara if len(self.camaras) == 1 else None,
+            "topico_deteccoes": self.topico if len(self.camaras) == 1 else None,
             "ficheiro_deteccoes": "deteccoes.mcap",
             **self.metadados,
             "trechos": self.trechos,
@@ -195,6 +222,32 @@ def ler_ensaio(pasta):
     return json.loads(caminho.read_text(encoding="utf-8"))
 
 
+def camaras_do_ensaio(ensaio):
+    """
+    Câmaras de um ensaio, pela ordem do ecrã (5 à esquerda, 8 à direita): lista de dicionários com
+    camara, topico_imagem, topico_deteccoes, calibracao (dict ou None) e imagem ({largura, altura}).
+    Funciona com os ensaios novos (lista "camaras") e com os antigos (uma câmara, campos no topo).
+    """
+    if ensaio.get("camaras"):
+        cams = [dict(c) for c in ensaio["camaras"]]
+    else:
+        c = ensaio.get("camara")
+        cams = [{"camara": c, "topico_imagem": ensaio.get("bag", {}).get("topico_imagem"),
+                 "topico_deteccoes": ensaio.get("topico_deteccoes") or topico_deteccoes(c),
+                 "calibracao": ensaio.get("calibracao"), "imagem": ensaio.get("imagem")}]
+    import visual
+    ordem = visual.ordenar_camaras([c["camara"] for c in cams])
+    return sorted(cams, key=lambda c: ordem.index(c["camara"]))
+
+
+def texto_camaras(camaras):
+    """['5', '8'] -> '5 e 8'."""
+    camaras = [str(c) for c in camaras if c is not None]
+    if not camaras:
+        return "—"
+    return camaras[0] if len(camaras) == 1 else ", ".join(camaras[:-1]) + " e " + camaras[-1]
+
+
 def listar_ensaios(base):
     """Todas as pastas de ensaio (com ensaio.json) dentro de base, da mais antiga para a mais recente."""
     return sorted((p.parent for p in Path(base).rglob("ensaio.json")), key=lambda p: p.stat().st_mtime)
@@ -220,8 +273,9 @@ def ler_trechos_texto(texto):
 
 def ler_deteccoes(caminho_mcap):
     """
-    {instante_ns: dados} de todas as mensagens .../processamento/dados_deteccoes de um MCAP
-    (registo offline ou do processamento em tempo real). Lê também ficheiros sem índice.
+    {câmara: {instante_ns: dados}} de todas as mensagens .../processamento/dados_deteccoes de um MCAP
+    (registo offline ou do processamento em tempo real, com uma ou duas câmaras). A câmara vem do
+    tópico (/camara5/...); num tópico sem câmara, a chave é None. Lê também ficheiros sem índice.
     """
     from mcap.reader import NonSeekingReader
     from mcap_ros2.decoder import DecoderFactory
@@ -234,9 +288,11 @@ def ler_deteccoes(caminho_mcap):
                 if not m.channel.topic.endswith("/processamento/dados_deteccoes"):
                     continue
                 dados = json.loads(m.ros_msg.data)
-                deteccoes[int(dados.get("stamp_ns", m.log_time_ns))] = dados
+                camara = camara_do_topico(m.channel.topic) or dados.get("camara")
+                deteccoes.setdefault(camara, {})[int(dados.get("stamp_ns", m.log_time_ns))] = dados
         except Exception as e:
-            print(f"Aviso: o registo está incompleto ({type(e).__name__}); foram lidas {len(deteccoes)} mensagens.")
+            lidas = sum(len(d) for d in deteccoes.values())
+            print(f"Aviso: o registo está incompleto ({type(e).__name__}); foram lidas {lidas} mensagens.")
     return deteccoes
 
 
@@ -248,6 +304,41 @@ VEICULOS = ("car", "motorcycle", "bicycle", "bus", "truck")   # classes do COCO 
 
 def n_veiculos(dados):
     return sum(1 for o in dados.get("objetos", []) if o["classe"] in VEICULOS)
+
+
+def veiculos_por_instante(por_camara, inicio_ns=None, fim_ns=None, tolerancia_ns=250_000_000):
+    """
+    Veículos (VEICULOS) em cada instante, somando as câmaras: [(instante_ns, n), ...].
+    por_camara: {câmara: {instante_ns: dados}} (só as câmaras a considerar). Com uma câmara, é o
+    número de veículos de cada imagem. Com duas, cada imagem da câmara com mais imagens é somada com
+    a imagem da outra câmara mais próxima no tempo (até tolerancia_ns de diferença; sem nenhuma tão
+    perto, essa câmara não conta nesse instante). Só entram imagens com os objetos ligados e, se
+    dados, entre inicio_ns (inclusive) e fim_ns (exclusive).
+    """
+    def dentro(t):
+        return (inicio_ns is None or t >= inicio_ns) and (fim_ns is None or t < fim_ns)
+
+    listas = {}
+    for cam, det in por_camara.items():
+        ts = sorted(t for t, d in det.items() if dentro(t)
+                    and (d.get("modelos_ativos") or {}).get("objetos", True))
+        listas[cam] = (ts, det)
+    if not listas:
+        return []
+    ref = max(listas, key=lambda c: len(listas[c][0]))
+    resultado = []
+    for t in listas[ref][0]:
+        n = n_veiculos(listas[ref][1][t])
+        for cam, (ts, det) in listas.items():
+            if cam == ref or not ts:
+                continue
+            i = bisect.bisect_left(ts, t)
+            vizinhos = [ts[j] for j in (i - 1, i) if 0 <= j < len(ts)]
+            mais_perto = min(vizinhos, key=lambda x: abs(x - t))
+            if abs(mais_perto - t) <= tolerancia_ns:
+                n += n_veiculos(det[mais_perto])
+        resultado.append((t, n))
+    return resultado
 
 
 def estatisticas(lista_dados, gamas=None):
