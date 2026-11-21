@@ -13,7 +13,7 @@ Há **dois modos de trabalho**, que partilham o mesmo ponto de partida (o vídeo
 
 | Secção | Conteúdo | Onde corre |
 |---|---|---|
-| [1](#1-visão-geral) | Visão geral: os dois modos, o ponto comum, quando usar cada um, relevância para a parte 2, ficheiros e pré-requisitos | — |
+| [1](#1-visão-geral) | Visão geral: os dois modos, o ponto comum, quando usar cada um, relevância para a parte 2, ficheiros, pré-requisitos e preparação do PC Linux (Docker, projeto, disco externo) | — |
 | [2](#2-preparação-calibração-das-câmaras) | Preparação: calibração das câmaras (correção da distorção da lente) | Windows (ou Linux), com Python |
 | [3](#3-modo-offline-gravar-no-veículo-processar-depois) | **Modo offline**: gravar no veículo (Docker de aquisição) → processar o bag → registar → reproduzir → janela de resultados | gravação: Linux com Docker; processamento: Windows, Linux ou macOS, com `venv` |
 | [4](#4-modo-online-processar-em-tempo-real-no-veículo) | **Modo online**: processar em tempo real (Docker de tempo real), gravar só os trechos marcados → resumo no fim | Linux com Docker (CPU ou GPU NVIDIA) |
@@ -134,10 +134,33 @@ O modo offline serve para desenvolver e validar a deteção (todas as imagens, p
 | `requirements.txt` | bibliotecas Python (`venv` do offline e Docker do online) | ambos |
 
 ### 1.5 Pré-requisitos
-* **Modo offline, gravação (3.1 a 3.7)** e **modo online (secção 4):** Linux com Docker e Docker Compose. Para o online com GPU: placa NVIDIA e NVIDIA Container Toolkit (4.3).
+* **Modo offline, gravação (3.1 a 3.7)** e **modo online (secção 4):** Linux com Docker e Docker Compose (instalação em 1.6). Para o online com GPU: placa NVIDIA e NVIDIA Container Toolkit (4.3).
 * **Modo offline, processamento (3.8 a 3.15):** Python 3 (com `venv`), em Windows, Linux ou macOS. GPU NVIDIA opcional (3.10).
 * **Calibração (secção 2):** Python 3 com `opencv-python` e `numpy`, a câmara ligada por USB e um xadrez impresso.
 * **Percurso no mapa (3.15.2):** ligação à internet (mapa do OpenStreetMap).
+
+### 1.6 Preparar o PC Linux dos Docker (uma vez)
+Os dois Docker (aquisição, secção 3, e tempo real, secção 4) correm no PC Linux do veículo. Nesse PC, uma única vez:
+1. **Instalar o Docker e o Docker Compose:** siga o guia oficial ([docs.docker.com/engine/install/ubuntu](https://docs.docker.com/engine/install/ubuntu/)), que instala o Docker Engine e o plugin `docker compose`.
+2. **Usar o Docker sem `sudo`:** junte o seu utilizador ao grupo `docker` e volte a entrar na sessão (ou reinicie o PC):
+   ```bash
+   sudo usermod -aG docker $USER
+   ```
+3. **Confirmar:**
+   ```bash
+   docker compose version
+   docker run --rm hello-world
+   ```
+   Se aparecer `permission denied ... docker.sock`, falta o passo 2 (ou voltar a entrar na sessão).
+4. **Obter o projeto** (a pasta onde se corre tudo; as gravações ficam dentro dela):
+   ```bash
+   git clone https://github.com/afv2003/aquisi-o_astra_orbec
+   cd aquisi-o_astra_orbec
+   ```
+   Para atualizar mais tarde: `git pull` nessa pasta. Os modelos de `modelos/` vêm com o repositório.
+5. **GPU NVIDIA (opcional, só para o online):** 4.3.
+
+**Gravar num disco externo:** as gravações ficam em pastas dentro do projeto (`data/` na aquisição, `data_realtime_inter/` no online), cerca de **2 GB por minuto** com as duas câmaras. Para irem para um disco externo, **clone o projeto no próprio disco** (passo 4, dentro da pasta do disco) e corra os comandos a partir daí; não use um atalho (*symlink*) para as pastas de dados, porque o Docker do online monta a pasta do projeto e não segue atalhos para fora dela. Use um disco **USB 3** (são cerca de 35 MB/s contínuos), de preferência formatado em **ext4** (ou exFAT, se também tiver de ser lido no Windows), numa porta USB de outro lado das câmaras.
 
 ---
 
