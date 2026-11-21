@@ -3,7 +3,8 @@
 # processamento em tempo real. Serve sobretudo sem janela (processar_inter.sh ... -i); com janela,
 # use a tecla D. Corra noutro terminal, na pasta do projeto, com o processamento a decorrer:
 #   bash alternar_camara.sh
-# A gravação do vídeo não é afetada: só a deteção dessa câmara é que pára.
+# Enquanto a deteção dessa câmara estiver desligada, o vídeo dela também não é gravado nos trechos
+# (a outra câmara continua a ser processada e gravada, e mais vezes por segundo).
 set -euo pipefail
 
 if ! docker compose -f compose_realtime_inter.yaml ps --status running processador 2>/dev/null | grep -q processador; then

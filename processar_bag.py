@@ -59,7 +59,8 @@ parser.add_argument("--sem-interface", action="store_true",
                          "terminal (as teclas R, Espaço e Q funcionam no terminal)")
 parser.add_argument("--trechos", type=str, default=None,
                     help="Registar estes trechos, em segundos desde o início do bag, ex.: \"10-20,35.5-50,60-\" "
-                         "(\"60-\" = do segundo 60 até ao fim). Sem esta opção, os trechos marcam-se com a tecla R")
+                         "(\"60-\" = do segundo 60 até ao fim). Sem esta opção, os trechos marcam-se com a tecla R "
+                         "(num bag do online, que só tem os trechos gravados no online, são esses os trechos)")
 parser.add_argument("--registar-tudo", action="store_true",
                     help="Registar o vídeo todo (o mesmo que --trechos 0-)")
 parser.add_argument("--pasta-registo", type=str, default="data_offline",
@@ -136,6 +137,22 @@ else:  # bag antigo (uma câmara, tópico /image_raw) ou sem índice de tópicos
     camaras = [camara]
     topico_da_camara = {t: camara for t in ["/image_raw"] + ([f"/camara{camara}/image_raw"] if camara and not topicos else [])}
 topicos_leitura = list(topico_da_camara)
+
+# --- BAG DO ONLINE (gravado só nos trechos) ---
+# O processar_tempo_real.py grava o vídeo original só nos trechos e marca o início e o fim de cada um
+# no tópico /processamento/trechos (e as câmaras ligadas em /processamento/estado_camaras). Nesse caso,
+# sem --trechos, os trechos do registo são os do online (mesmos números e instantes). Sem índice não
+# se sabe antes de ler; os tópicos são lidos na mesma (se não existirem, não aparecem).
+TOPICO_TRECHOS_ONLINE = "/processamento/trechos"
+TOPICO_ESTADO_ONLINE = "/processamento/estado_camaras"
+bag_online = TOPICO_TRECHOS_ONLINE in topicos
+if bag_online or not topicos:
+    topicos_leitura += [TOPICO_TRECHOS_ONLINE, TOPICO_ESTADO_ONLINE]
+trechos_do_online = trechos_pedidos is None          # usar os trechos do online (se o bag os tiver)
+if bag_online:
+    print("Bag do online: só tem os trechos gravados no online"
+          + (" (os trechos do registo são esses)." if trechos_do_online else
+             f"; registam-se os trechos pedidos ({args.trechos} s desde o início da sessão)."))
 duas = len(camaras) > 1
 if args.calib and duas:
     print("Erro: --calib só se usa com uma câmara (com duas, cada uma usa o seu config/camera_astra_<N>.yaml). "
@@ -144,7 +161,7 @@ if args.calib and duas:
 
 if camaras != [None]:
     print(f"Câmara{'s' if duas else ''}: {registo.texto_camaras(camaras)} (de: {origem_cam}) | "
-          f"tópico{'s' if duas else ''}: {', '.join(topicos_leitura)}"
+          f"tópico{'s' if duas else ''}: {', '.join(topico_da_camara)}"
           + ("  ·  lado a lado: " + " | ".join(f"câmara {c}" for c in camaras) if duas else ""))
 
 
@@ -260,8 +277,8 @@ print(f"Tempo total do vídeo: {int(mins)}m {secs:.1f}s" if total_duration_sec >
 # Cada execução com registo é um "ensaio": uma pasta com um deteccoes.mcap (todas as imagens de
 # todos os trechos registados) e um ensaio.json (bag de origem, câmara, calibração, modelos e trechos).
 # A pasta só é criada quando começa o primeiro trecho.
-nome_viagem = mcap_file.resolve().parent.name if mcap_file.resolve().parent.name.startswith("viagem") \
-    else mcap_file.stem
+nome_viagem = mcap_file.resolve().parent.name \
+    if mcap_file.resolve().parent.name.startswith(("viagem", "realtime")) else mcap_file.stem
 nome_pasta = (f"camara{camaras[0] or 'X'}" if not duas else "camaras" + "e".join(camaras))
 pasta_ensaio = Path(args.pasta_registo) / nome_viagem / f"{nome_pasta}_{datetime.datetime.now():%Y%m%d_%H%M%S}"
 metadados = {
@@ -292,6 +309,9 @@ metadados = {
     },
     "trechos_pedidos": args.trechos,
 }
+if bag_online:
+    metadados["origem"] = {"tipo": "online", "sessao": mcap_file.resolve().parent.name,
+                           "trechos": "os do online" if trechos_do_online else "pedidos (--trechos)"}
 registador = registo.Registador(pasta_ensaio, camaras, metadados)
 info_camara = {c["camara"]: c for c in registador.metadados["camaras"]}
 
@@ -305,7 +325,9 @@ if not com_interface:
 
 print("\n--- CONTROLOS ---" + ("" if com_interface else " (teclas no terminal)"))
 print("[Espaço] : Pausar / Retomar")
-if trechos_pedidos is None:
+if trechos_pedidos is None and bag_online:
+    print("Registo automático: os trechos gravados no online (a tecla R não é usada)")
+elif trechos_pedidos is None:
     print("[R]      : Começar / terminar um trecho do registo (pode haver vários)")
 else:
     print(f"Registo automático dos trechos: {args.trechos} s (a tecla R não é usada)")
@@ -366,15 +388,18 @@ def media(chave, valor_ms):
     contagem[chave] += 1
 
 
-def alternar_trecho():
+def alternar_trecho(extra=None):
     """Tecla R: começa um trecho novo ou termina o que está a ser registado."""
     if registador.a_registar:
+        fechar_intervalos_online()
         trecho = registador.terminar_trecho()
         if trecho:
             print(f"\nRegisto: trecho {trecho['n']} terminado ({trecho['imagens']} imagens).")
     else:
-        registador.iniciar_trecho()
-        print(f"\nRegisto: trecho {registador.trecho['n']} iniciado.")
+        registador.iniciar_trecho(extra=extra)
+        abrir_intervalos_online()
+        print(f"\nRegisto: trecho {registador.trecho['n']} iniciado"
+              + (" (trecho do online)." if extra and extra.get("origem") == "online" else "."))
 
 
 def tempo_txt(seg):
@@ -382,7 +407,82 @@ def tempo_txt(seg):
     return f"{int(m_):02d}:{s_:04.1f}"
 
 
+# Bag do online: câmaras com deteção (e gravação) ligada no online, e os trechos marcados por ele.
+# Se uma câmara foi desligada no online (tecla D) durante parte de um trecho, não há vídeo dela nesse
+# intervalo: o trecho do registo guarda os intervalos em que cada câmara existe ("intervalos_por_camara",
+# como num registo juntado), para a reprodução mostrar esse lado escuro, com uma mensagem.
+ativas_online = set(camaras)
+t_atual_ns = None                   # instante da última mensagem lida do bag
+intervalos_online = None            # {câmara: [[início, fim], ...]} do trecho em curso
+
+
+def abrir_intervalos_online(t_ns=None):
+    global intervalos_online
+    t_ns = t_atual_ns if t_ns is None else t_ns
+    intervalos_online = {c: ([[t_ns, None]] if c in ativas_online else []) for c in camaras}
+    intervalos_online["_inicio"] = t_ns
+
+
+def fechar_intervalos_online(t_ns=None):
+    """Fim do trecho: guarda os intervalos no trecho, se alguma câmara não existiu no trecho todo."""
+    global intervalos_online
+    if not bag_online or intervalos_online is None or not registador.a_registar:
+        intervalos_online = None
+        return
+    t_ns = t_atual_ns if t_ns is None else t_ns
+    inicio = intervalos_online.pop("_inicio")
+    for c in camaras:
+        for i in intervalos_online[c]:
+            if i[1] is None:
+                i[1] = t_ns
+    if any(intervalos_online[c] != [[inicio, t_ns]] for c in camaras):
+        registador.trecho["intervalos_por_camara"] = {str(c): intervalos_online[c] for c in camaras}
+    intervalos_online = None
+
+
+def tratar_evento_online(msg):
+    """Mensagens de /processamento/trechos e /processamento/estado_camaras de um bag do online."""
+    global ativas_online, bag_online, start_time_sec
+    import json
+    try:
+        ev = json.loads(msg.ros_msg.data)
+    except (ValueError, AttributeError):
+        return
+    if not bag_online:                       # bag sem índice: só agora se sabe que é do online
+        bag_online = True
+        registador.metadados["origem"] = {"tipo": "online", "sessao": mcap_file.resolve().parent.name,
+                                          "trechos": "os do online" if trechos_do_online else "pedidos (--trechos)"}
+        if trechos_do_online:
+            print("\nBag do online: os trechos do registo são os gravados no online.")
+    if msg.channel.topic == TOPICO_ESTADO_ONLINE:
+        novas = {str(c) for c in ev.get("ativas", camaras)}
+        if intervalos_online is not None:              # mudança a meio de um trecho
+            for c in camaras:
+                if c in novas and c not in ativas_online:
+                    intervalos_online[c].append([msg.log_time_ns, None])
+                elif c not in novas and c in ativas_online and intervalos_online[c]:
+                    intervalos_online[c][-1][1] = msg.log_time_ns
+        ativas_online = novas
+        return
+    if ev.get("evento") == "sessao_inicio" and start_time_sec == 0:
+        # bag sem índice: os tempos contam-se desde o início da sessão online (como com índice)
+        start_time_sec = ev["stamp_ns"] / 1e9
+        registador.metadados["bag"]["inicio_ns"] = ev["stamp_ns"]
+    if not trechos_do_online:
+        return
+    if ev.get("evento") == "inicio":
+        if registador.a_registar:
+            alternar_trecho()
+        alternar_trecho(extra={"n": ev["trecho"], "origem": "online"})
+    elif ev.get("evento") == "fim" and registador.a_registar:
+        alternar_trecho()
+
+
 for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
+    t_atual_ns = msg.log_time_ns
+    if msg.channel.topic in (TOPICO_TRECHOS_ONLINE, TOPICO_ESTADO_ONLINE):
+        tratar_evento_online(msg)
+        continue
     t_inicio = time.perf_counter()
     cam = topico_da_camara.get(msg.channel.topic, camaras[0])
     frame = leitura_bag.imagem_bgr(msg.ros_msg)
@@ -483,8 +583,16 @@ for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
                             for k in ("objetos", "linhas", "estrada")],
                 "rodape": f"{img_s:.1f} img/s  ·  gravado a {1000 / ritmo_cam[cam]:.0f} img/s",
                 # indicador de registo: um só, na câmara da direita
-                "registo": texto_registo if cam == camaras[-1] or ecra_cam[camaras[-1]] is None else None}
+                "registo": texto_registo if (cam == camaras[-1] or ecra_cam[camaras[-1]] is None
+                                             or (bag_online and camaras[-1] not in ativas_online)) else None}
         ecra_cam[cam] = visual.compor(frame, caixas, info)
+        if bag_online:                    # câmara desligada no online (tecla D): não há vídeo dela aqui
+            for c in camaras:
+                if c != cam and c not in ativas_online:
+                    h_, w_ = ecra_cam[cam].shape[:2]
+                    ecra_cam[c] = limpa_cam[c] = visual.imagem_espera(
+                        w_, h_, f"Câmara {c}: desligada no online",
+                        "tecla D no online: sem vídeo nem deteções desta câmara aqui")
         ecra = juntar(ecra_cam)
         if duas and not janela_ajustada:
             cv2.resizeWindow(janela_nome, ecra.shape[1], ecra.shape[0])
@@ -570,6 +678,7 @@ registador.metadados["processamento"] = {
     "com_interface": com_interface,
     "terminado_antes_do_fim": saiu_cedo,
 }
+fechar_intervalos_online()
 registador.fechar()
 if registador.trechos:
     n_img = sum(t["imagens"] for t in registador.trechos)

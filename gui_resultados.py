@@ -305,10 +305,13 @@ class TabResumo(ctk.CTkFrame):
             calib = info[cams[0]].get("calibracao")
             correcao = f"sim ({calib['origem']})" if calib else "não"
             n_img = f"{n_total} imagens"
+        online = (e.get("origem") or {}).get("tipo") == "online"
         linhas_chave_valor(c, [
             ("Bag", bag.get("nome", "—")),
+            *([("Origem", "online  ·  " + ("trechos do online" if e["origem"].get("trechos") == "os do online"
+                                            else "trechos pedidos"))] if online else []),
             ("Câmaras" if duas else "Câmara", txt_cam),
-            ("Duração do bag", tempo_txt(bag.get("duracao_s"))),
+            ("Duração da sessão" if online else "Duração do bag", tempo_txt(bag.get("duracao_s"))),
             ("Correção", correcao),
             ("Processado em", (e.get("criado_em") or "—").replace("T", " ")),
             *([("Juntado de", "\n".join(f"câmara {j['camara']}: {Path(j['pasta']).name}" for j in e["juntado_de"]))]

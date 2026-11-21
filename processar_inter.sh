@@ -5,11 +5,14 @@ CAMARAS_VALIDAS="5 8"
 read -r -a DEVS <<< "${DEVS_VIDEO:-/dev/video2 /dev/video4}"
 
 uso() {
-    echo "Uso: bash processar_inter.sh <câmara no ${DEVS[0]}> [<câmara no ${DEVS[1]}>] [-i] [--sem-correcao]"
-    echo "  -i             : executa sem interface gráfica (em segundo plano / headless)"
-    echo "  --sem-correcao : não corrige a distorção da lente (por omissão usa config/camera_astra_<N>.yaml)"
+    echo "Uso: bash processar_inter.sh <câmara no ${DEVS[0]}> [<câmara no ${DEVS[1]}>] [-i] [--sem-correcao] [--registar-tudo]"
+    echo "  -i              : executa sem interface gráfica (em segundo plano / headless)"
+    echo "  --sem-correcao  : não corrige a distorção da lente (por omissão usa config/camera_astra_<N>.yaml)"
+    echo "  --registar-tudo : começa logo um trecho (grava a sessão toda; a tecla R continua a funcionar)"
+    echo "  A deteção corre sempre; o vídeo original e as deteções só são gravados nos trechos:"
+    echo "  tecla R na janela, ou, sem janela, bash trecho.sh (noutro terminal)."
     echo "  ex.: bash processar_inter.sh 5 8"
-    echo "  ex.: bash processar_inter.sh 5 8 -i"
+    echo "  ex.: bash processar_inter.sh 5 8 -i --registar-tudo"
     echo "  Para forçar CPU num PC com GPU: USAR_GPU=0 bash processar_inter.sh 5 8"
     echo "  Sem janela, para desligar/ligar a câmara da direita: bash alternar_camara.sh (noutro terminal)"
     exit 1
@@ -17,6 +20,7 @@ uso() {
 
 export SEM_INTERFACE=0
 export SEM_CORRECAO=0
+export REGISTAR_TUDO=0
 camaras=()
 
 for arg in "$@"; do
@@ -26,6 +30,9 @@ for arg in "$@"; do
             ;;
         --sem-correcao)
             export SEM_CORRECAO=1
+            ;;
+        --registar-tudo)
+            export REGISTAR_TUDO=1
             ;;
         -h|--help)
             uso
@@ -90,28 +97,33 @@ else
 fi
 
 if [ "$SEM_INTERFACE" = "1" ]; then
-    echo "Modo: SEM interface gráfica (-i)"
+    echo "Modo: SEM interface gráfica (-i)  -  trechos: bash trecho.sh, noutro terminal"
 else
-    echo "Modo: COM interface gráfica"
+    echo "Modo: COM interface gráfica  -  trechos: tecla R"
+fi
+if [ "$REGISTAR_TUDO" = "1" ]; then
+    echo "Gravação: desde o início (--registar-tudo)"
+else
+    echo "Gravação: só nos trechos (nada é gravado até começar o primeiro)"
 fi
 
-# Nome da sessão: o mesmo para a pasta do bag (gravador_bag) e para o resumo (processador)
+# Nome da sessão: a pasta do bag (só com os trechos) e do resumo
 export SESSAO="realtime_$(date +%Y%m%d_%H%M%S)"
 PASTA_SESSAO="data_realtime_inter/$SESSAO"
 
 echo "A iniciar processamento para a(s) câmara(s): $CAMARAS_ATIVAS"
-echo "Gravação (vídeo original + deteções) e resumo em: $PASTA_SESSAO/"
+echo "Gravação (vídeo original + deteções, só nos trechos) e resumo em: $PASTA_SESSAO/"
 echo
 
-# --abort-on-container-exit: ao terminar o processamento (tecla Q), pára também a gravação, para o
-# bag acabar ao mesmo tempo. O Ctrl+C pára tudo da mesma forma; o script continua depois (o "trap"
-# impede que o Ctrl+C o termine), para mostrar o resumo.
+# --abort-on-container-exit: ao terminar o processamento (tecla Q), pára também os drivers das câmaras.
+# O Ctrl+C pára tudo da mesma forma (o processamento fecha o bag e grava o resumo); o script continua
+# depois (o "trap" impede que o Ctrl+C o termine), para mostrar o resumo.
 trap 'true' INT
 if [ ${#camaras[@]} -eq 2 ]; then
     docker compose "${COMPOSE_FILES[@]}" up --build --abort-on-container-exit || true
 else
     docker compose "${COMPOSE_FILES[@]}" up --build --abort-on-container-exit \
-        --no-deps "${servicos[@]}" processador gravador_bag || true
+        --no-deps "${servicos[@]}" processador || true
 fi
 trap - INT
 
@@ -120,7 +132,11 @@ if [ ! -f "$PASTA_SESSAO/resumo_online.json" ]; then
     echo "Não foi gravado o resumo ($PASTA_SESSAO/resumo_online.json): o processamento não chegou a arrancar?"
     exit 1
 fi
-echo "Gravação e resumo em: $PASTA_SESSAO/"
+if ls "$PASTA_SESSAO"/*.mcap >/dev/null 2>&1; then
+    echo "Gravação (só os trechos) e resumo em: $PASTA_SESSAO/"
+else
+    echo "Nenhum trecho gravado (só o resumo das deteções) em: $PASTA_SESSAO/"
+fi
 if [ "$SEM_INTERFACE" = "1" ]; then
     echo "(sem interface: o resumo não é mostrado; está no resumo_online.json)"
 else
