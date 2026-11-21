@@ -38,10 +38,15 @@ services:
       - QT_X11_NO_MITSHM=1
       - CAMARAS_ATIVAS=${CAMARAS_ATIVAS}
       - SEM_INTERFACE=${SEM_INTERFACE:-0}
+      - SEM_CORRECAO=${SEM_CORRECAO:-0}
+      - SESSAO=${SESSAO:-}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - .:/workspace
     working_dir: /workspace
+    # Ctrl+C (ou o fim de outro contentor) termina o processamento como a tecla Q: grava o resumo
+    stop_signal: SIGINT
+    stop_grace_period: 30s
     command: python3 processar_tempo_real.py
 
   gravador_bag:
@@ -54,13 +59,18 @@ services:
     stop_grace_period: 30s
     environment:
       - CAMARAS_ATIVAS=${CAMARAS_ATIVAS}
-    command: >
-      bash -c '
-      TOPICOS=""
-      for cam in $$CAMARAS_ATIVAS; do
-        # Grava única e exclusivamente o tópico com o JSON das deteções
-        TOPICOS="$$TOPICOS /camara$$cam/processamento/dados_deteccoes"
-      done
-      sleep 4
-      ros2 bag record -s mcap -o /data/realtime_$$(date +%Y%m%d_%H%M%S) $$TOPICOS
-      '
+      - SESSAO=${SESSAO:-}
+    # (lista em vez de "command: >": o ">" do YAML juntava as linhas do script numa só e o bash
+    #  dava erro de sintaxe, por isso o bag não era gravado)
+    command:
+      - bash
+      - -c
+      - |
+        TOPICOS="/processamento/estado_camaras"
+        for cam in $$CAMARAS_ATIVAS; do
+          # O vídeo original (como na aquisição, secção 1) e o JSON das deteções de cada câmara
+          TOPICOS="$$TOPICOS /camara$$cam/image_raw /camara$$cam/processamento/dados_deteccoes"
+        done
+        SESSAO="$${SESSAO:-realtime_$$(date +%Y%m%d_%H%M%S)}"
+        sleep 4
+        exec ros2 bag record -s mcap -o /data/$$SESSAO $$TOPICOS

@@ -3,6 +3,9 @@ numpy
 mcap-ros2-support
 pyyaml
 pillow
+# Janela de resultados (gui_resultados.py)
+customtkinter
+tkintermapview
 
 # --- Motor ONNX (escolher APENAS UMA das opções abaixo; nunca instalar as duas) ---
 

@@ -12,6 +12,12 @@ import numpy as np
 
 PASTA_MODELOS = Path(__file__).resolve().parent / "modelos"
 
+# Classes detetadas por omissão, no processar_bag.py (offline) e no processar_tempo_real.py (online):
+# só elementos de estrada (nomes do COCO, ver README, secção 5). Para mudar a lista de forma
+# permanente, nos dois, altere-a aqui (None = as 80 classes do COCO); para uma execução offline,
+# use --classes-objetos.
+CLASSES_ESTRADA = ["person", "bicycle", "car", "motorcycle", "bus", "truck", "traffic light", "stop sign"]
+
 # Fallback caso os metadados do ONNX não tragam a lista de nomes
 NOMES_COCO = {
     0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 4: "airplane", 5: "bus", 6: "train",

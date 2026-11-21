@@ -1,6 +1,6 @@
 # Aquisição e Processamento de Imagem em ROS 2 (Jazzy)
 
-Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e 8) em ROS 2 Jazzy, com dois modos de operação: **gravação offline** (RViz2 + gravação dos vídeos em ROS bag `.mcap`, processados depois em Python/OpenCV) e **processamento online em tempo real** dentro do próprio Docker (com deteção automática de CPU ou GPU NVIDIA e gravação dos resultados em JSON). Os três modelos de deteção correm todos em formato ONNX (`onnxruntime`), sem necessidade de `ultralytics` nem PyTorch: deteção de objetos (YOLOv8n), linhas da estrada (CLRNet) e área circulável / estrada (YOLOP).
+Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e 8) em ROS 2 Jazzy, com dois modos de operação: **gravação + processamento offline** (RViz2 e gravação dos vídeos em ROS bag `.mcap`, processados depois em Python/OpenCV, com registo das deteções e janela de resultados) e **processamento online em tempo real** dentro do próprio Docker (com deteção automática de CPU ou GPU NVIDIA, gravação do vídeo original e das deteções, e resumo no fim). Nos dois, as mesmas etapas: correção da distorção da lente e três modelos de deteção, todos em formato ONNX (`onnxruntime`), sem `ultralytics` nem PyTorch: objetos (YOLOv8n), linhas da estrada (CLRNet) e área circulável / estrada (YOLOP).
 
 | Secção | O quê | Onde |
 |---|---|---|
@@ -10,11 +10,13 @@ Sistema em Docker para aquisição de imagem com duas câmaras Orbbec Astra (5 e
 | 4 | Deteção de linhas da estrada (CLRNet, modelo já incluído) | dentro do processamento |
 | 5 | Deteção de objetos (YOLO, modelo já incluído) | dentro do processamento |
 | 6 | Deteção da estrada (YOLOP, modelo já incluído) | dentro do processamento |
-| 7 | Processamento em tempo real / online (câmaras + deteção + gravação JSON) | Linux, com Docker (CPU ou GPU automática) |
+| 7 | Registo das deteções e vídeos dos trechos registados | dentro do processamento + `reproduzir_registo.py` |
+| 8 | Janela de resultados: resumo e percurso no mapa (`gui_resultados.py`) | Windows, Linux ou macOS, com `venv` |
+| 9 | Processamento em tempo real / online (câmaras + deteção + gravação do vídeo e das deteções + resumo) | Linux, com Docker (CPU ou GPU automática) |
 
 ## Pré-requisitos
-* Aquisição (Secção 1) e Processamento em tempo real (Secção 7): Linux com Docker e Docker Compose instalados *(opcional: placa gráfica NVIDIA + NVIDIA Container Toolkit para aceleração por GPU na Secção 7)*
-* Processamento offline (Secção 2) e calibração (Secção 3): Python 3 (com suporte a `venv`)
+* Aquisição (Secção 1) e Processamento em tempo real (Secção 9): Linux com Docker e Docker Compose instalados *(opcional: placa gráfica NVIDIA + NVIDIA Container Toolkit para aceleração por GPU na Secção 9)*
+* Processamento offline (Secções 2, 7 e 8) e calibração (Secção 3): Python 3 (com suporte a `venv`)
 
 ---
 
@@ -91,7 +93,7 @@ Os bags são ficheiros grandes (cerca de 2 GB por minuto) e estragam-se facilmen
 O tratamento das imagens com OpenCV ou a extração para vídeo é feito diretamente no computador através de um ambiente virtual Python (`venv`), sem necessidade de ligar a câmara ou o Docker. Funciona em **Linux e em Windows**; cada sistema precisa do seu próprio `venv` (um `venv` criado num sistema não funciona no outro).
 
 ### Passo 1: Criar o ambiente virtual `venv` (Apenas na 1.ª vez)
-Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `pyyaml`, `pillow` e o motor `onnxruntime`):
+Quando descarregar o repositório pela primeira vez, abra o terminal na pasta do projeto e execute os comandos abaixo para criar o ambiente isolado e instalar as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `pyyaml`, `pillow`, `customtkinter` e `tkintermapview` para a janela de resultados (secção 8), e o motor `onnxruntime`):
 
 **Linux:**
 ```bash
@@ -139,8 +141,20 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
    ```bash
    python processar_bag.py data/<nome_da_pasta>/<nome_do_ficheiro>.mcap
    ```
-   *(Exemplo prático: `python processar_bag.py data/viagem_20261110_101500/viagem_20261110_101500_0.mcap --camara 5`)*
-   * Use `--camara 5` ou `--camara 8` para escolher a câmara a processar; cada câmara é processada separadamente.
+   *(Exemplo prático: `python processar_bag.py data/viagem_20261110_101500/viagem_20261110_101500_0.mcap`)*
+   * **Câmaras:** por omissão processam-se **todas as câmaras do bag**. Com as duas, o vídeo mostra-as **lado a lado, a 5 à esquerda e a 8 à direita**, cada uma com o seu painel; o registo (secção 7), a reprodução e a janela de resultados (secção 8) também tratam as duas juntas.
+
+     | Opção | Processa |
+     |---|---|
+     | (nenhuma) | todas as câmaras do bag (as duas, lado a lado, ou a única que tiver) |
+     | `--camara 5` / `--camara 8` | só essa câmara (exatamente como antes) |
+     | `--camara 5,8` | as duas (o mesmo que sem a opção, num bag com as duas) |
+
+     * Cada câmara usa a sua calibração (`config/camera_astra_5.yaml` e `config/camera_astra_8.yaml`); `--calib` só se usa com uma câmara.
+     * As imagens das duas câmaras vêm intercaladas no bag e são processadas pela ordem de gravação, cada uma com os mesmos modelos: **com as duas câmaras, o processamento demora o dobro** (passam o dobro das imagens). Para registar mais depressa, use `--sem-interface` (secção 7) ou desligue os modelos de que não precisa.
+     * As teclas (**C**, **O**, **L**, **E**, **V**, **R**, **Espaço**, **Q**) atuam nas duas câmaras ao mesmo tempo. A janela é larga (1284 px com as Astra) e pode ser redimensionada com o rato, mantendo a proporção.
+     * Antes de chegar a primeira imagem de uma câmara, o lado dela aparece escuro, com `à espera da primeira imagem`.
+     * Os bags antigos, de uma só câmara (tópico `/image_raw`), continuam a funcionar como antes: a câmara lê-se do nome da pasta (`viagem_camara5_...`) ou de `--camara`.
    * Em cada imagem, por esta ordem, o script:
      1. lê a imagem do tópico da câmara e converte-a para cores (BGR);
      2. corrige a distorção da lente com a calibração dessa câmara (secção 3);
@@ -159,13 +173,14 @@ Sempre que abrir um terminal novo para processar um ficheiro `.mcap` já gravado
 
      * Uma deteção desligada com a tecla deixa também de ser calculada, por isso o vídeo fica mais rápido; no painel, o marcador fica vazio e aparece `desligado`.
      * Uma deteção desligada na linha de comandos nem é carregada (arranque mais rápido), e a sua tecla não faz nada.
-     * Outras teclas: **Espaço** pausa, **C** liga/desliga a correção da distorção, **Q** fecha.
+     * Outras teclas: **Espaço** pausa, **C** liga/desliga a correção da distorção, **R** começa/termina um trecho do registo (secção 7), **Q** fecha.
+   * **Sem janela:** `--sem-interface` processa sem mostrar o vídeo, o mais depressa possível, e mostra o progresso no terminal; serve sobretudo para registar (secção 7).
      * **Confiança mínima:** um número de 0 a 1. Mais alto mostra menos deteções, mas mais seguras; mais baixo mostra mais, incluindo erradas.
    * Se o `.mcap` estiver vazio (por exemplo, uma cópia que falhou), o script avisa: `não é um ficheiro MCAP válido (0 bytes)`.
    * Se a gravação foi interrompida (Docker parado à força, `Ctrl + C` duas vezes, disco cheio) ou a cópia ficou incompleta, falta o índice que o MCAP guarda no fim do ficheiro. O script avisa (`o bag não tem o índice no fim`), lê as imagens sequencialmente desde o início e para no ponto onde o ficheiro foi cortado; o tempo total aparece como desconhecido.
    * Se parte do ficheiro estiver estragada (por exemplo, numa cópia ou transferência), o script verifica cada bloco de dados do MCAP, salta os blocos estragados (avisa `bloco estragado no bag`) e continua; no fim indica quantos segundos de vídeo faltam. Se isto acontecer, copie de novo o ficheiro original e verifique-o (secção 1, Passo 6).
    * **Informação no vídeo:**
-     * **Painel** (canto superior esquerdo): tempo decorrido e total, com barra de progresso; câmara e estado da correção (a laranja quando a imagem não está corrigida); uma linha por modelo, identificado pelo nome (`YOLOv8n`, `CLRNet`, `YOLOP`) e por um marcador da sua cor, com o resultado (número de objetos, número de linhas, percentagem da imagem que é área circulável) e o tempo da etapa; no fim, as imagens processadas por segundo e o ritmo da gravação.
+     * **Painel** (canto superior esquerdo de cada câmara): tempo decorrido e total, com barra de progresso; câmara e estado da correção (a laranja quando a imagem não está corrigida); uma linha por modelo, identificado pelo nome (`YOLOv8n`, `CLRNet`, `YOLOP`) e por um marcador da sua cor, com o resultado (número de objetos, número de linhas, percentagem da imagem que é área circulável) e o tempo da etapa; no fim, as imagens processadas por segundo e o ritmo da gravação.
      * **Cores fixas**, as mesmas em todas as imagens (definidas no `visual.py`):
 
        | Modelo (nome no painel) | Deteta | Desenho | Cor |
@@ -260,7 +275,7 @@ config/camera_astra_8.yaml
 ```
 
 ### Passo 3: Usar
-O `processar_bag.py` usa automaticamente `config/camera_astra_<N>.yaml` da câmara processada (escolha da câmara: secção 2, Passo 2).
+O `processar_bag.py` usa automaticamente `config/camera_astra_<N>.yaml` de cada câmara processada (com as duas câmaras, cada uma com o seu ficheiro; escolha das câmaras: secção 2, Passo 2). `--calib` (outro ficheiro) só se usa com uma câmara.
 ```bash
 python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --calib outro.yaml   # outro ficheiro de calibração
 python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --sem-correcao       # sem correção
@@ -276,7 +291,7 @@ python processar_bag.py data/<pasta>/<ficheiro>.mcap --camara 5 --sem-correcao  
 
 ## 4. Deteção de linhas da estrada (CLRNet)
 
-O `processar_bag.py` (e o `processar_tempo_real.py`) deteta as linhas da estrada em cada imagem com o modelo **CLRNet ResNet34** treinado no conjunto de dados CULane, tal como disponibilizado pelo [UnLanedet](https://github.com/zkyntu/UnLanedet). O modelo está guardado em formato ONNX em `modelos/linhas.onnx` e corre com a biblioteca `onnxruntime` (incluída no `requirements.txt`).
+O `processar_bag.py` deteta as linhas da estrada em cada imagem, **sempre** (exceto com `-v` ou `--sem-linhas`), tal como o `processar_tempo_real.py` (secção 9), com o modelo **CLRNet ResNet34** treinado no conjunto de dados CULane, tal como disponibilizado pelo [UnLanedet](https://github.com/zkyntu/UnLanedet). O modelo está guardado em formato ONNX em `modelos/linhas.onnx` e corre com a biblioteca `onnxruntime` (incluída no `requirements.txt`).
 
 > **Para usar a deteção de linhas basta a secção 4.1.** As secções 4.2 e 4.3 explicam como funciona e como o modelo foi gerado (registo do que foi feito, **não é preciso repetir**). A secção 4.4 só é precisa para gerar o modelo de novo (por exemplo, depois de o afinar).
 
@@ -331,12 +346,12 @@ O código do UnLanedet é clonado **fora** da pasta do repositório (para não i
 
 **Linux (Ubuntu):**
 ```bash
-curl -LsSf [https://astral.sh/uv/install.sh](https://astral.sh/uv/install.sh) | sh                 # instalar o uv (uma vez); abrir um terminal novo
-cd <pasta que contém o repositório> && git clone [https://github.com/zkyntu/UnLanedet](https://github.com/zkyntu/UnLanedet)
+curl -LsSf https://astral.sh/uv/install.sh | sh                 # instalar o uv (uma vez); abrir um terminal novo
+cd <pasta que contém o repositório> && git clone https://github.com/zkyntu/UnLanedet
 cd <pasta do repositório>
 uv venv --seed --python 3.10 .venv-exportar
 source .venv-exportar/bin/activate
-pip install torch==2.3.1 torchvision==0.18.1 --index-url [https://download.pytorch.org/whl/cpu](https://download.pytorch.org/whl/cpu)
+pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cpu
 pip install "setuptools<70" wheel
 pip install "numpy==1.23.1" "scipy==1.10.1" "protobuf==4.25.5"
 pip install fvcore cloudpickle omegaconf hydra-core "shapely==2.0.6" "scikit-image==0.21.0" "scikit-learn==1.3.2" "imgaug==0.4.0" p_tqdm tensorboard "timm==1.0.9" einops "opencv-python==4.8.1.78" "onnx==1.16.2" "onnxruntime==1.18.1" "numpy==1.23.1" "scipy==1.10.1" "protobuf==4.25.5"
@@ -350,11 +365,11 @@ deactivate
 ```
 pip install uv
 cd <pasta que contém o repositório>
-git clone [https://github.com/zkyntu/UnLanedet](https://github.com/zkyntu/UnLanedet)
+git clone https://github.com/zkyntu/UnLanedet
 cd <pasta do repositório>
 uv venv --seed --python 3.10 .venv-exportar
 .venv-exportar\Scripts\activate
-pip install torch==2.3.1 torchvision==0.18.1 --index-url [https://download.pytorch.org/whl/cpu](https://download.pytorch.org/whl/cpu)
+pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cpu
 pip install "setuptools<70" wheel
 pip install "numpy==1.23.1" "scipy==1.10.1" "protobuf==4.25.5"
 pip install fvcore cloudpickle omegaconf hydra-core "shapely==2.0.6" "scikit-image==0.21.0" "scikit-learn==1.3.2" "imgaug==0.4.0" p_tqdm tensorboard "timm==1.0.9" einops "opencv-python==4.8.1.78" "onnx==1.16.2" "onnxruntime==1.18.1" "numpy==1.23.1" "scipy==1.10.1" "protobuf==4.25.5"
@@ -393,7 +408,7 @@ O modelo foi treinado no CULane: imagens de uma câmara no carro, virada para a 
 
 ## 5. Deteção de objetos (YOLO)
 
-O `processar_bag.py` (e o `processar_tempo_real.py`) deteta objetos em cada imagem com o modelo **YOLOv8n** exportado para ONNX (`modelos/objetos.onnx`). Corre com o mesmo `onnxruntime` usado nas linhas e na estrada — não precisa do `ultralytics` nem de PyTorch no `venv` nem no Docker.
+O `processar_bag.py` deteta objetos em cada imagem, **sempre** (exceto com `-v` ou `--sem-objetos`), tal como o `processar_tempo_real.py` (secção 9), com o modelo **YOLOv8n** exportado para ONNX (`modelos/objetos.onnx`). Corre com o mesmo `onnxruntime` usado nas linhas e na estrada — não precisa do `ultralytics` nem de PyTorch no `venv` nem no Docker.
 
 ### 5.1 Utilização
 Não é preciso instalar nada além do `requirements.txt` (secção 2): o modelo `modelos/objetos.onnx` (cerca de 12,3 MB) já está incluído no repositório.
@@ -406,8 +421,8 @@ python processar_bag.py <bag>.mcap --camara 5 --classes-objetos todas           
 ```
 * No terminal aparece `Deteção de objetos: ATIVADA (YOLOv8n, GPU (CUDA), confiança mínima 0.25)` (ou `CPU`); no vídeo, cada objeto detetado aparece numa caixa da cor da sua classe, com o nome da classe e a confiança, e o painel mostra quantos foram detetados.
 * **Classes detetadas:** por omissão, só **elementos de estrada**: `person`, `bicycle`, `car`, `motorcycle`, `bus`, `truck`, `traffic light` e `stop sign`. O terminal mostra a lista usada (`Classes: ...`).
-  * Para mudar a lista de forma permanente, altere `CLASSES_ESTRADA` no início do `processar_bag.py` (ou do `processar_tempo_real.py`, na secção 7).
-  * Para uma só execução offline, use `--classes-objetos` com os nomes em inglês do COCO, separados por vírgulas e entre aspas se algum tiver espaços (`"traffic light"`). Um nome errado dá erro e mostra a lista de nomes possíveis.
+  * Para mudar a lista de forma permanente, altere `CLASSES_ESTRADA` no `objetos.py` (vale para o offline e para o tempo real, secção 9).
+  * Para uma só execução, use `--classes-objetos` com os nomes em inglês do COCO, separados por vírgulas e entre aspas se algum tiver espaços (`"traffic light"`). Um nome errado dá erro e mostra a lista de nomes possíveis.
   * O filtro é aplicado no `objetos.py` antes do NMS: as outras classes são descartadas de imediato e não são desenhadas.
 * **`--conf-objetos`**: confiança mínima de um objeto (0.25 por omissão, padrão do YOLOv8). Por exemplo, 0.5 esconde as deteções duvidosas (como `car 0.32` em carros distantes).
 * Se o `modelos/objetos.onnx` não existir ou o `onnxruntime` não estiver instalado, o script avisa e continua sem a deteção de objetos.
@@ -419,7 +434,7 @@ python processar_bag.py <bag>.mcap --camara 5 --classes-objetos todas           
   1. **Pré-processamento:** redimensiona mantendo a proporção e completa com cinzento até 640×640 (*letterbox*), converte BGR → RGB e divide por 255.
   2. **Rede (ONNX):** devolve 8400 propostas, cada uma com 84 valores (4 coordenadas da caixa e a pontuação das 80 classes do COCO).
   3. **Pós-processamento:** filtra pela confiança mínima e pelas classes escolhidas, aplica NMS separado por classe (`cv2.dnn.NMSBoxes`) e converte as coordenadas para o tamanho da imagem original. Os nomes das classes são lidos dos metadados gravados no próprio ficheiro ONNX.
-* **Onde entra:** no processamento offline, corre sobre a imagem **já corrigida** da distorção (secção 3), depois da deteção de linhas e da estrada e ainda antes de se desenhar qualquer coisa na imagem.
+* **Onde entra:** corre sobre a imagem **já corrigida** da distorção (secção 3), depois da deteção de linhas e da estrada e ainda antes de se desenhar qualquer coisa na imagem.
 * **Desenho:** as caixas e as etiquetas são desenhadas pelo `visual.py`, com uma cor fixa por classe, por cima da estrada e das linhas.
 * **CPU ou GPU:** usa o mesmo `onnxruntime` / `onnxruntime-gpu` dos outros modelos (secção 2, Passo 3), com passagem automática para CPU caso a GPU falhe. O terminal mostra `Deteção de objetos: ATIVADA (YOLOv8n, GPU (CUDA), ...)` ou `CPU`.
 
@@ -439,13 +454,13 @@ Depois, mova o ficheiro `.onnx` gerado para `modelos/objetos.onnx` (substituindo
 * **Luz:** pouca luz, contraluz e reflexos pioram a deteção.
 * O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
 * Só conhece as 80 classes do COCO, e por omissão mostra apenas as de estrada (secção 5.1). Não deteta, por exemplo, sinais de trânsito além do `stop sign`, nem marcas no chão (essas são tratadas pela deteção de linhas, secção 4). Para outros sinais seria preciso outro modelo, treinado com eles.
-* No processamento offline (`processar_bag.py`), os resultados são apenas mostrados no vídeo; para gravar as deteções em tempo real num bag `.mcap`, use o modo online (secção 7).
+* Os resultados podem ser gravados: no offline, nos trechos registados (secção 7); no tempo real, sempre (secção 9).
 
 ---
 
 ## 6. Deteção da estrada (YOLOP)
 
-O `processar_bag.py` (e o `processar_tempo_real.py`) deteta em cada imagem a **área circulável** (a estrada por onde o veículo pode seguir) e pinta-a de verde. Usa o **YOLOP** em ONNX (`modelos/estrada.onnx`), com o mesmo `onnxruntime` usado nos objetos e nas linhas: não é preciso instalar nada além do `requirements.txt`.
+O `processar_bag.py` deteta em cada imagem a **área circulável** (a estrada por onde o veículo pode seguir) e pinta-a de verde, **sempre** (exceto com `-v` ou `--sem-estrada`), tal como o `processar_tempo_real.py` (secção 9). Usa o **YOLOP** em ONNX (`modelos/estrada.onnx`), com o mesmo `onnxruntime` usado nos objetos e nas linhas: não é preciso instalar nada além do `requirements.txt`.
 
 ### 6.1 Utilização
 ```bash
@@ -462,7 +477,7 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 * **Ficheiro:** `modelos/estrada.onnx` é o `weights/yolop-640-640.onnx` publicado pelos autores do YOLOP, copiado sem alterações (entrada 640x640). Não foi preciso exportar nada.
 * **Pré-processamento** (igual ao `test_onnx.py` do YOLOP): a imagem é reduzida mantendo a proporção (640x480 fica igual) e completada com cinzento até 640x640; depois, RGB, divide por 255 e normaliza com a média e o desvio do ImageNet.
 * **Pós-processamento:** em cada píxel fica a classe mais provável (estrada ou não), retira-se a parte cinzenta e a máscara volta ao tamanho da imagem.
-* **Ordem:** corre antes de se desenhar qualquer coisa (caixas do YOLO, linhas), para os desenhos não confundirem o modelo.
+* **Ordem:** corre sobre a imagem já corrigida da distorção e **antes** de se desenhar qualquer coisa (caixas do YOLO, linhas), para os desenhos não confundirem o modelo.
 * **Saída usada:** `drive_area_seg`, 2 canais (não estrada, estrada) de 640x640, cada um com uma pontuação de 0 a 1 por píxel.
 * **Código:** `estrada.py`, com a mesma estrutura do `linhas.py` e do `objetos.py` (os três modelos partilham o mesmo motor `onnxruntime`: GPU se houver, CPU se não houver ou se a GPU falhar).
 
@@ -475,23 +490,168 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 
 ---
 
-## 7. Processamento em Tempo Real / Online (Em Docker)
+## 7. Registo das deteções e vídeos dos trechos registados
 
-Ao contrário das secções 1 e 2 (onde primeiro se grava o vídeo bruto e depois se processa offline num `venv`), este modo **capta a imagem das câmaras Astra, corre os três modelos de deteção em tempo real dentro do próprio Docker, mostra o vídeo anotado ao vivo e grava um ROS bag leve só com os dados das deteções em JSON**.
+O `processar_bag.py` pode guardar as deteções de cada imagem num ficheiro, para serem usadas depois sem voltar a correr os modelos. O formato é **o mesmo do processamento em tempo real** (`processar_tempo_real.py`, secção 9), para os registos offline e online se lerem da mesma forma. A partir de um registo, o `reproduzir_registo.py` refaz o vídeo de qualquer trecho (no ecrã ou em `.mp4`), juntando as imagens do bag original com as deteções guardadas.
 
-Não precisa de ter ROS 2, Python, PyTorch nem `ultralytics` instalados no computador: tudo corre dentro dos contentores Docker através dos módulos ONNX (`objetos.py`, `linhas.py` e `estrada.py`).
+### 7.1 Registar
+O registo é feito por **trechos**: só se guardam as imagens entre o início e o fim de cada trecho. Pode haver vários trechos na mesma execução; ficam todos no mesmo registo (o mesmo "ensaio").
+```bash
+python processar_bag.py <bag>.mcap                                   # tecla R: começa/termina cada trecho (as duas câmaras)
+python processar_bag.py <bag>.mcap --sem-interface                   # sem janela; tecla R no terminal
+python processar_bag.py <bag>.mcap --sem-interface --registar-tudo   # o vídeo todo, sem teclas
+python processar_bag.py <bag>.mcap --sem-interface --trechos "10-20,35.5-50,60-"
+python processar_bag.py <bag>.mcap --camara 5 --registar-tudo        # só a câmara 5
+```
+* **Duas câmaras:** um só ensaio para as duas; os trechos são **comuns** (a tecla R ou `--trechos` marcam o mesmo intervalo de tempo nas duas câmaras) e cada câmara tem o seu tópico no `deteccoes.mcap`, como no tempo real.
+* **Tecla R** (com ou sem janela): a primeira vez começa um trecho, a seguinte termina-o, e assim sucessivamente. Com janela, aparece no canto superior direito o indicador vermelho `REGISTO · trecho N · tempo`; sem janela, o estado aparece na linha de progresso do terminal. Se o vídeo acabar (ou carregar em Q) com um trecho aberto, o trecho termina na última imagem processada.
+* **`--trechos`**: os trechos em segundos desde o início do bag (`60-` = do segundo 60 até ao fim). Dá sempre os mesmos trechos, ao contrário da tecla; com esta opção a tecla R não é usada. `--registar-tudo` é o mesmo que `--trechos 0-`.
+* **`--sem-interface`**: sem janela, o processamento não espera pelo ritmo da gravação (vai o mais depressa possível) e não desenha nada, por isso é a forma mais rápida de registar. As teclas são lidas do terminal (**R**, **Espaço**, **Q**). Se a entrada não for um terminal (por exemplo, num contentor sem `-it`), as teclas não funcionam e o script avisa: use `--trechos` ou `--registar-tudo`.
+* O que fica registado é o que foi calculado em cada imagem: se desligar um modelo com O/L/E, ou a correção com C, durante um trecho, o registo indica-o imagem a imagem.
+
+### 7.2 Onde fica e formato
+Cada execução com pelo menos um trecho cria uma pasta (um **ensaio**):
+```
+data_offline/<viagem>/camaras5e8_<data_hora>/     (duas câmaras; com uma: camara5_<data_hora>/ ou camara8_...)
+    deteccoes.mcap    as deteções de todas as imagens de todos os trechos (de todas as câmaras)
+    ensaio.json       bag de origem, câmaras, calibração de cada câmara, modelos e limiares, e a lista de trechos
+    trecho_<N>.mp4    (só depois de exportar com o reproduzir_registo.py; com as duas câmaras, lado a lado)
+```
+* **`deteccoes.mcap`**: um ROS bag (MCAP), como o do tempo real, com uma mensagem por imagem no tópico da sua câmara, `/camara5/processamento/dados_deteccoes` ou `/camara8/processamento/dados_deteccoes`, do tipo `std_msgs/msg/String`, com um JSON:
+
+  | Campo | Conteúdo | Também no tempo real |
+  |---|---|---|
+  | `objetos` | `[{"classe": "car", "confianca": 0.84, "caixa": [x1, y1, x2, y2]}, ...]` | sim |
+  | `linhas` | pontos de cada linha, `[[[x, y], ...], ...]` | sim |
+  | `estrada_percentagem` | fração da imagem que é área circulável (0 a 1) | sim |
+  | `stamp_ns` | instante da imagem no bag original (ns): é o que liga a deteção à imagem | sim (o `header.stamp` da imagem) |
+  | `camara` | câmara da imagem (`"5"` ou `"8"`; também está no tópico) | sim |
+  | `trecho` | número do trecho | não |
+  | `corrigida` | se a imagem estava corrigida da distorção (as coordenadas são dessa imagem) | sim |
+  | `modelos_ativos` | que modelos correram nessa imagem | não |
+  | `estrada_contornos`, `estrada_buracos` | contorno da área circulável, para a voltar a desenhar | não |
+
+  Os campos extra não incomodam quem só lê os três primeiros. O instante de cada mensagem no MCAP é também o da imagem original (no tempo real, o instante da mensagem é o do processamento, e o da imagem é o `stamp_ns`).
+* **`ensaio.json`**: texto legível, com tudo o que é preciso para refazer os vídeos: caminho do bag; a lista `camaras`, com o tópico da imagem, o tópico das deteções, a calibração usada (K, D) e o tamanho da imagem de cada câmara; nomes e limiares dos modelos; e para cada trecho o início e o fim (em ns e em segundos desde o início do bag) e o número de imagens (total e `imagens_por_camara`). É atualizado sempre que um trecho termina, por isso não se perde se o programa parar. Os registos feitos antes (de uma câmara, sem a lista `camaras`) continuam a ser lidos pelo `reproduzir_registo.py` e pela janela de resultados.
+* **Tamanho:** cerca de 3 KB por imagem (cerca de 300 MB por hora de vídeo a 30 imagens por segundo, com os três modelos ligados; o dobro com as duas câmaras).
+* A pasta `data_offline/` não vai para o git (está no `.gitignore`), tal como `data/`.
+
+### 7.3 Ver ou exportar um trecho (`reproduzir_registo.py`)
+```bash
+python reproduzir_registo.py                                     # lista os registos e os seus trechos
+python reproduzir_registo.py data_offline/<viagem>/<ensaio>             # mostra todos os trechos, por ordem
+python reproduzir_registo.py data_offline/<viagem>/<ensaio> --trecho 2  # só o trecho 2 (pode repetir: --trecho 1 --trecho 3)
+python reproduzir_registo.py data_offline/<viagem>/<ensaio> --exportar  # grava trecho_<N>.mp4 na pasta do ensaio
+python reproduzir_registo.py data_offline/<viagem>/<ensaio> --exportar --sem-interface   # só grava, sem janela
+python reproduzir_registo.py data_offline/<viagem>/<ensaio> --camara 8  # registo de duas câmaras: só a câmara 8
+```
+* **Duas câmaras:** por omissão, as imagens aparecem lado a lado (5 à esquerda, 8 à direita), como no `processar_bag.py`, e o `.mp4` exportado também (`trecho_<N>.mp4`). Com `--camara 5` ou `--camara 8` mostra-se e exporta-se só essa câmara (`trecho_<N>_camara8.mp4`). O ritmo do vídeo é o da câmara com mais imagens no trecho; a outra câmara mostra sempre a sua imagem mais recente.
+* **Como funciona:** lê do bag original só as imagens entre o início e o fim de cada trecho e junta a cada uma as deteções com o mesmo instante (`stamp_ns`). Aplica a mesma correção da distorção (com a calibração guardada no `ensaio.json`) e desenha com o mesmo aspeto do `processar_bag.py` (`visual.py`). Os modelos **não** voltam a correr.
+* **Teclas:** **Espaço** pausa, **N** passa ao trecho seguinte, **Q** sai.
+* **Velocidade (só na janela):** **1** tempo real, **2** duas vezes mais lento, **3** três vezes mais lento; **-** e **+** abrandam ou aceleram em passos de 0.5x, entre 1x e 3x. A velocidade aparece no canto inferior direito. O vídeo exportado (`--exportar`) fica sempre em tempo real, qualquer que seja a velocidade escolhida.
+* **Bag original:** é procurado onde estava no processamento e em `data/<viagem>/`. Se o mudou de sítio, use `--bag <caminho do .mcap>`. O script avisa se o tamanho não for o do bag processado.
+* Os vídeos `.mp4` têm o ritmo da gravação (por exemplo, 30 imagens por segundo), qualquer que tenha sido a velocidade do processamento.
+* O tempo real (secção 9) grava as deteções no mesmo formato (também um tópico por câmara) e o vídeo original no mesmo bag, mas não tem trechos nem `ensaio.json`: não é para reproduzir com este script. Para relacionar as deteções com as imagens, ver a secção 9 («O que é gravado»).
+
+### 7.4 Juntar dois registos de uma câmara (`juntar_registos.py`)
+Se as duas câmaras de um bag forem processadas em sessões diferentes (`--camara 5` numa, `--camara 8` noutra), ficam dois registos separados. O `juntar_registos.py` junta-os num registo de duas câmaras, igual ao que sairia de as processar juntas, para se verem lado a lado no `reproduzir_registo.py` e na janela de resultados (secção 8):
+```bash
+python juntar_registos.py data_offline/<viagem>/camara5_<data_hora> data_offline/<viagem>/camara8_<data_hora>
+```
+* Cria `data_offline/<viagem>/camaras5e8_juntado_<data_hora>/` (com `deteccoes.mcap` e `ensaio.json`, como na secção 7.2). Os dois registos originais não são alterados.
+* Confirma que os dois registos são do mesmo bag (nome e tamanho) e de câmaras diferentes; se não forem, dá erro e não cria nada. Se os modelos ou limiares forem diferentes, avisa (ficam os dois no `ensaio.json`, em `modelos_por_camara`).
+* **Trechos: a união.** Os trechos das duas câmaras que se sobrepõem passam a ser um só trecho, do início mais cedo ao fim mais tarde; um trecho que só uma câmara registou fica como trecho dessa câmara. Cada trecho guarda em que intervalos cada câmara foi registada (`intervalos_por_camara`), e o script mostra-os no fim.
+  * Nas partes em que só uma câmara foi registada, o lado da outra aparece **escuro, com a mensagem `Câmara N: sem registo neste intervalo`** (no `reproduzir_registo.py`, no vídeo exportado e na janela de resultados).
+  * Nessas partes, os veículos por instante (resumo e cores do percurso) contam só a câmara registada.
+* Com `--registar-tudo`, ou o mesmo `--trechos` nas duas sessões, os trechos coincidem e o registo juntado fica igual ao de uma só execução com as duas câmaras. Com a tecla R, os trechos de cada câmara ficam ligeiramente diferentes, e as pontas aparecem só com uma câmara.
+* Na listagem do `reproduzir_registo.py` (sem argumentos) e no Resumo da janela («Juntado de»), um registo juntado indica os registos de origem e onde cada câmara foi registada.
+
+---
+
+## 8. Janela de resultados (`gui_resultados.py`)
+
+Uma janela, à parte do processamento, para ver os registos feitos pelo `processar_bag.py` (secção 7):
+```bash
+python gui_resultados.py                              # registos em data_offline
+python gui_resultados.py --pasta-registo outra_pasta  # registos noutra pasta
+```
+* **Bibliotecas:** `customtkinter` (aspeto da janela) e `tkintermapview` (mapa), no `requirements.txt`. Num `venv` que já existia (sobretudo com a versão GPU, secção 2, Passo 3), instale só estas: `pip install customtkinter tkintermapview`.
+* Os registos são lidos de `data_offline`. Se a pasta não existir ou não tiver registos, a janela avisa e a tab **Percurso** fica indisponível.
+* **Registos de uma ou de duas câmaras:** a janela adapta-se ao registo escolhido. Com uma câmara, tudo fica como antes. Com duas, aparece a escolha da câmara (abaixo) e, ao escolher as duas, o aspeto muda: tabelas com uma coluna/valor por câmara, vídeo lado a lado com mais espaço, e veículos contados por **instante** (soma das duas câmaras). Na lista, os registos de duas câmaras dizem `câmaras 5 e 8`.
+
+### 8.1 Tab Resumo
+* Escolhe-se o registo (por omissão, o mais recente) e o **trecho** (todos, ou um só); tudo o que é mostrado se refere à escolha.
+* **Câmara** (só nos registos de duas câmaras): **Ambas**, **Câmara 5** ou **Câmara 8**. Com uma só, o resumo é igual ao de um registo de uma câmara. Com **Ambas**:
+  * Vídeo e registo: as duas câmaras, a correção de cada uma e o número de imagens de cada uma;
+  * Linhas e área circulável: um valor por câmara (`5: … · 8: …`);
+  * Deteções por categoria: colunas com as deteções de cada câmara; média, máximo e % contam as imagens das duas;
+  * Veículos: **por instante**, somando as duas câmaras (cada imagem de uma câmara com a imagem da outra mais próxima no tempo, até 0,1 s), e a média de cada câmara.
+* **Vídeo e registo:** bag, câmara, duração, correção da distorção, data do processamento, trechos, e o número de imagens e a duração do que está selecionado.
+* **Modelos:** limiar de cada modelo, tempo médio por imagem, classes do YOLO e velocidade do processamento.
+* **Linhas e área circulável:** linhas por imagem e % de imagens sem linhas (CLRNet); área circulável média, mínima e máxima (YOLOP).
+* **Deteções por categoria (YOLO):** para cada classe, deteções, média por imagem, máximo numa imagem, % de imagens com a classe e confiança média. As deteções são somadas imagem a imagem (o mesmo veículo visto em 30 imagens conta 30 vezes): sem seguimento dos objetos, não se sabe quantos veículos diferentes passaram.
+* **Veículos por imagem** (com as duas câmaras, **por instante**): média, máximo e a % de imagens (instantes) em cada gama de cores do mapa (tab Percurso).
+
+### 8.2 Tab Percurso
+Sem GPS, a ligação entre o vídeo e o mapa faz-se à mão, em três passos por trecho.
+
+0. **Registo, trecho e intervalo:** escolhe-se o registo (da lista, ou noutra pasta com «Outra pasta…»), um trecho ou «Todos os trechos», e o intervalo entre referências (5 s por omissão). Num registo de duas câmaras escolhe-se também as **câmaras**: as duas (vídeo lado a lado e cor pela soma dos veículos das duas) ou só uma (tudo como num registo de uma câmara).
+1. **Trajeto** (a forma do caminho): escrevem-se as coordenadas de início (`latitude, longitude`, por exemplo `40.6405, -8.6538`, como o Google Maps as copia) e carrega-se em **Ir**; depois clica-se no mapa ponto a ponto, pela ordem em que foi feito, com pontos suficientes para seguir as curvas. «Desfazer ponto» e «Limpar» corrigem. Arrastar move o mapa; a roda do rato aproxima.
+2. **Pontos de referência** (onde estava o carro em instantes fixos): a janela mostra a imagem do vídeo (com as duas câmaras, as duas lado a lado, o que ajuda a reconhecer o sítio) em cada instante múltiplo do intervalo, contado desde o início da gravação (5, 10, 15 s…; num trecho de 12,3 a 31,0 s: 15, 20, 25 e 30 s), e clica-se no mapa onde o carro está. O ponto é encostado ao trajeto e fica marcado com um pequeno círculo branco.
+   * **Saltar:** se não reconhecer o sítio nesse instante; os dois intervalos vizinhos juntam-se.
+   * **Pontos de curva:** se o trajeto cortar uma esquina, escolha **«Acrescentar curva»** (em cima, ao lado de «Marcar referência») e clique no mapa por onde a rua passa; o ponto entra no troço do trajeto mais perto e as referências são reencostadas. Volte a «Marcar referência» para continuar. O botão direito no mapa («Acrescentar ponto de curva ao trajeto aqui») faz o mesmo.
+   * Se o trecho for mais curto do que o intervalo, não há referências a marcar: aparece a primeira imagem do trecho e pode passar ao passo seguinte.
+   * Uma referência não pode ficar antes da anterior no trajeto; o início e o fim do trecho ficam ligados ao início e ao fim do trajeto.
+3. **Mapa, vídeo e intervalos lado a lado:** à esquerda o trajeto, ao meio o vídeo do trecho (com as deteções registadas; com as duas câmaras, lado a lado, e o vídeo fica com mais largura e o mapa com menos), à direita a tabela de **intervalos** (entre referências): tempo, coordenadas da referência de início, média de veículos e drift, cada linha com o fundo da cor do intervalo e o intervalo em curso a negrito; em baixo, o resumo do trecho (distância, duração, velocidade média, veículos por imagem, referências e drift). **Run** começa e **Parar** pára; com vários trechos, passam seguidos.
+
+**Cores:** cada intervalo é pintado com a cor da **média de veículos por imagem** nesse intervalo (`car`, `motorcycle`, `bicycle`, `bus`, `truck`; pessoas e sinais não contam); com as duas câmaras, da média de veículos **por instante, somando as duas câmaras** (os veículos à volta do carro, dos dois lados). A cor só aparece quando o vídeo passa por esse intervalo.
+
+| Média de veículos (arredondada) | 0 | 1–2 | 3–5 | 6 ou mais |
+|---|---|---|---|---|
+| Cor | verde | amarelo | laranja | vermelho |
+
+As gamas estão em `GAMAS_VEICULOS`, no `registo.py`, e as cores em `CORES_GAMAS`, no `gui_comum.py` (as mesmas no resumo do tempo real, secção 9); o intervalo por omissão em `INTERVALO_REFERENCIAS_S`, no `gui_resultados.py`.
+
+**Posição e drift:** dentro de cada intervalo, a posição parte da referência de início e avança à velocidade média do trecho (comprimento do trajeto a dividir pela duração), sem nunca passar a referência seguinte. No início do intervalo seguinte, salta para a referência seguinte. O **drift** de cada intervalo é a diferença entre onde a estimativa chegou e a referência seguinte: negativo, a estimativa ficou aquém e o troço que faltava fica **cinzento** no mapa (é o drift visível); positivo, a estimativa chegaria à referência antes do tempo (o carro foi mais devagar do que a média). Não há marcador de posição: só o trajeto pintado.
+
+**Guardar e carregar:** o trajeto e as referências guardam-se em ficheiros separados, cada um no seu passo («Guardar trajeto…» / «Carregar trajeto…» no passo 1; «Guardar referências…» / «Carregar referências…» no passo 2). Por omissão ficam na pasta do ensaio, com os nomes `trajeto_trecho<N>.json` e `referencias_trecho<N>.json`. As referências só se carregam com o mesmo intervalo com que foram marcadas; ao carregar ficheiros de outro trecho ou registo, a janela avisa.
+
+* **Internet:** o mapa (OpenStreetMap) é descarregado da internet. Sem ligação, aparece um aviso em vez do mapa, com um botão para tentar de novo.
+* **Sair da tab:** pode-se ir para o Resumo a qualquer momento; ao voltar, tudo recomeça (os ficheiros guardados servem para não repetir os cliques).
+
+---
+
+## 9. Processamento em Tempo Real / Online (Em Docker)
+
+Ao contrário das secções 1 e 2 (onde primeiro se grava o vídeo bruto e depois se processa offline num `venv`), este modo **capta a imagem das câmaras Astra, corrige a distorção da lente e corre os três modelos de deteção em tempo real dentro do próprio Docker**, mostra o vídeo anotado ao vivo (as duas câmaras lado a lado, como no offline) e **grava um ROS bag com o vídeo original e as deteções em JSON**. No fim, mostra um resumo das deteções, como a tab Resumo da janela de resultados do offline (secção 8.1).
+
+Não precisa de ter ROS 2, Python, PyTorch nem `ultralytics` instalados no computador: tudo corre dentro dos contentores Docker, com os mesmos módulos do offline (`objetos.py`, `linhas.py`, `estrada.py`, `visual.py`, `registo.py` e a correção da distorção do `leitura_bag.py`).
+
+| | Offline (secções 2 e 7) | Online (esta secção) |
+|---|---|---|
+| Modelos, classes e limiares | os mesmos | os mesmos |
+| Correção da distorção | `config/camera_astra_<N>.yaml` | a mesma (`--sem-correcao` para desligar) |
+| Duas câmaras | lado a lado, 5 à esquerda e 8 à direita | igual; **D** desliga/liga a câmara da direita |
+| Deteções gravadas | `deteccoes.mcap` nos trechos registados | no bag da sessão, sempre |
+| Vídeo | o bag da aquisição (secção 1) | o vídeo original, no mesmo bag das deteções |
+| Resumo | `gui_resultados.py`, tab Resumo (e Percurso) | janela de resumo no fim (só Resumo); não se refaz o vídeo |
 
 ### Ficheiros e como funcionam
-* `Dockerfile_realtime_inter`: cria uma imagem Docker com ROS 2 Jazzy, o driver `usb_cam`, as bibliotecas do sistema para OpenCV e um ambiente Python (`/opt/venv`) instalado a partir do `requirements.txt` (sem `ultralytics` nem PyTorch). Recebe o argumento `ONNX_PKG` (por omissão `onnxruntime`, em CPU) para instalar automaticamente apenas a versão certa para o computador (CPU ou GPU).
+* `Dockerfile_realtime_inter`: cria uma imagem Docker com ROS 2 Jazzy, o driver `usb_cam`, as bibliotecas do sistema para OpenCV e para a janela do resumo (`python3-tk`) e um ambiente Python (`/opt/venv`) instalado a partir do `requirements.txt` (sem `ultralytics` nem PyTorch; o `tkintermapview`, só do mapa do offline, também não é instalado). Recebe o argumento `ONNX_PKG` (por omissão `onnxruntime`, em CPU) para instalar automaticamente apenas a versão certa para o computador (CPU ou GPU).
 * `compose_realtime_inter.yaml`: configuração base do Docker Compose (sempre compatível com CPU) que lança 4 serviços na mesma rede:
   * `driver_camara5` e `driver_camara8`: drivers `usb_cam` que publicam `/camara5/image_raw` e `/camara8/image_raw`;
-  * `processador`: corre o `processar_tempo_real.py` dentro do Docker (com a pasta atual montada em `/workspace`);
-  * `gravador_bag`: grava em `./data_realtime_inter/realtime_<data_hora>/` um ficheiro `.mcap` apenas com os tópicos JSON das deteções das câmaras ativas.
+  * `processador`: corre o `processar_tempo_real.py` dentro do Docker (com a pasta do projeto montada em `/workspace`);
+  * `gravador_bag`: grava em `./data_realtime_inter/realtime_<data_hora>/` um bag `.mcap` com o vídeo original e as deteções das câmaras ativas (ver «O que é gravado», abaixo).
 * `compose_realtime_gpu.yaml`: ficheiro complementar (apenas algumas linhas) que dá acesso da placa gráfica NVIDIA ao contentor `processador`. **Não precisa de o editar**: é carregado automaticamente pelo `processar_inter.sh` apenas quando o PC tem GPU NVIDIA pronta para Docker.
-* `processar_inter.sh`: script que deve usar sempre para arrancar o sistema. Associa as câmaras (5 e/ou 8) aos `/dev/video`, **deteta automaticamente se deve usar GPU NVIDIA ou CPU** (por omissão usa CPU se não houver GPU configurada), aceita a opção `-i` (`--sem-interface`) para correr sem janelas gráficas, constrói a imagem se houver alterações e lança todos os contentores.
-* `processar_tempo_real.py`: nó ROS 2 que recebe as imagens das câmaras, corre os três modelos ONNX (`objetos.py`, `linhas.py`, `estrada.py`), desenha com `visual.py`, abre uma janela de vídeo por câmara (exceto no modo `-i`) e publica dois tópicos por câmara:
-  * `/camara<N>/processamento/dados_deteccoes` (`std_msgs/String` em formato JSON);
-  * `/camara<N>/processamento/imagem_anotada` (`sensor_msgs/Image`, imagem BGR com o desenho).
+* `processar_inter.sh`: script que deve usar sempre para arrancar o sistema. Associa as câmaras (5 e/ou 8) aos `/dev/video`, **deteta automaticamente se deve usar GPU NVIDIA ou CPU** (por omissão usa CPU se não houver GPU configurada), aceita as opções `-i` (`--sem-interface`, sem janelas) e `--sem-correcao`, constrói a imagem se houver alterações, lança todos os contentores e, no fim, abre a janela do resumo.
+* `processar_tempo_real.py`: nó ROS 2 que recebe as imagens das câmaras, corrige a distorção, corre os três modelos ONNX, desenha com `visual.py`, abre **uma janela com as câmaras lado a lado** (exceto no modo `-i`) e publica:
+  * `/camara<N>/processamento/dados_deteccoes` (`std_msgs/String` em JSON, o mesmo formato do registo offline);
+  * `/camara<N>/processamento/imagem_anotada` (`sensor_msgs/Image`, imagem BGR com o desenho; só é calculada com janela, ou se alguém subscrever o tópico, por exemplo no RViz);
+  * `/processamento/estado_camaras` (que câmaras estão a ser processadas; muda quando se desliga ou liga a câmara da direita).
+
+  No fim grava `resumo_online.json` na pasta da sessão (as estatísticas das deteções).
+* `resumo_online.py`: janela do resumo, aberta pelo `processar_inter.sh` no fim (usa o `gui_comum.py`, o mesmo da tab Resumo do offline).
+* `alternar_camara.sh`: desliga ou volta a ligar a câmara da direita sem janela (modo `-i`), a partir de outro terminal.
 
 ### Passo 0: Preparar a GPU NVIDIA no Docker (Opcional — apenas se tiver placa NVIDIA)
 O sistema funciona **em CPU por omissão** em qualquer PC com Linux e Docker — se não tiver placa NVIDIA, salte diretamente para o **Passo 1**.
@@ -509,8 +669,8 @@ Se o seu PC tem uma placa gráfica NVIDIA e quer usar aceleração por GPU em te
 2. **Adicione o repositório oficial da NVIDIA (Ubuntu/Debian):**
    ```bash
    sudo apt-get update && sudo apt-get install -y --no-install-recommends ca-certificates curl gnupg2
-   curl -fsSL [https://nvidia.github.io/libnvidia-container/gpgkey](https://nvidia.github.io/libnvidia-container/gpgkey) | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-   curl -s -L [https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list](https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list) | \
+   curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+   curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
      sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
      sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
    ```
@@ -538,7 +698,7 @@ Se o seu PC tem uma placa gráfica NVIDIA e quer usar aceleração por GPU em te
    Por omissão o script usa `/dev/video2` para a 1.ª câmara indicada e `/dev/video4` para a 2.ª. Se as suas câmaras ficarem noutros números, pode indicá-los ao arrancar (exemplo: `DEVS_VIDEO="/dev/video4 /dev/video6" bash processar_inter.sh 5 8`).
 
 ### Passo 2: Autorizar o Docker a abrir janelas no ecrã (Uma vez por arranque do PC)
-Tal como na Secção 1, dê permissão para que as janelas de vídeo do OpenCV consigam abrir no ecrã *(se executar com `-i` para correr sem interface gráfica, este passo não é necessário)*:
+Tal como na Secção 1, dê permissão para que as janelas (vídeo e resumo) consigam abrir no ecrã *(se executar com `-i` para correr sem interface gráfica, este passo não é necessário)*:
 ```bash
 xhost +local:root
 ```
@@ -551,43 +711,83 @@ bash processar_inter.sh 8 5              # se estiverem ao contrário
 bash processar_inter.sh 5                # apenas a câmara 5 em /dev/video2
 bash processar_inter.sh 5 8 -i           # sem interface gráfica (corre apenas no terminal/fundo)
 bash processar_inter.sh 5 -i             # apenas a câmara 5, sem interface gráfica
+bash processar_inter.sh 5 8 --sem-correcao   # sem corrigir a distorção da lente
 USAR_GPU=0 bash processar_inter.sh 5 8   # forçar CPU mesmo num PC com GPU NVIDIA
 ```
 * **Deteção automática de hardware:** logo no início, o terminal indica o que escolheu, por exemplo:
   * `Hardware detetado: GPU NVIDIA (CUDA 13) -> onnxruntime-gpu[cuda,cudnn]`
   * `Hardware detetado: CPU -> onnxruntime`
   * ou `Hardware: GPU NVIDIA encontrada, mas falta o NVIDIA Container Toolkit no Docker -> a usar CPU` (neste caso, siga o Passo 0 se quiser usar a GPU).
-* **Na 1.ª vez** (ou quando alterna entre CPU e GPU), o Docker constrói a imagem e descarrega as bibliotecas Python (pode demorar alguns minutos, sobretudo com `onnxruntime-gpu[cuda,cudnn]`). Nas execuções seguintes, usa a cache do Docker e arranca em poucos segundos.
-* **Confirme no terminal** que os três modelos carregaram no dispositivo esperado:
+* **Na 1.ª vez** (ou quando alterna entre CPU e GPU, ou depois de mudar o `Dockerfile_realtime_inter` ou o `requirements.txt`), o Docker constrói a imagem e descarrega as bibliotecas Python (pode demorar alguns minutos, sobretudo com `onnxruntime-gpu[cuda,cudnn]`). Nas execuções seguintes, usa a cache do Docker e arranca em poucos segundos.
+* **Confirme no terminal** que os três modelos carregaram no dispositivo esperado e que a correção da distorção está ativa:
   ```text
   Objetos (YOLOv8n): GPU (CUDA)
   Linhas  (CLRNet):  GPU (CUDA)
   Estrada (YOLOP):   GPU (CUDA)
+  Câmara 5: correção da distorção com config/camera_astra_5.yaml
+  Câmara 8: correção da distorção com config/camera_astra_8.yaml
   ```
-  *(ou `CPU`, se estiver a correr sem GPU).*
-* Por omissão, abre uma janela OpenCV independente por cada câmara ativa (`Tempo Real - Camara 5`, `Tempo Real - Camara 8`) com a estrada, linhas e objetos desenhados ao vivo. Com a opção `-i` (ou `--sem-interface`), não abre janelas gráficas, mantendo o processamento, a publicação dos tópicos ROS e a gravação do `.mcap` a funcionar normalmente.
-* Passados 4 segundos, o `gravador_bag` começa automaticamente a gravar as deteções em `data_realtime_inter/realtime_AAAAMMDD_HHMMSS/`.
+  *(ou `CPU`, se estiver a correr sem GPU; sem o ficheiro de calibração de uma câmara, aparece um aviso e essa câmara não é corrigida).*
+* **Janela:** uma só janela (`Tempo Real`) com as câmaras **lado a lado, a 5 à esquerda e a 8 à direita** (qualquer que seja a ordem dos `/dev/video`), com a estrada, as linhas e os objetos desenhados ao vivo e o painel de cada câmara: tempo desde o arranque, estado da correção, resultado e tempo (ms) de cada modelo e **deteções por segundo** dessa câmara. A janela pode ser redimensionada com o rato.
+* **Correção da distorção:** como no offline (secção 3), cada imagem é corrigida com o `config/camera_astra_<N>.yaml` da sua câmara **antes** das deteções, por isso as coordenadas das deteções são as da imagem corrigida (campo `corrigida` no JSON). O vídeo gravado no bag é o original, sem correção. Com `--sem-correcao`, as deteções são feitas na imagem original.
+* Com a opção `-i` (ou `--sem-interface`), não abre janelas gráficas nem desenha nada (mais rápido), mantendo o processamento, a publicação dos tópicos ROS e a gravação do bag a funcionar normalmente.
+* Passados 4 segundos, o `gravador_bag` começa automaticamente a gravar em `data_realtime_inter/realtime_AAAAMMDD_HHMMSS/` (o terminal indica a pasta logo no arranque).
 
-### Passo 4: Terminar e guardar a gravação
-1. Para fechar, prima **`Q`** (ou `ESC`) na janela do vídeo ou prima **`Ctrl + C`** (apenas uma vez) no terminal *(no modo `-i`, sem interface, use `Ctrl + C`)*.
-2. Aguarde alguns segundos para o Docker encerrar os contentores em segurança e gravar o índice final do ficheiro `.mcap`.
-3. Os resultados ficam guardados na pasta `./data_realtime_inter/realtime_<data_hora>/`.
+### Desligar temporariamente a câmara da direita (mais deteções por segundo na outra)
+Os três modelos correm um de cada vez, para uma câmara e depois para a outra: com as duas câmaras, cada uma é processada metade das vezes. Para aumentar a frequência de deteção numa delas durante um trecho, desligue temporariamente a deteção da câmara da direita (a 8, com as duas câmaras):
+* **Com janela:** tecla **D** (a mesma tecla volta a ligá-la). O lado direito da janela fica escuro, com `Câmara 8: deteção desligada`.
+* **Sem janela (`-i`):** noutro terminal, na pasta do projeto: `bash alternar_camara.sh` (cada vez que corre, desliga ou volta a ligar).
+* O terminal do processamento mostra cada mudança, com o instante (`[00:27.9] Câmara 8: deteção DESLIGADA`).
+* **A gravação do vídeo da câmara desligada continua** (só a deteção é que pára): o bag tem o vídeo das duas câmaras o tempo todo, e as deteções da câmara 8 só nos períodos em que esteve ligada. Cada mudança fica também gravada no tópico `/processamento/estado_camaras`, e os períodos em que esteve desligada aparecem no resumo.
+* A câmara da esquerda nunca se desliga (há sempre pelo menos uma câmara a ser processada). Com uma só câmara, a tecla não faz nada.
 
-### O que é gravado nos bags (`data_realtime_inter/`)
-Para evitar ficheiros gigantescos (como os 2 GB/min do vídeo bruto na Secção 1), o `gravador_bag` grava **apenas** os tópicos `/camara<N>/processamento/dados_deteccoes`. Cada mensagem é uma string JSON com esta estrutura:
-```json
-{
-  "objetos": [
-    {"classe": "car", "confianca": 0.87, "caixa": [120, 210, 290, 340]}
-  ],
-  "linhas": [
-    [[180.5, 479.0], [215.2, 420.0]]
-  ],
-  "estrada_percentagem": 0.34
-}
+### Passo 4: Terminar, gravação e resumo
+1. Para terminar, prima **`Q`** (ou `ESC`) na janela do vídeo ou prima **`Ctrl + C`** (apenas uma vez) no terminal *(no modo `-i`, sem interface, use `Ctrl + C`)*.
+2. O processamento e a gravação terminam juntos (o bag acaba quando o processamento acaba). Aguarde alguns segundos para o Docker encerrar os contentores em segurança e gravar o índice final do `.mcap`.
+3. **Resumo:** com janela, abre-se a seguir a janela **«Resumo do processamento em tempo real»**, com o mesmo conteúdo da tab Resumo do offline (secção 8.1), sem o percurso:
+   * **Sessão:** câmaras, início, duração, correção, imagens processadas e **deteções por segundo** de cada câmara, e os períodos em que a câmara da direita esteve desligada;
+   * **Modelos:** limiar, dispositivo (CPU/GPU) e tempo médio de cada modelo;
+   * **Linhas e área circulável**, **deteções por categoria** e **veículos** (por instante, somando as duas câmaras), iguais aos do offline;
+   * com duas câmaras, escolhe-se **Ambas**, **Câmara 5** ou **Câmara 8**, como no offline. Enquanto a câmara 8 esteve desligada, os veículos por instante contam só a câmara 5.
+
+   Feche a janela do resumo para terminar. **Sem janela (`-i`), o resumo não é mostrado**, mas é gravado na mesma (`resumo_online.json`), tal como o vídeo e as deteções.
+
+### O que é gravado (`data_realtime_inter/realtime_<data_hora>/`)
 ```
-* As classes detetadas pelo YOLO em tempo real são, por omissão, as mesmas 8 classes de estrada do `processar_bag.py` (`CLASSES_ESTRADA` no topo do `processar_tempo_real.py`). Para detetar as 80 classes do COCO, altere essa linha para `CLASSES_ESTRADA = None`. Como a pasta do projeto está montada em `/workspace`, **não precisa de reconstruir a imagem Docker** quando edita ficheiros `.py`.
-* **Nota:** ao contrário do `processar_bag.py` (offline), o `processar_tempo_real.py` atual processa diretamente a imagem publicada pelo driver da câmara, sem aplicar a correção de distorção da lente (Secção 3).
+data_realtime_inter/realtime_<data_hora>/
+    realtime_<data_hora>_0.mcap   o bag: vídeo original e deteções de cada câmara, e o estado das câmaras
+    metadata.yaml                 (do ros2 bag)
+    resumo_online.json            as estatísticas das deteções (o que a janela do resumo mostra)
+```
+* **Tópicos do bag:**
+
+  | Tópico | Conteúdo |
+  |---|---|
+  | `/camara<N>/image_raw` | o vídeo original de cada câmara, como na aquisição (secção 1): cerca de **1 GB por minuto por câmara** |
+  | `/camara<N>/processamento/dados_deteccoes` | uma mensagem JSON por imagem processada (abaixo) |
+  | `/processamento/estado_camaras` | que câmaras estavam a ser processadas, a cada mudança (tecla D) |
+
+  Confirme que há espaço livre no disco: com as duas câmaras, cerca de 2 GB por minuto, como na aquisição.
+* **Cada mensagem de deteções** é uma string JSON com os mesmos campos do registo offline (secção 7.2):
+  ```json
+  {
+    "objetos": [
+      {"classe": "car", "confianca": 0.87, "caixa": [120, 210, 290, 340]}
+    ],
+    "linhas": [
+      [[180.5, 479.0], [215.2, 420.0]]
+    ],
+    "estrada_percentagem": 0.34,
+    "stamp_ns": 1795227005801337824,
+    "camara": "5",
+    "corrigida": true
+  }
+  ```
+  * `stamp_ns` é o instante da imagem (o `header.stamp` posto pelo driver da câmara): **é o que liga cada deteção à imagem gravada no bag** (a mensagem de `/camara<N>/image_raw` com o mesmo `header.stamp`).
+  * `corrigida` diz se as coordenadas (caixas e linhas) são as da imagem corrigida da distorção (com a calibração da secção 3) ou as da original.
+  * Não se guardam os contornos da área circulável (só a percentagem), porque no online não se refaz o vídeo.
+* **Relacionar as deteções com a imagem, mais tarde, no offline:** o bag tem o vídeo original, por isso pode ser processado com o `processar_bag.py` como um bag da aquisição (`python processar_bag.py data_realtime_inter/realtime_<data_hora>/realtime_<data_hora>_0.mcap`, secção 2), ou lido diretamente (cada deteção com a imagem do mesmo `stamp_ns`).
+* As classes detetadas pelo YOLO são as mesmas do offline: `CLASSES_ESTRADA`, no `objetos.py` (vale para os dois). Para detetar as 80 classes do COCO, altere essa linha para `CLASSES_ESTRADA = None`. Como a pasta do projeto está montada em `/workspace`, **não precisa de reconstruir a imagem Docker** quando edita ficheiros `.py`.
 
 ### Testar o build e os modelos sem câmaras ligadas (Opcional)
 Se quiser confirmar que o Docker constrói bem e que os três modelos ONNX correm em GPU ou CPU **sem ter as câmaras ligadas**:
@@ -626,11 +826,16 @@ Se quiser confirmar que o Docker constrói bem e que os três modelos ONNX corre
    ```
    Deve imprimir `Objetos`, `Linhas` e `Estrada` com `GPU (CUDA)` (ou `CPU`), sem erros. Os avisos `The "CAMARAS_ATIVAS" variable is not set` e `Found orphan containers (extract-rviz-1)` são normais quando se corre o `docker compose` diretamente fora do `processar_inter.sh`.
 
-### Problemas comuns (Secção 7)
+3. **Testar a janela do resumo** (depois de uma sessão): `docker compose -f compose_realtime_inter.yaml run --rm --no-deps processador python3 resumo_online.py data_realtime_inter/realtime_<data_hora>` (precisa do `xhost +local:root`).
+
+### Problemas comuns (Secção 9)
 * **`cannot open display` ou erro de janela gráfica:** esqueceu-se de executar `xhost +local:root` antes de lançar o script (Passo 2), ou pode adicionar `-i` ao comando se não precisar de abrir a interface gráfica.
 * **`could not select device driver "nvidia"`:** tentou usar `compose_realtime_gpu.yaml` sem o *NVIDIA Container Toolkit* instalado/configurado (ver Passo 0). Se usar sempre `bash processar_inter.sh`, o script deteta isto sozinho e arranca em CPU sem dar erro.
 * **Os modelos arrancam em `CPU` num PC com GPU:** confirme se correu `nvidia-smi` e `docker info | grep -i nvidia` (Passo 0) e confirme que não passou `USAR_GPU=0`.
 * **Erro `FileNotFoundError` ao carregar os modelos:** confirme que a pasta `modelos/` existe na raiz do repositório com `objetos.onnx`, `linhas.onnx`, `linhas.json` e `estrada.onnx`.
+* **Aviso `config/camera_astra_<N>.yaml não existe`:** falta a calibração dessa câmara (secção 3); as deteções dessa câmara são feitas na imagem original (`"corrigida": false`).
+* **`Não foi gravado o resumo` no fim:** o processamento não chegou a arrancar (veja os erros do `processador` mais acima no terminal).
+* **`alternar_camara.sh` diz que o processamento não está a correr:** corra-o na pasta do projeto, noutro terminal, enquanto o `processar_inter.sh` está a decorrer.
 
 ---
 
@@ -639,5 +844,6 @@ Se quiser confirmar que o Docker constrói bem e que os três modelos ONNX corre
 * Implementação e pesos: [UnLanedet](https://github.com/zkyntu/UnLanedet) (licença Apache 2.0).
 * Conjunto de dados de treino das linhas: CULane.
 * Deteção da estrada: [YOLOP](https://github.com/hustvl/YOLOP), Wu et al., *YOLOP: You Only Look Once for Panoptic Driving Perception* (licença MIT), treinado no BDD100K.
+* Mapa da janela de resultados: [OpenStreetMap](https://www.openstreetmap.org/copyright) (© contribuidores do OpenStreetMap), com o [TkinterMapView](https://github.com/TomSchimansky/TkinterMapView); janela com o [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter).
 * Deteção de objetos: [Ultralytics YOLOv8](https://github.com/ultralytics/ultralytics) (licença AGPL-3.0), pré-treinado no COCO e utilizado em formato ONNX.
 * Verifique as condições de utilização do CULane, do BDD100K, do UnLanedet, do YOLOP e do Ultralytics antes de usar os modelos fora do contexto académico.

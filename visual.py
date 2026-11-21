@@ -6,7 +6,7 @@ Só trata da apresentação: as deteções (objetos, linhas, estrada) são feita
 chegam aqui já calculadas. Cores fixas por modelo e, nos objetos, por classe, para a mesma coisa
 ter sempre a mesma cor em todas as imagens.
 
-O texto é escrito com o Pillow (instalado com o ultralytics) e uma fonte do sistema, para ter
+O texto é escrito com o Pillow (ver requirements.txt) e uma fonte do sistema, para ter
 acentos e um aspeto mais limpo do que as fontes do OpenCV; se não houver nenhuma fonte, usa a
 fonte do Pillow.
 """
@@ -138,7 +138,9 @@ def compor(img, caixas, info):
     """
     Escreve as etiquetas dos objetos e o painel de informação. info é um dicionário com:
       tempo, total (s); subtitulo (texto) e cor_subtitulo; modelos: lista de
-      (chave, nome do modelo, resultado, ms, ativo, carregado); rodape (texto).
+      (chave, nome do modelo, resultado, ms, ativo, carregado), com ms None quando não há tempo
+      (reprodução de um registo); rodape (texto); opcional: registo (texto do indicador vermelho
+      de registo no canto superior direito, ou None).
     Devolve a imagem BGR final.
     """
     imagem = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
@@ -213,7 +215,8 @@ def compor(img, caixas, info):
             dp.ellipse([x0, cy - r, x0 + 2 * r, cy + r], fill=_rgba(COR_MODELO[chave]))
             dp.text((x0 + 3 * r, cy), nome, font=f_txt, fill=(229, 231, 235, 255), anchor="lm")
             dp.text((x0 + int(88 * esc), cy), valor, font=f_val, fill=(255, 255, 255, 255), anchor="lm")
-            dp.text((x0 + barra_l, cy), f"{ms:.0f} ms", font=f_sub, fill=(156, 163, 175, 255), anchor="rm")
+            if ms is not None:
+                dp.text((x0 + barra_l, cy), f"{ms:.0f} ms", font=f_sub, fill=(156, 163, 175, 255), anchor="rm")
         else:
             dp.ellipse([x0, cy - r, x0 + 2 * r, cy + r], outline=_rgba(COR_DESLIGADO), width=max(1, int(1.5 * esc)))
             dp.text((x0 + 3 * r, cy), nome, font=f_txt, fill=_rgba(COR_DESLIGADO), anchor="lm")
@@ -223,7 +226,45 @@ def compor(img, caixas, info):
     dp.text((x0, y), rodape, font=f_sub, fill=(156, 163, 175, 255))
     imagem.paste(Image.alpha_composite(recorte, camada).convert("RGB"), zona_painel[:2])
 
+    # Indicador de registo (canto superior direito): ponto vermelho e texto, sobre fundo escuro
+    if info.get("registo"):
+        texto = info["registo"]
+        f_reg = fonte(int(13 * esc), negrito=True)
+        r = int(5 * esc)
+        tw = d.textlength(texto, font=f_reg)
+        lr, hr = int(tw + 4 * r + 2 * p), int(26 * esc)
+        zona = (largura - m - lr, m, largura - m, m + hr)
+        recorte = imagem.crop(zona).convert("RGBA")
+        camada = Image.new("RGBA", recorte.size, (0, 0, 0, 0))
+        dr = ImageDraw.Draw(camada)
+        dr.rounded_rectangle([0, 0, lr - 1, hr - 1], radius=hr // 2, fill=(15, 17, 21, 190))
+        cy = hr // 2
+        dr.ellipse([p, cy - r, p + 2 * r, cy + r], fill=(239, 68, 68, 255))
+        dr.text((p + 3 * r, cy), texto, font=f_reg, fill=(255, 255, 255, 255), anchor="lm")
+        imagem.paste(Image.alpha_composite(recorte, camada).convert("RGB"), zona[:2])
+
     return cv2.cvtColor(np.asarray(imagem), cv2.COLOR_RGB2BGR)
+
+
+def etiqueta_canto(img, texto):
+    """Pequena etiqueta escura no canto inferior direito (ex. a velocidade da reprodução). Altera img."""
+    base = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    d = ImageDraw.Draw(base)
+    largura, altura = base.size
+    esc = max(0.8, min(1.6, largura / 800))
+    f = fonte(int(12 * esc), negrito=True)
+    m, p = int(10 * esc), int(10 * esc)
+    tw = d.textlength(texto, font=f)
+    lr, hr = int(tw + 2 * p), int(22 * esc)
+    zona = (largura - m - lr, altura - m - hr, largura - m, altura - m)
+    recorte = base.crop(zona).convert("RGBA")
+    camada = Image.new("RGBA", recorte.size, (0, 0, 0, 0))
+    dc = ImageDraw.Draw(camada)
+    dc.rounded_rectangle([0, 0, lr - 1, hr - 1], radius=hr // 2, fill=(15, 17, 21, 180))
+    dc.text((lr / 2, hr / 2), texto, font=f, fill=(229, 231, 235, 255), anchor="mm")
+    base.paste(Image.alpha_composite(recorte, camada).convert("RGB"), zona[:2])
+    img[:] = cv2.cvtColor(np.asarray(base), cv2.COLOR_RGB2BGR)
+    return img
 
 
 def ecra_fim(img):
@@ -237,3 +278,54 @@ def ecra_fim(img):
     d.text((cx, cy + 22 * esc), "Prima Q para fechar", font=fonte(int(15 * esc)), fill=(209, 213, 219, 255), anchor="mm")
     final = Image.alpha_composite(base, camada).convert("RGB")
     return cv2.cvtColor(np.asarray(final), cv2.COLOR_RGB2BGR)
+
+
+# --------------------------------------------------------------------------- #
+# Duas câmaras: imagens lado a lado
+# --------------------------------------------------------------------------- #
+# Ordem no ecrã, da esquerda para a direita: câmara 5 à esquerda, câmara 8 à direita.
+# Outras câmaras (se houver) ficam a seguir, por ordem.
+ORDEM_CAMARAS = ("5", "8")
+SEPARADOR_PX = 4                       # faixa escura entre as imagens das câmaras
+
+
+def ordenar_camaras(camaras):
+    """Câmaras pela ordem em que aparecem no ecrã (esquerda -> direita)."""
+    def chave(c):
+        c = str(c) if c is not None else ""
+        return (ORDEM_CAMARAS.index(c) if c in ORDEM_CAMARAS else len(ORDEM_CAMARAS), c)
+    return sorted(camaras, key=chave)
+
+
+def imagem_espera(largura, altura, texto, subtexto=None):
+    """
+    Imagem escura com um texto ao centro (câmara que ainda não tem imagem, ou que não foi registada
+    nesse intervalo) e, opcionalmente, uma segunda linha mais pequena.
+    """
+    base = Image.new("RGB", (int(largura), int(altura)), (20, 23, 28))
+    d = ImageDraw.Draw(base)
+    esc = max(0.8, min(1.6, largura / 800))
+    y = altura / 2 - (10 * esc if subtexto else 0)
+    d.text((largura / 2, y), texto, font=fonte(int(16 * esc), True), fill=(209, 213, 219), anchor="mm")
+    if subtexto:
+        d.text((largura / 2, y + 24 * esc), subtexto, font=fonte(int(13 * esc)), fill=(156, 163, 175), anchor="mm")
+    return cv2.cvtColor(np.asarray(base), cv2.COLOR_RGB2BGR)
+
+
+def lado_a_lado(imagens):
+    """
+    Junta as imagens (BGR) numa só, da esquerda para a direita, com a altura da primeira (as
+    outras são redimensionadas mantendo a proporção). Com uma só imagem, devolve-a tal como está.
+    """
+    if len(imagens) == 1:
+        return imagens[0]
+    altura = imagens[0].shape[0]
+    partes = []
+    for i, img in enumerate(imagens):
+        h, w = img.shape[:2]
+        if h != altura:
+            img = cv2.resize(img, (max(1, round(w * altura / h)), altura), interpolation=cv2.INTER_AREA)
+        if i:
+            partes.append(np.full((altura, SEPARADOR_PX, 3), 12, dtype=np.uint8))
+        partes.append(img)
+    return np.hstack(partes)

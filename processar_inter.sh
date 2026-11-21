@@ -5,21 +5,27 @@ CAMARAS_VALIDAS="5 8"
 read -r -a DEVS <<< "${DEVS_VIDEO:-/dev/video2 /dev/video4}"
 
 uso() {
-    echo "Uso: bash processar_inter.sh <câmara no ${DEVS[0]}> [<câmara no ${DEVS[1]}>] [-i]"
-    echo "  -i : executa sem interface gráfica (em segundo plano / headless)"
+    echo "Uso: bash processar_inter.sh <câmara no ${DEVS[0]}> [<câmara no ${DEVS[1]}>] [-i] [--sem-correcao]"
+    echo "  -i             : executa sem interface gráfica (em segundo plano / headless)"
+    echo "  --sem-correcao : não corrige a distorção da lente (por omissão usa config/camera_astra_<N>.yaml)"
     echo "  ex.: bash processar_inter.sh 5 8"
     echo "  ex.: bash processar_inter.sh 5 8 -i"
     echo "  Para forçar CPU num PC com GPU: USAR_GPU=0 bash processar_inter.sh 5 8"
+    echo "  Sem janela, para desligar/ligar a câmara da direita: bash alternar_camara.sh (noutro terminal)"
     exit 1
 }
 
 export SEM_INTERFACE=0
+export SEM_CORRECAO=0
 camaras=()
 
 for arg in "$@"; do
     case "$arg" in
         -i|--sem-interface)
             export SEM_INTERFACE=1
+            ;;
+        --sem-correcao)
+            export SEM_CORRECAO=1
             ;;
         -h|--help)
             uso
@@ -89,11 +95,36 @@ else
     echo "Modo: COM interface gráfica"
 fi
 
+# Nome da sessão: o mesmo para a pasta do bag (gravador_bag) e para o resumo (processador)
+export SESSAO="realtime_$(date +%Y%m%d_%H%M%S)"
+PASTA_SESSAO="data_realtime_inter/$SESSAO"
+
 echo "A iniciar processamento para a(s) câmara(s): $CAMARAS_ATIVAS"
+echo "Gravação (vídeo original + deteções) e resumo em: $PASTA_SESSAO/"
 echo
 
+# --abort-on-container-exit: ao terminar o processamento (tecla Q), pára também a gravação, para o
+# bag acabar ao mesmo tempo. O Ctrl+C pára tudo da mesma forma; o script continua depois (o "trap"
+# impede que o Ctrl+C o termine), para mostrar o resumo.
+trap 'true' INT
 if [ ${#camaras[@]} -eq 2 ]; then
-    exec docker compose "${COMPOSE_FILES[@]}" up --build
+    docker compose "${COMPOSE_FILES[@]}" up --build --abort-on-container-exit || true
 else
-    exec docker compose "${COMPOSE_FILES[@]}" up --build --no-deps "${servicos[@]}" processador gravador_bag
+    docker compose "${COMPOSE_FILES[@]}" up --build --abort-on-container-exit \
+        --no-deps "${servicos[@]}" processador gravador_bag || true
+fi
+trap - INT
+
+echo
+if [ ! -f "$PASTA_SESSAO/resumo_online.json" ]; then
+    echo "Não foi gravado o resumo ($PASTA_SESSAO/resumo_online.json): o processamento não chegou a arrancar?"
+    exit 1
+fi
+echo "Gravação e resumo em: $PASTA_SESSAO/"
+if [ "$SEM_INTERFACE" = "1" ]; then
+    echo "(sem interface: o resumo não é mostrado; está no resumo_online.json)"
+else
+    echo "A abrir o resumo (feche a janela para terminar)..."
+    docker compose -f compose_realtime_inter.yaml run --rm --no-deps processador \
+        python3 resumo_online.py "$PASTA_SESSAO" || true
 fi
