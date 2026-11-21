@@ -19,6 +19,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+import gpu
+
 PASTA_MODELOS = Path(__file__).resolve().parent / "modelos"
 
 # Valores por omissão = configuração CULane do UnLanedet (config/clrnet/resnet34_culane.py)
@@ -161,32 +163,20 @@ class DetetorLinhas:
         # GPU se houver: CUDA (onnxruntime-gpu, NVIDIA) ou DirectML (onnxruntime-directml, Windows);
         # se não houver, ou se falhar, usa o CPU.
         self.ort = ort
-        if hasattr(ort, "set_default_logger_severity"):
-            ort.set_default_logger_severity(3)  # avisos do CUDA (ScatterND) saem no registo geral, não no da sessão
-        disponiveis = ort.get_available_providers()
-        import sys
-        if ("CUDAExecutionProvider" in disponiveis and hasattr(ort, "preload_dlls")
-                and "torch" not in sys.modules):  # com o PyTorch carregado, o CUDA já está carregado
-            try:  # carrega as bibliotecas CUDA/cuDNN instaladas pelo pip (sem instalar o CUDA no sistema)
-                ort.preload_dlls()
-            except Exception:
-                pass
-        preferidos = [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider")
-                      if p in disponiveis]
+        preferidos = gpu.preparar(ort)   # GPU se houver (CUDA ou DirectML), senão CPU (gpu.py)
         try:
             self._criar_sessao(preferidos)
         except Exception as e:
             print(f"Aviso: não foi possível usar a GPU na deteção de linhas ({type(e).__name__}); a usar o CPU.")
             self._criar_sessao(["CPUExecutionProvider"])
+        self.dispositivo = gpu.confirmar(self.sessao, "linhas")   # a GPU pode só falhar ao correr
 
     def _criar_sessao(self, fornecedores):
         opcoes = self.ort.SessionOptions()
         opcoes.log_severity_level = 3   # só erros (esconde avisos inofensivos, ex. ScatterND/Memcpy)
         self.sessao = self.ort.InferenceSession(str(self.caminho), sess_options=opcoes, providers=fornecedores)
         self.entrada = self.sessao.get_inputs()[0].name
-        usado = self.sessao.get_providers()[0]
-        self.dispositivo = {"CUDAExecutionProvider": "GPU (CUDA)",
-                            "DmlExecutionProvider": "GPU (DirectML)"}.get(usado, "CPU")
+        self.dispositivo = gpu.dispositivo(self.sessao)
 
     def detetar(self, img_bgr):
         """Devolve uma lista de linhas; cada linha é um array (N, 2) de pontos (x, y) em píxeis."""
