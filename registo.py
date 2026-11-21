@@ -285,14 +285,24 @@ def ler_deteccoes(caminho_mcap):
     (registo offline ou do processamento em tempo real, com uma ou duas câmaras). A câmara vem do
     tópico (/camara5/...); num tópico sem câmara, a chave é None. Lê também ficheiros sem índice.
     """
-    from mcap.reader import NonSeekingReader
+    from mcap.reader import NonSeekingReader, make_reader
     from mcap_ros2.decoder import DecoderFactory
     from mcap_ros2.reader import read_ros2_messages
+    # Só os tópicos das deteções (num bag do tempo real, que também tem o vídeo, as imagens não são
+    # descodificadas); sem índice no fim do ficheiro, lê-se tudo.
+    topicos = None
+    try:
+        with open(caminho_mcap, "rb") as f:
+            resumo = make_reader(f).get_summary()
+        if resumo:
+            topicos = [c.topic for c in resumo.channels.values() if c.topic.endswith("/processamento/dados_deteccoes")]
+    except Exception:
+        topicos = None
     deteccoes = {}
     with open(caminho_mcap, "rb") as f:
         leitor = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
         try:
-            for m in read_ros2_messages(leitor, log_time_order=False):
+            for m in read_ros2_messages(leitor, topics=topicos, log_time_order=False):
                 if not m.channel.topic.endswith("/processamento/dados_deteccoes"):
                     continue
                 dados = json.loads(m.ros_msg.data)
