@@ -1,0 +1,20 @@
+{
+  "modelo": "ufldv2_culane_res34",
+  "descricao": "UFLDv2 ResNet34, CULane (F1 76.0)",
+  "img_w": 1600,
+  "img_h": 320,
+  "crop_ratio": 0.6,
+  "num_row": 72,
+  "num_col": 81,
+  "row_anchor": [0.42, 1.0],
+  "col_anchor": [0.0, 1.0],
+  "linhas_row": [1, 2],
+  "linhas_col": [0, 3],
+  "min_row": 0.5,
+  "min_col": 0.25,
+  "local_width": 1,
+  "corte_topo": null,
+  "origem": "https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2 (configs/culane_res34.py, demo.py)",
+  "onnx": "ufldv2_culane_res34_320x1600.onnx, convertido por PINTO0309 (PINTO_model_zoo, 324_Ultra-Fast-Lane-Detection-v2)",
+  "url_onnx": "https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/324_Ultra-Fast-Lane-Detection-v2/resources.tar.gz"
+}

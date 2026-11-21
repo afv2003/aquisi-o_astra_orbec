@@ -31,3 +31,9 @@ CLRNet/
 # Scripts pessoais e de teste (ficam só no PC de quem os usa)
 corrigir_calibracao.py
 processar_video_teste.py
+
+# Comparação de modelos de linhas (ramo comparacao-linhas): sessões e o modelo do UFLDv2
+# (o ONNX tem várias centenas de MB; cada PC prepara-o com: python preparar_ufld.py)
+data_comparacao/
+modelos/ufld.onnx
+modelos/ufld.parcial

@@ -9,6 +9,8 @@ Há **dois modos de trabalho**, que partilham o mesmo ponto de partida (o vídeo
 * **Modo offline** (secção 3): no veículo só se grava o vídeo; o processamento é feito depois, em qualquer PC, com todo o detalhe.
 * **Modo online** (secção 4): o processamento é feito durante a viagem, no próprio Docker; grava-se o vídeo e, no mesmo bag, as deteções, e no fim aparece um resumo.
 
+> **Ramo `comparacao-linhas`:** este ramo acrescenta a comparação de dois modelos de deteção de linhas (CLRNet e UFLDv2) no mesmo vídeo, lado a lado, com registo das deteções de cada um, instantes guardados em `.png` nas pausas e um resumo. Ver **[COMPARACAO_LINHAS.md](COMPARACAO_LINHAS.md)**. O resto deste README é igual ao do `main`.
+
 ## Índice
 
 | Secção | Conteúdo | Onde corre |
