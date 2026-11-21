@@ -19,11 +19,12 @@ faixa do veículo) e em 81 colunas de âncora (as 2 de fora); uma linha só cont
 de metade das âncoras (linhas do meio) ou de um quarto (linhas de fora).
 """
 import json
-import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+import gpu
 
 PASTA_MODELOS = Path(__file__).resolve().parent / "modelos"
 MEDIA_IMAGENET = np.array([0.485, 0.456, 0.406], dtype=np.float32)
@@ -136,22 +137,13 @@ class DetetorUFLD:
         if corte_topo is not None:
             self.cfg["corte_topo"] = corte_topo
         self.ort = ort
-        if hasattr(ort, "set_default_logger_severity"):
-            ort.set_default_logger_severity(3)
-        disponiveis = ort.get_available_providers()
-        if ("CUDAExecutionProvider" in disponiveis and hasattr(ort, "preload_dlls")
-                and "torch" not in sys.modules):
-            try:
-                ort.preload_dlls()
-            except Exception:
-                pass
-        preferidos = [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider")
-                      if p in disponiveis]
+        preferidos = gpu.preparar(ort)   # GPU se houver (CUDA ou DirectML), senão CPU (gpu.py)
         try:
             self._criar_sessao(preferidos)
         except Exception as e:
             print(f"Aviso: não foi possível usar a GPU no UFLD ({type(e).__name__}); a usar o CPU.")
             self._criar_sessao(["CPUExecutionProvider"])
+        self.dispositivo = gpu.confirmar(self.sessao, "UFLD")   # a GPU pode só falhar ao correr
 
     def _criar_sessao(self, fornecedores):
         opcoes = self.ort.SessionOptions()
@@ -166,9 +158,7 @@ class DetetorUFLD:
         # as saídas têm os nomes do pt2onnx.py oficial; se não tiverem, usa-se a ordem
         self.nomes_saida = nomes if set(SAIDAS) <= set(nomes) else list(SAIDAS)
         self._por_ordem = not set(SAIDAS) <= set(nomes)
-        usado = self.sessao.get_providers()[0]
-        self.dispositivo = {"CUDAExecutionProvider": "GPU (CUDA)",
-                            "DmlExecutionProvider": "GPU (DirectML)"}.get(usado, "CPU")
+        self.dispositivo = gpu.dispositivo(self.sessao)
 
     def _correr(self, x):
         saidas = self.sessao.run(None, {self.entrada: x})

@@ -32,7 +32,7 @@ CLRNet/
 corrigir_calibracao.py
 processar_video_teste.py
 
-# Comparação de modelos de linhas (ramo comparacao-linhas): sessões e o modelo do UFLDv2
+# Comparação de modelos de linhas (ramo Extra-Line-Comparison): sessões e o modelo do UFLDv2
 # (o ONNX tem várias centenas de MB; cada PC prepara-o com: python preparar_ufld.py)
 data_comparacao/
 modelos/ufld.onnx

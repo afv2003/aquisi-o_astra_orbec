@@ -120,6 +120,14 @@ def main():
     ap.add_argument("--verificar", action="store_true", help="Só verificar o modelos/ufld.onnx")
     args = ap.parse_args()
 
+    try:                                           # antes de descarregar: sem o onnxruntime não se verifica
+        import onnxruntime  # noqa: F401
+    except ImportError:
+        print("Erro: falta o onnxruntime. Ative o venv do projeto (README, 3.8) e corra de novo:\n"
+              "  venv\\Scripts\\activate          (Windows)\n"
+              "  source venv/bin/activate       (Linux / macOS)")
+        sys.exit(1)
+
     if not args.verificar:
         if args.de:
             fonte = Path(args.de)

@@ -17,6 +17,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+import gpu
+
 PASTA_MODELOS = Path(__file__).resolve().parent / "modelos"
 MEDIA = np.array([0.485, 0.456, 0.406], dtype=np.float32)   # normalização do ImageNet (RGB)
 DESVIO = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -44,7 +46,6 @@ def desenhar_estrada(img, mascara, cor=(0, 200, 0), opacidade=0.35):
 class DetetorEstrada:
     def __init__(self, caminho_onnx=None, confianca=None):
         import onnxruntime as ort
-        import sys
         self.caminho = Path(caminho_onnx) if caminho_onnx else PASTA_MODELOS / "estrada.onnx"
         if not self.caminho.exists():
             raise FileNotFoundError(self.caminho)
@@ -52,22 +53,13 @@ class DetetorEstrada:
         # None: cada píxel fica com a classe mais provável (como no YOLOP). Um valor (ex. 0.9): só é
         # estrada onde a pontuação de "estrada" (0 a 1) é pelo menos esse valor.
         self.confianca = confianca
-        if hasattr(ort, "set_default_logger_severity"):
-            ort.set_default_logger_severity(3)
-        disponiveis = ort.get_available_providers()
-        if ("CUDAExecutionProvider" in disponiveis and hasattr(ort, "preload_dlls")
-                and "torch" not in sys.modules):
-            try:
-                ort.preload_dlls()
-            except Exception:
-                pass
-        preferidos = [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider")
-                      if p in disponiveis]
+        preferidos = gpu.preparar(ort)   # GPU se houver (CUDA ou DirectML), senão CPU (gpu.py)
         try:
             self._criar_sessao(preferidos)
         except Exception as e:
             print(f"Aviso: não foi possível usar a GPU na deteção da estrada ({type(e).__name__}); a usar o CPU.")
             self._criar_sessao(["CPUExecutionProvider"])
+        self.dispositivo = gpu.confirmar(self.sessao, "estrada")   # a GPU pode só falhar ao correr
 
     def _criar_sessao(self, fornecedores):
         opcoes = self.ort.SessionOptions()
@@ -75,9 +67,7 @@ class DetetorEstrada:
         self.sessao = self.ort.InferenceSession(str(self.caminho), sess_options=opcoes, providers=fornecedores)
         entrada = self.sessao.get_inputs()[0]
         self.entrada, self.lado = entrada.name, int(entrada.shape[2])
-        usado = self.sessao.get_providers()[0]
-        self.dispositivo = {"CUDAExecutionProvider": "GPU (CUDA)",
-                            "DmlExecutionProvider": "GPU (DirectML)"}.get(usado, "CPU")
+        self.dispositivo = gpu.dispositivo(self.sessao)
 
     def detetar(self, img_bgr):
         """Devolve uma máscara booleana (H, W): True onde há estrada (área circulável)."""

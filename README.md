@@ -9,7 +9,7 @@ Há **dois modos de trabalho**, que partilham o mesmo ponto de partida (o vídeo
 * **Modo offline** (secção 3): no veículo só se grava o vídeo; o processamento é feito depois, em qualquer PC, com todo o detalhe.
 * **Modo online** (secção 4): o processamento é feito durante a viagem, no próprio Docker; grava-se o vídeo e, no mesmo bag, as deteções, e no fim aparece um resumo.
 
-> **Ramo `comparacao-linhas`:** este ramo acrescenta a comparação de dois modelos de deteção de linhas (CLRNet e UFLDv2) no mesmo vídeo, lado a lado, com registo das deteções de cada um, instantes guardados em `.png` nas pausas e um resumo. Ver **[COMPARACAO_LINHAS.md](COMPARACAO_LINHAS.md)**. O resto deste README é igual ao do `main`.
+> **Ramo `Extra-Line-Comparison`:** este ramo acrescenta a comparação de dois modelos de deteção de linhas (CLRNet e UFLDv2) no mesmo vídeo, lado a lado, com registo das deteções de cada um, instantes guardados em `.png` nas pausas e um resumo. Ver **[COMPARACAO_LINHAS.md](COMPARACAO_LINHAS.md)**. O resto deste README é igual ao do `main`.
 
 ## Índice
 
@@ -122,6 +122,7 @@ O modo offline serve para desenvolver e validar a deteção (todas as imagens, p
 | `alternar_camara.sh` | desligar/ligar a câmara da direita sem janela (4.7) | online |
 | `resumo_online.py` | janela do resumo no fim do processamento (4.8) | online |
 | `objetos.py`, `linhas.py`, `estrada.py` | os três modelos (secção 5) | ambos |
+| `gpu.py` | escolha da GPU ou do CPU para os três modelos e confirmação no arranque (3.10) | ambos |
 | `modelos/` | `objetos.onnx`, `linhas.onnx` + `linhas.json`, `estrada.onnx` (secção 5) | ambos |
 | `visual.py` | desenho das deteções, painel e câmaras lado a lado | ambos |
 | `leitura_bag.py` | leitura dos bags e correção da distorção | ambos |
@@ -411,7 +412,9 @@ No painel do vídeo aparece o tempo de cada etapa (à direita de cada deteção)
      ```
   4. Num portátil, ligue o carregador: só com bateria, a GPU fica muito mais lenta.
 * Não use o `onnxruntime-directml`: foi testado e falhou com o modelo de linhas na RTX 3050 Ti (a GPU deixou de responder).
-* Se a GPU falhar numa deteção, o script avisa e continua em CPU. Para voltar ao CPU de forma permanente: `pip uninstall -y onnxruntime-gpu` e `pip install onnxruntime`.
+* **Bibliotecas do cuDNN no Windows:** com o `onnxruntime-gpu[cuda,cudnn]`, as bibliotecas da NVIDIA ficam dentro do `venv` (`venv\Lib\site-packages\nvidia\<biblioteca>\bin`). O cuDNN carrega algumas só ao correr o modelo (por exemplo o `cudnn_engines_tensor_ir64_9.dll`, nas versões recentes) e, sem essas pastas no `PATH`, falhava com `Could not locate cudnn_..._9.dll` e passava sozinho para o CPU. O `gpu.py` acrescenta essas pastas ao `PATH` (só do próprio processo): não é preciso fazer nada.
+* **No arranque, cada modelo corre uma vez numa imagem neutra** (`gpu.py`). Se a GPU só falhar ao correr, o `onnxruntime` passa para o CPU e aparece `Aviso: a GPU (CUDA) falhou ao correr o modelo de ...; a usar o CPU`. O dispositivo indicado no arranque, e guardado no registo, é sempre o que fica de facto em uso.
+* Se a GPU falhar mais tarde numa deteção, o script avisa e continua em CPU. Para voltar ao CPU de forma permanente: `pip uninstall -y onnxruntime-gpu` e `pip install onnxruntime`.
 
 ### 3.11 Registar as deteções (trechos)
 O `processar_bag.py` pode guardar as deteções de cada imagem num ficheiro, para serem usadas depois sem voltar a correr os modelos. O formato das deteções é **o mesmo do modo online** (4.9), para as duas gravações se lerem da mesma forma.
