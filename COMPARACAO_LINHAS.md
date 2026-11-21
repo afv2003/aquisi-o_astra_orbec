@@ -1,6 +1,6 @@
 # Comparação de modelos de deteção de linhas: CLRNet vs UFLDv2
 
-> Ramo `comparacao-linhas` (fica à parte do `main`). Tudo o resto do projeto (README.md) continua igual; este ramo só acrescenta os ficheiros da comparação.
+> Ramo `Extra-Line-Comparison` (fica à parte do `main`). Tudo o resto do projeto (README.md) continua igual; este ramo só acrescenta os ficheiros da comparação.
 
 Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de linhas do projeto (**CLRNet ResNet34**, secção 5.1 do README) com o **UFLDv2 ResNet34** (Ultra-Fast-Lane-Detection-v2), os dois treinados no mesmo conjunto de dados (CULane) e com o mesmo backbone. Segue o processamento offline (`processar_bag.py`, secção 3.9 do README): lê um bag da aquisição (ou do online), uma câmara, corrige a distorção e mostra o vídeo **duas vezes, lado a lado**: à esquerda com as linhas do CLRNet, à direita com as do UFLDv2.
 
