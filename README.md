@@ -7,7 +7,7 @@ Sistema para recolher e analisar o vídeo de duas câmaras Orbbec Astra (**5** e
 
 Há **dois modos de trabalho**, que partilham o mesmo ponto de partida (o vídeo original gravado num ROS bag `.mcap`) e o mesmo código de deteção:
 * **Modo offline** (secção 3): no veículo só se grava o vídeo; o processamento é feito depois, em qualquer PC, com todo o detalhe.
-* **Modo online** (secção 4): o processamento é feito durante a viagem, no próprio Docker; grava-se o vídeo e, no mesmo bag, as deteções, e no fim aparece um resumo.
+* **Modo online** (secção 4): o processamento é feito durante a viagem, no próprio Docker; a deteção corre sempre, mas o vídeo e as deteções só são gravados (no mesmo bag) nos **trechos** marcados durante a viagem, e no fim aparece um resumo.
 
 > **Ramo `Extra-Line-Comparison`:** este ramo acrescenta a comparação de dois modelos de deteção de linhas (CLRNet e UFLDv2) no mesmo vídeo, lado a lado, com registo das deteções de cada um, instantes guardados em `.png` nas pausas e um resumo. Ver **[COMPARACAO_LINHAS.md](COMPARACAO_LINHAS.md)**. O resto deste README é igual ao do `main`.
 
@@ -18,7 +18,7 @@ Há **dois modos de trabalho**, que partilham o mesmo ponto de partida (o vídeo
 | [1](#1-visão-geral) | Visão geral: os dois modos, o ponto comum, quando usar cada um, relevância para a parte 2, ficheiros e pré-requisitos | — |
 | [2](#2-preparação-calibração-das-câmaras) | Preparação: calibração das câmaras (correção da distorção da lente) | Windows (ou Linux), com Python |
 | [3](#3-modo-offline-gravar-no-veículo-processar-depois) | **Modo offline**: gravar no veículo (Docker de aquisição) → processar o bag → registar → reproduzir → janela de resultados | gravação: Linux com Docker; processamento: Windows, Linux ou macOS, com `venv` |
-| [4](#4-modo-online-processar-em-tempo-real-no-veículo) | **Modo online**: gravar e processar em tempo real (Docker de tempo real) → resumo no fim | Linux com Docker (CPU ou GPU NVIDIA) |
+| [4](#4-modo-online-processar-em-tempo-real-no-veículo) | **Modo online**: processar em tempo real (Docker de tempo real), gravar só os trechos marcados → resumo no fim | Linux com Docker (CPU ou GPU NVIDIA) |
 | [5](#5-modelos-de-deteção-comuns-aos-dois-modos) | Modelos de deteção (comuns aos dois modos): linhas (CLRNet), objetos (YOLO) e estrada (YOLOP) | dentro do processamento |
 | [6](#6-referência-rápida-comandos-opções-teclas-e-pastas) | Referência rápida: todos os comandos, opções, teclas, variáveis e pastas | — |
 
@@ -46,7 +46,7 @@ flowchart LR
 
     subgraph ON["Modo online (secção 4)"]
         PI["processar_inter.sh<br/>Docker de tempo real<br/>(deteção ao vivo)"]
-        BAG2[("data_realtime_inter/realtime_*/<br/>vídeo original + deteções (.mcap)")]
+        BAG2[("data_realtime_inter/realtime_*/<br/>vídeo original + deteções,<br/>só nos trechos (.mcap)")]
         RO["resumo_online.py<br/>Resumo"]
         PI --> BAG2
         PI --> RO
@@ -54,23 +54,23 @@ flowchart LR
 
     CAM --> GR
     CAM --> PI
-    BAG2 -.->|"o mesmo vídeo original:<br/>pode ser processado no offline"| PB
+    BAG2 -.->|"o mesmo vídeo original (só os trechos):<br/>processado no offline com esses trechos"| PB
 ```
 
 **O ponto comum é o vídeo original.** Nos dois modos, as câmaras publicam as imagens nos tópicos `/camara5/image_raw` e `/camara8/image_raw` e essas imagens são gravadas, sem alterações, num ROS bag `.mcap`:
-* no **offline**, pelo Docker de aquisição (`gravar.sh`), em `data/viagem_<data_hora>/`; o bag só tem o vídeo;
-* no **online**, pelo Docker de tempo real (`processar_inter.sh`), em `data_realtime_inter/realtime_<data_hora>/`; o bag tem o mesmo vídeo e, além dele, as deteções feitas durante a viagem.
+* no **offline**, pelo Docker de aquisição (`gravar.sh`), em `data/viagem_<data_hora>/`; o bag tem o vídeo da viagem inteira, e os **trechos** escolhem-se depois, no processamento (3.11);
+* no **online**, pelo Docker de tempo real (`processar_inter.sh`), em `data_realtime_inter/realtime_<data_hora>/`; os **trechos** marcam-se durante a viagem (tecla **R**) e o bag só tem o vídeo desses trechos e, além dele, as deteções feitas neles (4.9).
 
 A partir daí, a diferença está em **quando** e **com que detalhe** se faz o processamento:
 
 | | Modo offline (secção 3) | Modo online (secção 4) |
 |---|---|---|
 | **Quando se deteta** | depois da viagem, num PC à parte | durante a viagem, no PC do veículo |
-| **O que fica no bag** | só o vídeo original | o vídeo original + as deteções (+ o estado das câmaras) |
+| **O que fica no bag** | só o vídeo original, da viagem inteira | o vídeo original + as deteções, **só nos trechos** marcados (+ o estado das câmaras e os trechos) |
 | **Imagens processadas** | **todas** (30 por segundo por câmara), ao ritmo que o PC conseguir | as que houver tempo de processar (cada câmara é processada quando o modelo fica livre; ver 4.7); as outras ficam só gravadas |
-| **Interação** | pausa, ligar/desligar cada modelo, ligar/desligar a correção, marcar trechos, limiares e classes por opção | **D** desliga/liga a câmara da direita, para a outra ser processada mais vezes; **Q** termina |
-| **Registo das deteções** | por trechos escolhidos (tecla **R** ou `--trechos`), com o desenho completo da estrada | sempre, a sessão inteira (só a percentagem da estrada) |
-| **Resultados** | reprodução e exportação em `.mp4`, janela de resultados com Resumo e **Percurso no mapa** | janela de resumo no fim (equivalente ao Resumo do offline) |
+| **Interação** | pausa, ligar/desligar cada modelo, ligar/desligar a correção, marcar trechos, limiares e classes por opção | **R** começa/termina um trecho (gravação); **D** desliga/liga a câmara da direita, para a outra ser processada mais vezes; **Q** termina |
+| **Registo das deteções** | por trechos escolhidos depois (tecla **R** ou `--trechos`), com o desenho completo da estrada | por trechos marcados durante a viagem (tecla **R**, `trecho.sh` ou `--registar-tudo`), junto com o vídeo; a deteção corre sempre (só a percentagem da estrada) |
+| **Resultados** | reprodução e exportação em `.mp4`, janela de resultados com Resumo e **Percurso no mapa** | janela de resumo no fim (equivalente ao Resumo do offline, com filtro por trecho) |
 | **Onde corre** | gravação: Linux com Docker; processamento: Windows, Linux ou macOS | Linux com Docker (CPU ou GPU NVIDIA, escolhida sozinha) |
 
 O que **não** muda entre os dois modos (o mesmo código, os mesmos ficheiros):
@@ -78,7 +78,7 @@ O que **não** muda entre os dois modos (o mesmo código, os mesmos ficheiros):
 * o **formato das deteções**: um tópico por câmara, `/camara<N>/processamento/dados_deteccoes`, com o mesmo JSON (3.12 e 4.9);
 * o **desenho** (`visual.py`: cores fixas por modelo e por classe, câmaras lado a lado, 5 à esquerda e 8 à direita) e o **resumo das deteções** (mesmos cálculos e cartões: `registo.py` e `gui_comum.py`).
 
-Por isso, uma gravação do online pode sempre ser processada também no offline (4.10): o vídeo é o mesmo que o offline grava.
+Por isso, uma gravação do online pode sempre ser processada também no offline (4.10): o vídeo dos trechos é o mesmo que o offline grava, e o `processar_bag.py` regista sozinho os mesmos trechos (mesmos números e instantes), que depois se reproduzem e se veem na janela de resultados como os do offline.
 
 ### 1.2 Quando usar cada modo
 
@@ -88,21 +88,23 @@ Por isso, uma gravação do online pode sempre ser processada também no offline
 * quiser analisar **trechos** escolhidos, **reproduzir** ou **exportar vídeos** com as deteções desenhadas (3.11 a 3.14);
 * quiser o **percurso no mapa**, com as cores do trânsito por intervalo (3.15.2);
 * o PC do veículo for **fraco** ou não tiver GPU, e a prioridade for gravar sem perder imagens (o Docker de aquisição só grava);
+* quiser guardar o vídeo da **viagem inteira** e só escolher os trechos depois (o online só grava os trechos marcados durante a viagem, salvo `--registar-tudo`);
 * for processar em **Windows** ou noutro PC sem Docker.
 
 **Use o modo online quando:**
 * quiser ver as deteções **ao vivo** e ter os resultados **logo no fim da viagem**, sem processamento posterior;
 * quiser medir o comportamento do sistema **em tempo real** (deteções por segundo de cada câmara, tempo de cada modelo, CPU ou GPU);
+* quiser gravar **só as partes que interessam** (trechos marcados com **R**), para a gravação não pesar (cerca de 2 GB por minuto com as duas câmaras);
 * precisar de concentrar a deteção numa câmara durante um trecho (tecla **D**);
 * o PC do veículo for **Linux com Docker** (de preferência com GPU NVIDIA).
 
-**Na dúvida, o online não perde nada:** grava o mesmo vídeo original que o offline, por isso pode depois processar a mesma viagem no offline, com todo o detalhe (4.10). O único custo é a carga do processamento no PC do veículo durante a gravação.
+**Os trechos do online também servem o offline:** o vídeo original de cada trecho é o mesmo que o offline grava, por isso pode depois processá-lo no offline, com todo o detalhe e com os mesmos trechos (4.10). O que não foi marcado como trecho não fica gravado: para guardar a viagem toda, use `--registar-tudo` (4.6) ou o Docker de aquisição (3.5).
 
 ### 1.3 Relevância do modo online para a parte 2
 O modo offline serve para desenvolver e validar a deteção (todas as imagens, parâmetros ajustáveis, vídeos e percurso); o **modo online é o que se aproxima do uso real** e é a base para a parte 2 do trabalho:
 * **O processamento acontece no veículo, durante a viagem:** os resultados existem logo, sem horas de processamento num PC à parte, e o sistema pode ser usado por quem não tem o ambiente Python instalado (tudo corre no Docker).
 * **Mostra os limites do tempo real:** a frequência de deteção de cada câmara (no painel e no resumo), o peso de cada modelo e a diferença entre CPU e GPU; a tecla **D** permite trocar cobertura (duas câmaras) por frequência (uma câmara).
-* **Grava tudo no mesmo bag, com o mesmo relógio:** vídeo, deteções e estado das câmaras. Outros sensores (por exemplo, o **GPS**) entram como mais um tópico nesse bag, e a ligação entre as deteções e o mapa, que no offline se faz à mão (3.15.2), passa a poder ser automática.
+* **Grava no mesmo bag, com o mesmo relógio:** vídeo, deteções, estado das câmaras e trechos; só as partes marcadas como trechos, o que torna viável gravar em viagens longas. Outros sensores (por exemplo, o **GPS**) entram como mais um tópico nesse bag, e a ligação entre as deteções e o mapa, que no offline se faz à mão (3.15.2), passa a poder ser automática.
 * **Usa o mesmo código e o mesmo formato do offline:** o que se melhora num modo (modelos, correção, resumo) fica disponível no outro, e qualquer gravação do online pode ser analisada em detalhe no offline.
 
 ### 1.4 Ficheiros do repositório
@@ -119,6 +121,8 @@ O modo offline serve para desenvolver e validar a deteção (todas as imagens, p
 | `teclado.py` | teclas lidas no terminal, sem janela (`--sem-interface`) | offline |
 | `Dockerfile_realtime_inter`, `compose_realtime_inter.yaml`, `compose_realtime_gpu.yaml`, `processar_inter.sh` | Docker de tempo real: drivers, processamento, gravação; deteção de CPU/GPU (4.2) | online |
 | `processar_tempo_real.py` | processamento em tempo real (nó ROS 2) (4.2) | online |
+| `gravacao_online.py` | gravação do bag do online, só nos trechos (4.2 e 4.9) | online |
+| `trecho.sh` | começar/terminar um trecho sem janela (4.7) | online |
 | `alternar_camara.sh` | desligar/ligar a câmara da direita sem janela (4.7) | online |
 | `resumo_online.py` | janela do resumo no fim do processamento (4.8) | online |
 | `objetos.py`, `linhas.py`, `estrada.py` | os três modelos (secção 5) | ambos |
@@ -430,6 +434,7 @@ python processar_bag.py <bag>.mcap --registar-tudo --pasta-registo outra_pasta  
 ```
 * **Tecla R** (com ou sem janela): a primeira vez começa um trecho, a seguinte termina-o, e assim sucessivamente. Com janela, aparece no canto superior direito o indicador vermelho `REGISTO · trecho N · tempo`; sem janela, o estado aparece na linha de progresso do terminal. Se o vídeo acabar (ou carregar em Q) com um trecho aberto, o trecho termina na última imagem processada.
 * **`--trechos`**: os trechos em segundos desde o início do bag (`60-` = do segundo 60 até ao fim). Dá sempre os mesmos trechos, ao contrário da tecla; com esta opção a tecla R não é usada. **`--registar-tudo`** é o mesmo que `--trechos 0-`.
+* **Bag do modo online** (já gravado só nos trechos, 4.9): sem `--trechos`, os trechos do registo são **os do online**, automaticamente (mesmos números e instantes; a tecla R não é usada). Com `--trechos`, registam-se os pedidos, em segundos desde o início da sessão online (4.10).
 * **`--sem-interface`** é a forma mais rápida de registar. Se a entrada não for um terminal (por exemplo, num contentor sem `-it`), as teclas não funcionam e o script avisa: use `--trechos` ou `--registar-tudo`.
 * **Duas câmaras:** um só ensaio para as duas; os trechos são **comuns** (a tecla R ou `--trechos` marcam o mesmo intervalo de tempo nas duas câmaras) e cada câmara tem o seu tópico no `deteccoes.mcap`, como no modo online.
 * O que fica registado é o que foi calculado em cada imagem: se desligar um modelo com O/L/E, ou a correção com C, durante um trecho, o registo indica-o imagem a imagem.
@@ -479,7 +484,7 @@ python reproduzir_registo.py data_offline/<viagem>/<ensaio> --bag <caminho do .m
 * **Bag original:** é procurado onde estava no processamento e em `data/<viagem>/`. Se o mudou de sítio, use `--bag`. O script avisa se o tamanho não for o do bag processado.
 * Os vídeos `.mp4` têm o ritmo da gravação (por exemplo, 30 imagens por segundo), qualquer que tenha sido a velocidade do processamento.
 * Se algumas imagens de um trecho não tiverem deteções no registo (por exemplo, blocos do bag que estavam estragados), o script avisa no fim.
-* As gravações do modo online não têm `ensaio.json` nem trechos: não se reproduzem com este script (para as ver com as deteções desenhadas, processe o bag no offline, 4.10).
+* **Gravações do modo online:** primeiro processam-se no offline (4.10), que cria o registo com os mesmos trechos do online; depois reproduzem-se como qualquer registo. Se a câmara da direita esteve desligada no online (tecla **D**) durante parte de um trecho, o lado dela aparece escuro nesse intervalo, com `Câmara 8: desligada no online` (não há vídeo dela aí).
 
 ### 3.14 Juntar dois registos de uma câmara (`juntar_registos.py`)
 Se as duas câmaras de um bag forem processadas em sessões diferentes (`--camara 5` numa, `--camara 8` noutra), ficam dois registos separados. O `juntar_registos.py` junta-os num registo de duas câmaras, igual ao que sairia de as processar juntas, para se verem lado a lado no `reproduzir_registo.py` e na janela de resultados:
@@ -507,9 +512,9 @@ python gui_resultados.py --pasta-registo outra_pasta          # registos noutra 
 * **Registos de uma ou de duas câmaras:** a janela adapta-se ao registo escolhido. Com duas, aparece a escolha da câmara e, ao escolher as duas, o aspeto muda: tabelas com um valor por câmara, vídeo lado a lado com mais espaço, e veículos contados por **instante** (soma das duas câmaras). Na lista, os registos de duas câmaras dizem `câmaras 5 e 8`.
 
 #### 3.15.1 Tab Resumo
-É o mesmo resumo que o modo online mostra no fim (4.8), com os mesmos cálculos e cartões (`registo.py` e `gui_comum.py`), mais o filtro por trecho.
+É o mesmo resumo que o modo online mostra no fim (4.8), com os mesmos cálculos e cartões (`registo.py` e `gui_comum.py`) e o mesmo filtro por trecho.
 * Escolhe-se o registo (por omissão, o mais recente), o **trecho** (todos, ou um só) e, nos registos de duas câmaras, a **câmara** (**Ambas**, **Câmara 5** ou **Câmara 8**); tudo o que é mostrado se refere à escolha.
-* **Vídeo e registo:** bag, câmara(s), duração, correção da distorção, data do processamento, registos de origem (registos juntados), trechos, e o número de imagens e a duração do que está selecionado.
+* **Vídeo e registo:** bag (num registo feito a partir de um bag do online, também a **Origem**: `online · trechos do online`, e a duração da sessão), câmara(s), duração, correção da distorção, data do processamento, registos de origem (registos juntados), trechos, e o número de imagens e a duração do que está selecionado.
 * **Modelos:** limiar de cada modelo, tempo médio por imagem, classes do YOLO e velocidade do processamento.
 * **Linhas e área circulável:** linhas por imagem e % de imagens sem linhas (CLRNet); área circulável média, mínima e máxima (YOLOP). Com **Ambas**, um valor por câmara (`5: … · 8: …`).
 * **Deteções por categoria (YOLO):** para cada classe, deteções, média por imagem, máximo numa imagem, % de imagens com a classe e confiança média; com **Ambas**, também as deteções de cada câmara. As deteções são somadas imagem a imagem (o mesmo veículo visto em 30 imagens conta 30 vezes): sem seguimento dos objetos, não se sabe quantos veículos diferentes passaram.
@@ -552,41 +557,46 @@ O fluxo de trabalho segue o caminho dos dados, tudo dentro do Docker e ao mesmo 
 ```
  no veículo (Linux + Docker), durante a viagem
  ──────────────────────────────────────────────────────────────────────────────────────────────────────────
- 4.6 processar_inter.sh ─▶ drivers das câmaras ─▶ /camara5/image_raw, /camara8/image_raw ──┬─▶ gravador_bag ─┐
-                                                                                           │                │
-                                    4.7 processar_tempo_real.py ◀─────────────────────────┘                │
-                                        correção → 3 modelos → janela (5 | 8), tecla D                       │
-                                        └─▶ /camara<N>/processamento/dados_deteccoes ─────────▶ gravador_bag ─┤
-                                                                                                             ▼
- 4.8 fim (Q / Ctrl+C) ─▶ resumo_online.py (janela do resumo)     4.9 data_realtime_inter/realtime_<data_hora>/
-                                                                     .mcap (vídeo original + deteções) + resumo
-                                                                 4.10 ──▶ o mesmo bag pode ir para o offline (3.9)
+ 4.6 processar_inter.sh ─▶ drivers das câmaras ─▶ /camara5/image_raw, /camara8/image_raw
+                                                                │
+                                    4.7 processar_tempo_real.py ◀┘   (recebe todas as imagens)
+                                        ├─ deteção SEMPRE: correção → 3 modelos → janela (5 | 8), teclas R e D
+                                        │  └─▶ /camara<N>/processamento/dados_deteccoes (tópico ROS, sempre)
+                                        └─ gravação SÓ NOS TRECHOS (tecla R / trecho.sh / --registar-tudo):
+                                           vídeo original + deteções ─────────────────────────────────────────┐
+                                                                                                               ▼
+ 4.8 fim (Q / Ctrl+C) ─▶ resumo_online.py (resumo, por trecho)    4.9 data_realtime_inter/realtime_<data_hora>/
+                                                                      .mcap (só os trechos) + resumo_online.json
+                                                                  4.10 ──▶ o bag vai para o offline (3.9), com
+                                                                           os mesmos trechos
 ```
 
 ### 4.1 O que muda em relação ao offline
 O ponto de partida é o mesmo do offline (1.1): os drivers das câmaras publicam `/camara5/image_raw` e `/camara8/image_raw`, e essas imagens são gravadas sem alterações num bag `.mcap`. A partir daí:
-* **Em vez de só gravar**, o Docker de tempo real também **processa** cada imagem enquanto grava: a mesma correção da distorção (secção 2), os mesmos três modelos (secção 5), o mesmo desenho e as mesmas câmaras lado a lado do `processar_bag.py`.
-* **As deteções vão para o mesmo bag do vídeo**, nos mesmos tópicos e com o mesmo JSON do registo offline (3.12), mais o estado das câmaras.
-* **Não se processam todas as imagens:** o modelo processa sempre a imagem **mais recente** de cada câmara, à vez; as imagens que chegam enquanto o modelo está ocupado ficam só gravadas. Por isso, a frequência de deteção depende do PC (ver 4.7). A tecla **D** desliga temporariamente a câmara da direita, para a outra ser processada o dobro das vezes.
-* **Não há pausa, trechos, limiares por opção nem teclas O/L/E/C:** correm sempre os três modelos, com as classes e os limiares por omissão (os mesmos do offline: `CLASSES_ESTRADA` no `objetos.py`, confiança 0.25 nos objetos, 0.4 nas linhas, classe mais provável na estrada).
-* **No fim, em vez da janela de resultados**, aparece um **resumo** (o mesmo da tab Resumo do offline, 3.15.1), sem percurso nem reprodução do vídeo. Para análise detalhada, o bag pode ser processado depois no offline (4.10).
+* **Em vez de só gravar**, o Docker de tempo real **processa** as imagens durante a viagem: a mesma correção da distorção (secção 2), os mesmos três modelos (secção 5), o mesmo desenho e as mesmas câmaras lado a lado do `processar_bag.py`.
+* **A deteção corre sempre; a gravação só nos trechos.** Os trechos são os mesmos do registo offline (3.11), mas marcados **durante a viagem** (tecla **R**, `trecho.sh` sem janela, ou `--registar-tudo`) e, em vez de escolherem que deteções se registam, escolhem **o que fica gravado**: o vídeo original e as deteções. Fora dos trechos nada é gravado (só o resumo no fim conta tudo o que foi detetado).
+* **As deteções vão para o mesmo bag do vídeo**, nos mesmos tópicos e com o mesmo JSON do registo offline (3.12), mais o estado das câmaras e o início e fim de cada trecho.
+* **Não se processam todas as imagens:** o modelo processa sempre a imagem **mais recente** de cada câmara, à vez; nos trechos, as imagens que chegam enquanto o modelo está ocupado ficam só gravadas. Por isso, a frequência de deteção depende do PC (ver 4.7). A tecla **D** desliga temporariamente a câmara da direita, para a outra ser processada o dobro das vezes (o vídeo da câmara desligada também deixa de ser gravado).
+* **Não há pausa, limiares por opção nem teclas O/L/E/C:** correm sempre os três modelos, com as classes e os limiares por omissão (os mesmos do offline: `CLASSES_ESTRADA` no `objetos.py`, confiança 0.25 nos objetos, 0.4 nas linhas, classe mais provável na estrada).
+* **No fim, em vez da janela de resultados**, aparece um **resumo** (o mesmo da tab Resumo do offline, 3.15.1, com filtro por trecho), sem percurso nem reprodução do vídeo. Para análise detalhada, o bag pode ser processado depois no offline, com os mesmos trechos (4.10).
 
 ### 4.2 Ficheiros e como funcionam
 * `Dockerfile_realtime_inter`: imagem Docker com ROS 2 Jazzy, o driver `usb_cam`, as bibliotecas do sistema para OpenCV e para a janela do resumo (`python3-tk`) e um ambiente Python (`/opt/venv`) instalado a partir do `requirements.txt` (sem `ultralytics` nem PyTorch; o `tkintermapview`, só do mapa do offline, também não é instalado). Recebe o argumento `ONNX_PKG` (por omissão `onnxruntime`, em CPU) para instalar apenas a versão certa para o computador (CPU ou GPU).
-* `compose_realtime_inter.yaml`: configuração base do Docker Compose (sempre compatível com CPU) que lança 4 serviços na mesma rede:
+* `compose_realtime_inter.yaml`: configuração base do Docker Compose (sempre compatível com CPU) que lança 3 serviços na mesma rede:
   * `driver_camara5` e `driver_camara8`: drivers `usb_cam` que publicam `/camara5/image_raw` e `/camara8/image_raw`;
-  * `processador`: corre o `processar_tempo_real.py`, com a pasta do projeto montada em `/workspace` (por isso, editar um `.py` não obriga a reconstruir a imagem);
-  * `gravador_bag`: grava em `./data_realtime_inter/realtime_<data_hora>/` um bag `.mcap` com o vídeo original, as deteções e o estado das câmaras (4.9).
+  * `processador`: corre o `processar_tempo_real.py`, com a pasta do projeto montada em `/workspace` (por isso, editar um `.py` não obriga a reconstruir a imagem). Faz também a gravação, só nos trechos, em `./data_realtime_inter/realtime_<data_hora>/` (4.9); já não há um serviço de gravação à parte (`ros2 bag record`), que gravava sempre tudo.
 * `compose_realtime_gpu.yaml`: ficheiro complementar que dá acesso da placa gráfica NVIDIA ao contentor `processador`. **Não precisa de o editar**: é carregado automaticamente pelo `processar_inter.sh` quando o PC tem GPU NVIDIA pronta para Docker.
-* `processar_inter.sh`: o script que deve usar sempre para arrancar. Associa as câmaras (5 e/ou 8) aos `/dev/video`, **deteta automaticamente se deve usar GPU NVIDIA ou CPU**, aceita as opções `-i` e `--sem-correcao`, constrói a imagem se houver alterações, lança os contentores e, no fim, abre a janela do resumo.
-* `processar_tempo_real.py`: nó ROS 2 que recebe as imagens das câmaras, corrige a distorção, corre os três modelos, desenha com o `visual.py` e publica:
+* `processar_inter.sh`: o script que deve usar sempre para arrancar. Associa as câmaras (5 e/ou 8) aos `/dev/video`, **deteta automaticamente se deve usar GPU NVIDIA ou CPU**, aceita as opções `-i`, `--sem-correcao` e `--registar-tudo`, constrói a imagem se houver alterações, lança os contentores e, no fim, abre a janela do resumo.
+* `processar_tempo_real.py`: nó ROS 2 que recebe todas as imagens das câmaras, corrige a distorção, corre os três modelos (na imagem mais recente de cada câmara), desenha com o `visual.py` e publica:
   * `/camara<N>/processamento/dados_deteccoes` (`std_msgs/String`, o JSON das deteções);
   * `/camara<N>/processamento/imagem_anotada` (`sensor_msgs/Image`, a imagem com os desenhos; só é calculada com janela, ou se alguém subscrever o tópico, por exemplo no RViz);
   * `/processamento/estado_camaras` (que câmaras estão a ser processadas; muda com a tecla **D**).
 
-  No fim grava o `resumo_online.json` na pasta da sessão.
+  Nos trechos, passa cada imagem recebida e cada deteção ao `gravacao_online.py`; no fim fecha o bag e grava o `resumo_online.json` na pasta da sessão.
+* `gravacao_online.py`: grava o bag, **só nos trechos**: as imagens tal como chegam da câmara (os bytes da mensagem ROS, sem descodificar nem voltar a codificar), as deteções, o estado das câmaras e o início e o fim de cada trecho, num `.mcap` igual ao do `ros2 bag record` (os mesmos tópicos e tipos). Escreve no disco numa thread à parte, para não atrasar a deteção.
 * `resumo_online.py`: janela do resumo, aberta pelo `processar_inter.sh` no fim (usa o `gui_comum.py`, o mesmo da tab Resumo do offline).
-* `alternar_camara.sh`: desliga ou volta a ligar a câmara da direita sem janela (modo `-i`), a partir de outro terminal.
+* `trecho.sh`: começa ou termina um trecho sem janela (modo `-i`), a partir de outro terminal (como a tecla **R**).
+* `alternar_camara.sh`: desliga ou volta a ligar a câmara da direita sem janela (modo `-i`), a partir de outro terminal (como a tecla **D**).
 
 ### 4.3 Preparar a GPU NVIDIA no Docker (opcional, uma vez)
 O sistema funciona **em CPU por omissão** em qualquer PC com Linux e Docker — se não tiver placa NVIDIA, salte para 4.4. Com GPU, o processamento fica várias vezes mais rápido (mais deteções por segundo). O Docker precisa do **NVIDIA Container Toolkit** (faz-se apenas uma vez no computador):
@@ -644,17 +654,18 @@ bash processar_inter.sh 8 5                  # se estiverem ao contrário
 bash processar_inter.sh 5                    # apenas a câmara 5, em /dev/video2
 bash processar_inter.sh 5 8 -i               # sem janelas (corre só no terminal); --sem-interface é o mesmo
 bash processar_inter.sh 5 8 --sem-correcao   # sem corrigir a distorção da lente
+bash processar_inter.sh 5 8 --registar-tudo  # gravar desde o início (um trecho aberto logo no arranque)
 USAR_GPU=0 bash processar_inter.sh 5 8       # forçar CPU, mesmo num PC com GPU NVIDIA
 DEVS_VIDEO="/dev/video4 /dev/video6" bash processar_inter.sh 5 8   # outros dispositivos
 bash processar_inter.sh -h                   # ajuda
 ```
-As opções podem juntar-se (por exemplo, `bash processar_inter.sh 5 8 -i --sem-correcao`). O terminal mostra, por esta ordem:
+As opções podem juntar-se (por exemplo, `bash processar_inter.sh 5 8 -i --registar-tudo`). O terminal mostra, por esta ordem:
 * **As câmaras e os dispositivos** (`Câmara 5  ->  /dev/video2`). Se um `/dev/video` não existir, o script para e avisa.
 * **O hardware escolhido:**
   * `Hardware detetado: GPU NVIDIA (CUDA 13) -> onnxruntime-gpu[cuda,cudnn]`
   * `Hardware detetado: CPU -> onnxruntime`
   * ou `Hardware: GPU NVIDIA encontrada, mas falta o NVIDIA Container Toolkit no Docker -> a usar CPU` (veja 4.3).
-* **A pasta da gravação** (`data_realtime_inter/realtime_<data_hora>/`).
+* **Como marcar os trechos e se a gravação começa já** (`Gravação: só nos trechos (nada é gravado até começar o primeiro)`, ou `desde o início (--registar-tudo)`) e a pasta da gravação (`data_realtime_inter/realtime_<data_hora>/`).
 * **Na 1.ª vez** (ou ao alternar entre CPU e GPU, ou depois de mudar o `Dockerfile_realtime_inter` ou o `requirements.txt`), o Docker constrói a imagem e descarrega as bibliotecas Python (alguns minutos, sobretudo com `onnxruntime-gpu[cuda,cudnn]`). Nas vezes seguintes, arranca em poucos segundos.
 * **Os modelos e a correção:**
   ```text
@@ -665,51 +676,68 @@ As opções podem juntar-se (por exemplo, `bash processar_inter.sh 5 8 -i --sem-
   Câmara 8: correção da distorção com config/camera_astra_8.yaml
   ```
   *(ou `CPU`; sem o ficheiro de calibração de uma câmara, aparece um aviso e essa câmara não é corrigida).*
-* **Os controlos** (tecla **D**, **Q**, ou `Ctrl + C` sem janela).
+* **Os controlos** (teclas **R**, **D** e **Q**; sem janela, `trecho.sh`, `alternar_camara.sh` e `Ctrl + C`) e `A deteção já está a correr; nada é gravado até começar um trecho.` (com `--registar-tudo`, logo `Trecho 1 iniciado`).
 
-Passados 4 segundos, o `gravador_bag` começa a gravar. O `docker compose up` sozinho não funciona: use sempre o `processar_inter.sh`.
+A deteção começa assim que chegam as primeiras imagens; a gravação, só no primeiro trecho. O `docker compose up` sozinho não funciona: use sempre o `processar_inter.sh`.
 
-### 4.7 Durante a viagem: janela, painel e câmara da direita
+### 4.7 Durante a viagem: janela, painel, trechos e câmara da direita
 * **Janela:** uma só janela (`Tempo Real`) com as câmaras **lado a lado, a 5 à esquerda e a 8 à direita** (qualquer que seja a ordem dos `/dev/video`), com a estrada, as linhas e os objetos desenhados ao vivo, com as cores do offline (3.9). Pode ser redimensionada com o rato.
 * **Painel de cada câmara:** tempo desde o arranque, câmara e estado da correção (`corrigida`; a laranja `sem correção` ou `sem calibração`), resultado e tempo médio (ms) de cada modelo e **deteções por segundo** dessa câmara.
-* **Frequência de deteção:** os modelos processam uma câmara de cada vez, sempre a imagem mais recente. Com as duas câmaras, cada uma é processada metade das vezes. Em CPU, isso significa menos de uma deteção por segundo em cada câmara; com GPU, várias por segundo (o painel e o resumo mostram o valor real). As imagens que não são processadas continuam gravadas no bag.
-* **Sem janela (`-i`):** nada é desenhado (fica mais rápido); o processamento, os tópicos ROS e a gravação funcionam igual.
+* **Frequência de deteção:** os modelos processam uma câmara de cada vez, sempre a imagem mais recente. Com as duas câmaras, cada uma é processada metade das vezes. Em CPU, isso significa menos de uma deteção por segundo em cada câmara; com GPU, várias por segundo (o painel e o resumo mostram o valor real). Nos trechos, as imagens que não são processadas ficam gravadas na mesma (o vídeo do trecho fica completo).
+* **Sem janela (`-i`):** nada é desenhado (fica mais rápido); o processamento, os tópicos ROS, os trechos e a gravação funcionam igual (como no offline com `--sem-interface`).
+
+**Trechos (o que fica gravado):**
+* **Com janela:** tecla **R**: a primeira vez começa um trecho, a seguinte termina-o, e assim sucessivamente. Enquanto um trecho está a ser gravado, aparece no canto superior direito `REGISTO · trecho N · tempo` (como no offline, 3.9).
+* **Sem janela (`-i`):** noutro terminal, na pasta do projeto: `bash trecho.sh` (cada vez que corre, começa ou termina um trecho).
+* **`--registar-tudo`** (4.6): o trecho 1 começa no arranque; **R** termina-o e começa outros, como sempre.
+* O terminal do processamento mostra cada trecho, com o instante desde o arranque e as imagens gravadas de cada câmara:
+  ```text
+  [01:12.4] Trecho 1 iniciado: a gravar o vídeo original e as deteções
+  [01:58.0] Trecho 1 terminado: 01:12.4 a 01:58.0, câmara 5: 1366 imagens, câmara 8: 1368 imagens
+  ```
+* **Num trecho, grava-se tudo o que chega das câmaras** (30 imagens por segundo cada, cerca de **1 GB por minuto por câmara**) e as deteções das imagens processadas; **fora dos trechos não se grava nada** (a deteção, a janela e os tópicos continuam). O início do trecho apanha também as imagens dos últimos instantes já captados.
+* Ao terminar o processamento (**Q** / `Ctrl + C`) com um trecho aberto, esse trecho termina aí e fica gravado.
 
 **Desligar temporariamente a câmara da direita (mais deteções por segundo na outra):**
 * **Com janela:** tecla **D** (a mesma tecla volta a ligá-la). O lado direito fica escuro, com `Câmara 8: deteção desligada`.
 * **Sem janela (`-i`):** noutro terminal, na pasta do projeto: `bash alternar_camara.sh` (cada vez que corre, desliga ou volta a ligar).
 * O terminal do processamento mostra cada mudança, com o instante (`[00:27.9] Câmara 8: deteção DESLIGADA`).
-* **A gravação do vídeo da câmara desligada continua** (só a deteção é que pára): o bag tem o vídeo das duas câmaras o tempo todo, e as deteções da câmara 8 só nos períodos em que esteve ligada. Cada mudança fica gravada no tópico `/processamento/estado_camaras` e os períodos desligados aparecem no resumo.
+* **O vídeo da câmara desligada também deixa de ser gravado** nos trechos (poupa espaço; não há vídeo nem deteções dela nesses períodos). Cada mudança fica gravada no tópico `/processamento/estado_camaras` e os períodos desligados aparecem no resumo (na sessão e em cada trecho); no offline, a reprodução mostra esse lado escuro, com `Câmara 8: desligada no online` (4.10).
 * A câmara da esquerda nunca se desliga (há sempre pelo menos uma câmara a ser processada). Com uma só câmara, a tecla não faz nada.
 
 ### 4.8 Terminar e ver o resumo
 1. Para terminar, prima **`Q`** (ou **`Esc`**) na janela do vídeo, ou **`Ctrl + C`** (apenas uma vez) no terminal *(sem janela, use `Ctrl + C`)*.
 2. **O processamento e a gravação terminam juntos** (o bag acaba quando o processamento acaba). Aguarde alguns segundos para o Docker encerrar os contentores e gravar o índice final do `.mcap`.
-3. **Resumo:** com janela, abre-se a seguir a janela **«Resumo do processamento em tempo real»**, com o mesmo conteúdo da tab Resumo do offline (3.15.1), sem o filtro por trecho:
-   * **Sessão:** câmaras, início, duração, correção, imagens processadas e **deteções por segundo** de cada câmara, e os períodos em que a câmara da direita esteve desligada;
+3. **Resumo:** com janela, abre-se a seguir a janela **«Resumo do processamento em tempo real»**, com o mesmo conteúdo da tab Resumo do offline (3.15.1), incluindo o filtro por trecho:
+   * **Registo:** **Sessão inteira** (tudo o que foi detetado, dentro e fora dos trechos), **Todos os trechos** (só as deteções gravadas; é o que aparece primeiro, se houver trechos) ou **Trecho N**; as estatísticas referem-se à escolha;
+   * **Sessão:** câmaras, início, duração, correção, imagens processadas e **deteções por segundo** de cada câmara, os períodos em que a câmara da direita esteve desligada, a gravação (ficheiro e tamanho, número de trechos e tempo gravado) e o que está selecionado;
    * **Modelos:** limiar, dispositivo (CPU/GPU) e tempo médio de cada modelo, e o tempo total por imagem;
    * **Linhas e área circulável**, **deteções por categoria** e **veículos** (por instante, somando as duas câmaras), iguais aos do offline;
+   * **Trechos gravados:** cada trecho, com o início, o fim e a duração (desde o arranque da sessão) e, por câmara, as imagens gravadas, as imagens com deteções e os períodos em que esteve desligada;
    * com duas câmaras, escolhe-se **Ambas**, **Câmara 5** ou **Câmara 8**. Enquanto a câmara 8 esteve desligada, os veículos por instante contam só a câmara 5.
 
    Feche a janela (ou carregue em **Fechar**) para terminar.
-4. **Sem janela (`-i`)**, o resumo não é mostrado, mas é gravado na mesma (`resumo_online.json`), tal como o vídeo e as deteções. Pode abri-lo depois (4.11, passo 3).
+4. **Sem janela (`-i`)**, o resumo não é mostrado, mas é gravado na mesma (`resumo_online.json`), tal como os trechos. Pode abri-lo depois (4.11, passo 3).
+5. O terminal mostra no fim a gravação (ficheiro, tamanho e trechos); sem nenhum trecho, diz `Nenhum trecho gravado` e não fica bag (só o resumo das deteções).
 
 ### 4.9 O que é gravado (`data_realtime_inter/realtime_<data_hora>/`)
 ```
 data_realtime_inter/realtime_<data_hora>/
-    realtime_<data_hora>_0.mcap   o bag: vídeo original e deteções de cada câmara, e o estado das câmaras
-    metadata.yaml                 (do ros2 bag)
-    resumo_online.json            as estatísticas da sessão (o que a janela do resumo mostra)
+    realtime_<data_hora>_0.mcap   o bag, só com os trechos: vídeo original e deteções de cada câmara, estado das câmaras e trechos
+    resumo_online.json            os trechos e as estatísticas da sessão (o que a janela do resumo mostra)
 ```
+O bag só existe se houver pelo menos um trecho com imagens. Começa no arranque da sessão: os instantes "desde o início do bag" (no offline) são os da sessão online, os mesmos do terminal e do resumo.
 * **Tópicos do bag:**
 
   | Tópico | Conteúdo | No bag do offline (3.6)? |
   |---|---|---|
-  | `/camara<N>/image_raw` | o vídeo original de cada câmara: cerca de **1 GB por minuto por câmara** | sim, igual |
-  | `/camara<N>/processamento/dados_deteccoes` | uma mensagem JSON por imagem processada | não (no offline vai para o `deteccoes.mcap` do registo, 3.12) |
+  | `/camara<N>/image_raw` | o vídeo original de cada câmara, **só nos trechos** e só enquanto a câmara está ligada: cerca de **1 GB por minuto de trecho por câmara** | sim, igual (mas a viagem toda) |
+  | `/camara<N>/processamento/dados_deteccoes` | uma mensagem JSON por imagem processada, só nos trechos | não (no offline vai para o `deteccoes.mcap` do registo, 3.12) |
   | `/processamento/estado_camaras` | que câmaras estavam a ser processadas, a cada mudança (tecla **D**) | não |
+  | `/processamento/trechos` | início e fim de cada trecho (e da sessão), em JSON, com as imagens gravadas e os intervalos em que cada câmara esteve ligada | não |
 
-  Com as duas câmaras, conte com cerca de **2 GB por minuto**, como na aquisição; confirme que há espaço livre no disco.
+  Com as duas câmaras, conte com cerca de **2 GB por minuto de trecho**, como na aquisição; confirme que há espaço livre no disco. Se o disco não acompanhar (ou encher), a gravação avisa e a deteção continua.
+* **Cada imagem** fica gravada com o instante da imagem (`header.stamp`, posto pelo driver da câmara) como instante no bag; é esse instante que liga cada deteção à sua imagem (`stamp_ns`).
 * **Cada mensagem de deteções** tem os campos do registo offline (3.12), sem os que só servem para refazer o vídeo:
   ```json
   {
@@ -727,19 +755,23 @@ data_realtime_inter/realtime_<data_hora>/
   ```
   * `stamp_ns` é o instante da imagem (o `header.stamp` posto pelo driver da câmara): **é o que liga cada deteção à imagem gravada no bag** (a mensagem de `/camara<N>/image_raw` com o mesmo `header.stamp`).
   * `corrigida` diz se as coordenadas (caixas e linhas) são as da imagem corrigida da distorção ou as da original.
-  * Não se guardam os contornos da área circulável (só a percentagem), nem trechos, nem `modelos_ativos` (correm sempre os três).
-* **`resumo_online.json`:** câmaras (imagens processadas, deteções por segundo, correção, períodos desligada), modelos (dispositivo, limiares, tempos médios) e as estatísticas para **Ambas**, **5** e **8** (as mesmas do resumo do offline).
+  * Não se guardam os contornos da área circulável (só a percentagem), nem `modelos_ativos` (correm sempre os três); o trecho de cada deteção sabe-se pelo tópico `/processamento/trechos`.
+* **`resumo_online.json`:** câmaras (imagens processadas, deteções por segundo, correção, períodos desligada), modelos (dispositivo, limiares, tempos médios), a gravação (ficheiro e tamanho), os **trechos** (início, fim e duração em segundos desde o arranque, imagens gravadas e com deteções, e períodos desligada de cada câmara) e as estatísticas para **Ambas**, **5** e **8** (as mesmas do resumo do offline) na sessão inteira (`resumos`) e por filtro (`resumos_por_filtro`: `sessao`, `trechos`, `1`, `2`, ...).
 * A pasta `data_realtime_inter/` não vai para o git (está no `.gitignore`).
 
 ### 4.10 Do online para o offline: usar a mesma gravação
-Como o bag do online tem o mesmo vídeo original que o offline grava (1.1), a mesma viagem pode ser analisada depois com todo o detalhe do offline:
-* **Processar o bag no offline**, como um bag da aquisição (3.9): processa **todas** as imagens, com limiares, trechos, registo, reprodução, exportação e percurso no mapa:
+Como o bag do online tem, nos trechos, o mesmo vídeo original que o offline grava (1.1), esses trechos podem ser analisados depois com todo o detalhe do offline:
+* **Processar o bag no offline**, como um bag da aquisição (3.9): processa **todas** as imagens gravadas, com limiares, registo, reprodução, exportação e percurso no mapa:
   ```bash
   python processar_bag.py data_realtime_inter/realtime_<data_hora>/realtime_<data_hora>_0.mcap
   ```
-  O `processar_bag.py` só lê os tópicos `/camara<N>/image_raw`; ignora as deteções do online. Copie a pasta com verificação, como na aquisição (3.7).
+  * **Os trechos são os do online, automaticamente:** o `processar_bag.py` reconhece o bag do online (`Bag do online: só tem os trechos gravados no online (os trechos do registo são esses).`) e cria um registo com os mesmos trechos, com os mesmos números e instantes (`Registo: trecho 1 iniciado (trecho do online).`); a tecla **R** não é usada. Com `--trechos`, registam-se os pedidos (em segundos desde o início da sessão online).
+  * Os tempos (no painel, nos trechos e na janela de resultados) são os da sessão online; o vídeo salta de um trecho para o seguinte (entre eles não há imagens).
+  * Se a câmara da direita esteve desligada no online durante parte de um trecho, não há vídeo dela nesse intervalo: o processamento, a reprodução (3.13) e a janela de resultados mostram esse lado escuro, com `Câmara 8: desligada no online`, e o trecho guarda os intervalos de cada câmara (`intervalos_por_camara`, como num registo juntado, 3.14).
+  * O registo vai para `data_offline/realtime_<data_hora>/<ensaio>/` e reproduz-se (3.13) e vê-se na janela de resultados (3.15) como qualquer outro; no Resumo aparece a **Origem** `online · trechos do online`.
+  * O `processar_bag.py` lê os tópicos `/camara<N>/image_raw` (e os trechos e o estado das câmaras); volta a calcular as deteções e ignora as do online. Copie a pasta com verificação, como na aquisição (3.7). Um bag cortado (sem índice) também se lê: indique a câmara com `--camara 5` (3.9).
 * **Usar as deteções do online diretamente**, sem voltar a processar: leia o bag (por exemplo, com `registo.ler_deteccoes(<.mcap>)`, que devolve `{câmara: {stamp_ns: dados}}`) e junte cada deteção à imagem de `/camara<N>/image_raw` com o mesmo `header.stamp`. As coordenadas são as da imagem corrigida (`corrigida: true`): para desenhar sobre a imagem do bag, corrija-a primeiro com a mesma calibração (`leitura_bag.CorretorDistorcao`).
-* **Comparar os dois modos** na mesma viagem: o offline processa todas as imagens; o online, só as que houve tempo de processar. A diferença mostra o que se perde em tempo real com aquele PC.
+* **Comparar os dois modos** nos mesmos trechos: o offline processa todas as imagens; o online, só as que houve tempo de processar. A diferença mostra o que se perde em tempo real com aquele PC.
 
 ### 4.11 Testar o build e os modelos sem câmaras ligadas (opcional)
 Para confirmar que o Docker constrói bem e que os três modelos correm em GPU ou CPU **sem ter as câmaras ligadas**:
@@ -791,7 +823,9 @@ Para confirmar que o Docker constrói bem e que os três modelos correm em GPU o
 * **`FileNotFoundError` ao carregar os modelos:** confirme que a pasta `modelos/` tem `objetos.onnx`, `linhas.onnx`, `linhas.json` e `estrada.onnx`.
 * **Aviso `config/camera_astra_<N>.yaml não existe`:** falta a calibração dessa câmara (secção 2); as deteções dessa câmara são feitas na imagem original (`"corrigida": false`).
 * **`Não foi gravado o resumo` no fim:** o processamento não chegou a arrancar (veja os erros do `processador` mais acima no terminal).
-* **`alternar_camara.sh` diz que o processamento não está a correr:** corra-o na pasta do projeto, noutro terminal, enquanto o `processar_inter.sh` está a decorrer.
+* **`trecho.sh` ou `alternar_camara.sh` dizem que o processamento não está a correr:** corra-os na pasta do projeto, noutro terminal, enquanto o `processar_inter.sh` está a decorrer.
+* **`Nenhum trecho gravado` no fim:** não se marcou nenhum trecho (tecla **R**, `trecho.sh` ou `--registar-tudo`); só fica o resumo das deteções.
+* **`Aviso: a gravação falhou`:** o disco encheu ou não acompanhou; a deteção continua, mas o resto do trecho não fica gravado. Liberte espaço (cerca de 2 GB por minuto de trecho com as duas câmaras).
 * **Uma câmara não arranca com `No space left on device`:** falta de largura de banda USB; ligue as câmaras em portas de lados diferentes (4.4).
 * **Poucas deteções por segundo:** use a GPU (4.3), desligue a câmara da direita num trecho (**D**) ou corra sem janela (`-i`).
 
@@ -982,7 +1016,7 @@ Depois, mova o ficheiro `.onnx` gerado para `modelos/objetos.onnx` (substituindo
 * **Luz:** pouca luz, contraluz e reflexos pioram a deteção.
 * O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
 * Só conhece as 80 classes do COCO, e por omissão mostra apenas as de estrada (5.2.1). Não deteta, por exemplo, sinais de trânsito além do `stop sign`, nem marcas no chão (essas são tratadas pela deteção de linhas, 5.1). Para outros sinais seria preciso outro modelo, treinado com eles.
-* Os resultados podem ser gravados: no offline, nos trechos registados (3.11); no tempo real, sempre (secção 4).
+* Os resultados podem ser gravados: no offline, nos trechos registados (3.11); no tempo real, nos trechos marcados durante a viagem (secção 4).
 
 
 ### 5.3 Estrada / área circulável (YOLOP)
@@ -1092,11 +1126,13 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 | Comando | Opção | O que faz |
 |---|---|---|
 | `bash processar_inter.sh` (4.6) | `5 8`, `8 5`, `5`, `8` | câmaras, pela ordem dos dispositivos |
-| | `-i` / `--sem-interface` | sem janelas (nem vídeo nem resumo); grava na mesma |
+| | `-i` / `--sem-interface` | sem janelas (nem vídeo nem resumo); deteção, trechos e gravação na mesma |
 | | `--sem-correcao` | não corrige a distorção |
+| | `--registar-tudo` | começa um trecho logo no arranque (grava desde o início) |
 | | `-h` / `--help` | ajuda |
 | | `USAR_GPU=0` (antes do comando) | força CPU num PC com GPU |
 | | `DEVS_VIDEO="/dev/videoA /dev/videoB"` (antes do comando) | outros dispositivos (por omissão `/dev/video2 /dev/video4`) |
+| `bash trecho.sh` (4.7) | — | noutro terminal: começa/termina um trecho (sem janela) |
 | `bash alternar_camara.sh` (4.7) | — | noutro terminal: desliga/liga a câmara da direita (sem janela) |
 | `python3 resumo_online.py <pasta da sessão>` (4.11) | — | abre o resumo de uma sessão (no Docker ou no `venv`) |
 
@@ -1129,9 +1165,10 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 | | **Q** / **Esc** | sai |
 | **Janela de resultados** (`gui_resultados.py`, Percurso) | **Enter** (nas coordenadas) | o mesmo que **Ir** |
 | | rato: clique / arrastar / roda / botão direito | ponto (ou referência) / mover / aproximar / ponto de curva |
-| **Tempo real** (`processar_tempo_real.py`) | **D** | desliga / volta a ligar a câmara da direita |
+| **Tempo real** (`processar_tempo_real.py`) | **R** | começa / termina um trecho (gravação do vídeo e das deteções) |
+| | **D** | desliga / volta a ligar a câmara da direita (e a gravação do vídeo dela) |
 | | **Q** / **Esc** | termina (e abre o resumo) |
-| **Tempo real sem janela** (`-i`, no terminal) | **Ctrl + C** | termina |
+| **Tempo real sem janela** (`-i`, no terminal) | **Ctrl + C** | termina (os trechos e a câmara da direita: `trecho.sh` e `alternar_camara.sh`, noutro terminal) |
 | **Docker de aquisição** (terminal do `gravar.sh`) | **Ctrl + C** (uma vez) | termina a gravação |
 
 ### 6.3 Pastas e ficheiros gerados
@@ -1142,8 +1179,8 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 | `modelos/` | `objetos.onnx`, `linhas.onnx` + `linhas.json`, `estrada.onnx` | já incluídos (secção 5) | sim |
 | `calibracoes/camara<N>_<data_hora>/` | calibração, relatório e fotos | `calibrar_astra.py` | — |
 | `data/viagem_<data_hora>/` | bag do vídeo original (offline) | `gravar.sh` | não |
-| `data_offline/<viagem>/<ensaio>/` | registo das deteções (`deteccoes.mcap`, `ensaio.json`, vídeos `.mp4`, trajetos e referências do percurso) | `processar_bag.py`, `juntar_registos.py`, `reproduzir_registo.py`, `gui_resultados.py` | não |
-| `data_realtime_inter/realtime_<data_hora>/` | bag do vídeo original + deteções e `resumo_online.json` (online) | `processar_inter.sh` | não |
+| `data_offline/<viagem ou sessão online>/<ensaio>/` | registo das deteções (`deteccoes.mcap`, `ensaio.json`, vídeos `.mp4`, trajetos e referências do percurso) | `processar_bag.py`, `juntar_registos.py`, `reproduzir_registo.py`, `gui_resultados.py` | não |
+| `data_realtime_inter/realtime_<data_hora>/` | bag do vídeo original + deteções, só nos trechos, e `resumo_online.json` (online) | `processar_inter.sh` | não |
 
 ---
 

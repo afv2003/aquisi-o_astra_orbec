@@ -11,6 +11,9 @@ Com um registo de duas câmaras, as imagens são juntadas lado a lado (5 à esqu
 como no processar_bag.py; pode também escolher-se só uma das câmaras (camaras=["5"]).
 Num registo juntado (juntar_registos.py), cada trecho diz em que intervalos cada câmara foi
 registada ("intervalos_por_camara"); fora deles, o lado dessa câmara aparece escuro, com uma mensagem.
+O mesmo acontece num registo feito a partir de um bag do online (gravado só nos trechos): os trechos
+são os do online ("origem": "online") e, se uma câmara foi desligada no online (tecla D) durante parte
+de um trecho, o vídeo dela só existe nos intervalos em que esteve ligada.
 """
 from pathlib import Path
 
@@ -34,6 +37,8 @@ class Reproducao:
         if self.ensaio is None:
             raise ErroRegisto(f"'{self.pasta}' não tem ensaio.json (não é uma pasta de registo do processar_bag.py).")
         self.trechos = self.ensaio.get("trechos", [])
+        # registo feito a partir de um bag do online (gravado só nos trechos)
+        self.online = (self.ensaio.get("origem") or {}).get("tipo") == "online"
         if not self.trechos:
             raise ErroRegisto("O registo não tem trechos.")
 
@@ -129,7 +134,8 @@ class Reproducao:
     def n_imagens(self, trecho):
         """Número de imagens do vídeo do trecho (as da câmara principal; num registo juntado, uma
         estimativa: o vídeo cobre o trecho todo, incluindo onde essa câmara não foi registada)."""
-        if not trecho.get("intervalos_por_camara"):
+        if not trecho.get("intervalos_por_camara") or self.online:
+            # (num bag do online, a câmara principal é a que esteve sempre ligada: tem as imagens todas)
             return self.imagens_por_camara(trecho).get(self.camara_principal(trecho), 0) or trecho["imagens"]
         return int(round(self.fps(trecho) * (trecho["fim_ns"] - trecho["inicio_ns"]) / 1e9)) + 1
 
@@ -173,7 +179,11 @@ class Reproducao:
             yield msg.log_time_ns, self.juntar(ultima, trecho, msg.log_time_ns), dict(dados_cam)
 
     def _sem_registo(self, trecho, cam, t_ns, w, h):
-        """Lado escuro de uma câmara que não foi registada neste instante (registo juntado)."""
+        """Lado escuro de uma câmara que não foi registada neste instante (registo juntado, ou câmara
+        desligada no online)."""
+        if self.online:
+            return visual.imagem_espera(w, h, f"Câmara {cam}: desligada no online",
+                                        "tecla D no online: sem vídeo nem deteções desta câmara aqui")
         outras = [c for c in self.camaras if c != cam and self.registada(trecho, c, t_ns)]
         return visual.imagem_espera(w, h, f"Câmara {cam}: sem registo neste intervalo",
                                     (f"só a câmara {registo.texto_camaras(outras)} foi registada aqui" if outras
@@ -185,10 +195,12 @@ class Reproducao:
         h, w = ref.shape[:2]
         partes = []
         for c in self.camaras:
-            if ultima[c] is not None:
-                partes.append(ultima[c])
-            elif trecho is not None and not self.registada(trecho, c, t_ns):
+            # fora dos intervalos registados, a câmara aparece escura (mesmo que não chegue nenhuma
+            # imagem dela nesse intervalo, como no bag do online com a câmara desligada)
+            if trecho is not None and t_ns is not None and not self.registada(trecho, c, t_ns):
                 partes.append(self._sem_registo(trecho, c, t_ns, w, h))
+            elif ultima[c] is not None:
+                partes.append(ultima[c])
             else:
                 partes.append(visual.imagem_espera(w, h, f"Câmara {c}: sem imagem ainda"))
         return visual.lado_a_lado(partes)

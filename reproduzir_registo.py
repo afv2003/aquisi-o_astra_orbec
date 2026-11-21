@@ -62,9 +62,11 @@ def descrever_trechos(ensaio):
         print(f"    trecho {t['n']}: {intervalo}  ({t['imagens']} imagens{extra})")
         inicio = ensaio.get("bag", {}).get("inicio_ns") or 0
         for c, ints in (t.get("intervalos_por_camara") or {}).items():
-            # registo juntado: onde cada câmara foi registada (fora disso, aparece escura)
+            # registo juntado, ou câmara desligada no online (tecla D): onde cada câmara foi registada
+            # (fora disso, aparece escura)
             txt = ", ".join(f"{(a - inicio) / 1e9:.1f}–{(b - inicio) / 1e9:.1f} s" for a, b in ints)
-            print(f"        câmara {c}: " + (f"registada em {txt}" if txt else "não registada (aparece escura)"))
+            onde = "ligada no online" if (ensaio.get("origem") or {}).get("tipo") == "online" else "registada"
+            print(f"        câmara {c}: " + (f"{onde} em {txt}" if txt else "não registada (aparece escura)"))
 
 
 # --- Sem ensaio indicado (ou uma pasta com vários): listar os registos existentes ---
