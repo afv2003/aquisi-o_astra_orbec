@@ -22,7 +22,7 @@ Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de lin
 4. [Instantes guardados nas pausas](#4-instantes-guardados-nas-pausas)
 5. [Registo das deteções (trechos)](#5-registo-das-deteções-trechos)
 6. [Resumo da comparação (`resumo_comparacao.py`)](#6-resumo-da-comparação-resumo_comparacaopy)
-7. [Como funciona o UFLDv2 aqui e o corte do topo](#7-como-funciona-o-ufldv2-aqui-e-o-corte-do-topo)
+7. [Treino dos modelos, métricas e perspetiva do vídeo](#7-treino-dos-modelos-métricas-e-perspetiva-do-vídeo)
 8. [Desempenho e GPU](#8-desempenho-e-gpu)
 9. [Coerência entre vídeo, deteções e imagens](#9-coerência-entre-vídeo-deteções-e-imagens)
 10. [Referência rápida (opções e teclas)](#10-referência-rápida-opções-e-teclas)
@@ -58,7 +58,7 @@ Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de lin
 
 Para processar uma viagem com todas as deteções, use o `processar_bag.py` (offline); para processar em tempo real no veículo, o modo online (README 4; quando usar cada modo: README 1.2).
 
-**Relevância para a parte 2 (online, README 1.3):** o online usa o CLRNet e precisa de imagens por segundo. O UFLDv2 foi pensado para ser rápido em GPU; esta comparação mostra, nas mesmas imagens, quanto custa cada modelo em tempo (secção 8) e onde diferem as deteções (secções 4 e 6), antes de pensar em mudar o modelo do online.
+**Relevância para a parte 2 (online, README 1.3):** o online usa o CLRNet e precisa de imagens por segundo. O UFLD é conhecido por ser rápido; esta comparação mostra, nas mesmas imagens e na mesma GPU, quanto custa cada modelo em tempo (secção 8) e onde diferem as deteções (secções 4, 6 e 7.2), antes de pensar em mudar o modelo do online.
 
 ## 1. Preparar o ambiente e o modelo UFLDv2 (uma vez por PC)
 1. **Ambiente Python:** o mesmo `venv` do offline (README 3.8; GPU: README 3.10). Ative-o **em cada terminal novo**:
@@ -200,22 +200,62 @@ Com o aspeto do Resumo do offline (mais simples) e um filtro por **trecho**:
   Não é uma medida de qualidade (não há linhas de referência marcadas à mão): mostra onde os modelos concordam e onde diferem; os instantes ajudam a ver quem tem razão.
 * **Instantes guardados:** a lista (tempo, linhas de cada modelo, trecho), com um botão para abrir a pasta de cada um.
 
-## 7. Como funciona o UFLDv2 aqui e o corte do topo
-* **Modelo:** UFLDv2 ResNet34 treinado no CULane (F1 76.0; o CLRNet ResNet34 do projeto tem F1 78.99 no mesmo conjunto). Ficheiros: `ufld.py` (detetor), `modelos/ufld.json` (configuração), `modelos/ufld.onnx` (secção 1).
-* **Ideia do UFLD:** em vez de procurar a linha em cada píxel, escolhe, para cada uma de 72 linhas horizontais da imagem (âncoras), em que coluna (de 200) passa cada uma de 4 linhas da estrada; as duas linhas de fora usam 81 âncoras verticais.
+## 7. Treino dos modelos, métricas e perspetiva do vídeo
+Os dois modelos só funcionam bem em imagens parecidas com as do treino. Esta secção diz em que foram treinados, como foram avaliados e como deve ser o vídeo (e os cortes) para se aproximar dessas condições.
+
+### 7.1 Conjunto de treino: CULane
+Os dois modelos foram treinados e avaliados no mesmo conjunto, o [CULane](https://xingangpan.github.io/projects/CULane):
+* imagens de **1640x590 px** (proporção 2,78:1, muito mais "larga" do que os 4:3 das Astra), de câmaras **montadas em seis veículos**, viradas para a frente, em Pequim (mais de 55 horas de vídeo);
+* 88 880 imagens de treino, 9 675 de validação e 34 680 de teste; o teste está dividido em situação **normal** e **8 situações difíceis** (multidão, encandeamento, sombras, sem linhas, setas, curvas, cruzamentos e noite);
+* marcadas até **4 linhas** por imagem: as das duas faixas junto ao veículo (é por isso que os dois modelos dão no máximo 4).
+
+**Métrica (F1@50):** cada linha, prevista ou marcada, é desenhada com **30 px de largura** na imagem de 1640x590; uma linha prevista conta como certa se a sobreposição (IoU) com uma marcada for **maior do que 0,5**. Com as certas, as erradas e as que faltam calcula-se o F1 (média harmónica de precisão e cobertura). Em "cruzamento" não há linhas para encontrar, por isso conta-se só o número de **falsos positivos** (menos é melhor).
+
+### 7.2 Resultados publicados (CULane, teste)
+F1@50 (%) por situação, dos artigos de cada modelo (ResNet34 nos dois):
+
+| Situação | CLRNet ResNet34 | UFLDv2 ResNet34 | Diferença |
+|---|---|---|---|
+| Normal | 93,49 | 92,5 | +1,0 |
+| Multidão (*crowded*) | 78,06 | 74,9 | +3,2 |
+| Encandeamento (*dazzle*) | 74,57 | 65,7 | **+8,9** |
+| Sombras (*shadow*) | 79,92 | 75,3 | +4,6 |
+| Sem linhas (*no line*) | 54,01 | 49,0 | +5,0 |
+| Setas (*arrow*) | 90,59 | 88,5 | +2,1 |
+| Curvas (*curve*) | 72,77 | 70,2 | +2,6 |
+| Cruzamento (falsos positivos, menos é melhor) | 1216 | 1864 | **−648** |
+| Noite (*night*) | 75,02 | 70,6 | +4,4 |
+| **Total (F1@50)** | **79,73** | **75,9** (76,0 na versão final) | +3,8 |
+
+* **Modelos usados aqui:** o CLRNet do projeto tem os pesos do UnLanedet, com **F1 78,99** no total (o UnLanedet não publica valores por situação; os da tabela são os do artigo do CLRNet, com 79,73). O UFLDv2 é o ONNX do PINTO feito com os pesos oficiais (**F1 76,0** no README do UFLDv2).
+* **O que se espera ver na comparação:** o CLRNet é melhor em todas as situações. As maiores diferenças estão no **encandeamento**, nas **sombras**, na **noite**, nas imagens **sem linhas pintadas** e nos **falsos positivos em cruzamentos**. Estes são os casos que vale a pena procurar e guardar com a pausa (secção 4).
+* **Velocidade publicada:** CLRNet ResNet34 103 imagens/s (GTX 1080 Ti, artigo do CLRNet); UFLDv2 ResNet34 165 imagens/s (RTX 3090, citado no artigo do CLRKDNet). As GPUs são diferentes, por isso os números não são comparáveis entre si; a comparação na mesma GPU é a da secção 8.
+* **A concordância do resumo (secção 6) não é o F1 do CULane:** não há linhas marcadas à mão nos nossos vídeos; mede só se os dois modelos encontram as mesmas linhas, com uma tolerância de 30 px numa imagem de 640 px de largura.
+
+Fontes: CULane ([página do conjunto](https://xingangpan.github.io/projects/CULane)); CLRNet ([Zheng et al., CVPR 2022](https://arxiv.org/abs/2203.10350), Tabela 1); UFLDv2 ([Qin et al., TPAMI 2022](https://arxiv.org/abs/2206.07389), e [README](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2)); largura de 30 px da métrica ([CLRerNet](https://arxiv.org/abs/2305.08366)); velocidade do UFLDv2 ([CLRKDNet](https://arxiv.org/abs/2405.12503), Tabela I); CLRNet do UnLanedet ([Model Zoo](https://github.com/zkyntu/UnLanedet)).
+
+### 7.3 Como funciona o UFLDv2 aqui
+* **Ideia do UFLD:** em vez de procurar a linha em cada píxel, escolhe, para cada uma de 72 linhas horizontais da imagem (âncoras), em que coluna (de 200) passa cada uma de 4 linhas da estrada; as duas linhas de fora usam 81 âncoras verticais. Por isso as linhas saem com pequenos "degraus" (mais onduladas do que as do CLRNet, que prevê cada linha inteira de uma vez).
 * **Pré-processamento** (igual ao demo oficial, `demo.py` e `configs/culane_res34.py`): RGB; corta-se o topo da imagem (40%: o modelo foi treinado a ver só os 60% de baixo, `crop_ratio = 0.6`); redimensiona-se para 1600 x 320; normaliza-se com a média e o desvio do ImageNet.
 * **Pós-processamento** (o `pred2coords` oficial, em numpy): uma linha do meio conta se existir em **mais de metade** das 72 âncoras; uma de fora, em **mais de um quarto** das 81; a posição em cada âncora é a média pesada (softmax) da célula mais provável e das vizinhas. As linhas saem da esquerda para a direita, em píxeis da imagem recebida (a conversão foi testada: nas linhas do meio, erro médio de 0,1 px e máximo de 0,5 px).
-* **Diferenças em relação ao CLRNet** a ter em conta: o UFLDv2 não dá uma confiança por linha (só "existe/não existe" em cada âncora), por isso não há limiar equivalente ao `--conf-linhas`; o corte do topo por omissão é o do treino de cada um (0.4 no UFLDv2, 0.46 no CLRNet).
+* **Diferenças em relação ao CLRNet:** o UFLDv2 não dá uma confiança por linha (só "existe/não existe" em cada âncora), por isso não há limiar equivalente ao `--conf-linhas`. Ficheiros: `ufld.py` (detetor), `modelos/ufld.json` (configuração), `modelos/ufld.onnx` (secção 1).
 
-**Corte do topo (`--corte-ufld`, `--corte-linhas`):** os dois modelos só veem a parte de baixo da imagem e foram treinados com o horizonte a uma certa altura (no CULane, por volta dos 40% a partir de cima). As linhas desenhadas estão sempre onde o modelo as deteta (a conversão de coordenadas é exata para qualquer corte); o que muda com o enquadramento é **a qualidade da deteção**:
-* se o horizonte da câmara estiver noutra altura, o modelo recebe a estrada mais acima ou mais abaixo do que no treino: linhas curtas, tortas na parte de longe ou falhadas;
-* as imagens 4:3 (Astra, 640x480) ficam esticadas na horizontal ao passar para a entrada do modelo (UFLDv2 1600x320; CLRNet 800x320), mais do que as do CULane (1640x590). Isto acontece aos dois modelos e não tem ajuste (o tamanho da entrada é fixo); as condições de utilização do CLRNet (README 5.1.5: câmara virada para a frente, horizonte a meio) aplicam-se também ao UFLDv2.
+### 7.4 Perspetiva do vídeo e cortes
+**Como deve ser o vídeo** (as condições do CULane; README 5.1.5 para o CLRNet, que valem também para o UFLDv2):
+* câmara **no veículo, virada para a frente**, ao centro, à altura de um carro, **nivelada** (sem rodar) e alinhada com a estrada;
+* **horizonte perto dos 40 a 46% da altura** da imagem, a contar de cima (os cortes de treino dos dois modelos estão nessa zona; o CULane não publica a altura exata do horizonte);
+* pouco capô à vista: a parte de baixo da imagem tapada pelo carro não tem linhas e reduz a zona útil;
+* estrada com linhas pintadas no sentido da marcha; de dia, sem encandeamento, é onde os dois modelos são mais fiáveis (7.2).
 
-Para uma comparação justa, use **o mesmo corte nos dois**, ligeiramente acima do horizonte da câmara, por exemplo:
-```bash
-python comparar_linhas.py <entrada> --corte-ufld 0.45 --corte-linhas 0.45
-```
-Se o UFLDv2 tiver linhas claramente piores na parte de longe do que o CLRNet, pause num troço reto e compare os `comparacao.png` com cortes diferentes.
+**O que o corte do topo corrige:** os dois modelos ignoram a parte de cima da imagem e foram treinados com o horizonte a uma certa altura: o corte do CLRNet (0,46, `cut_height` 270 de 590) fica aproximadamente no horizonte típico do CULane, e o do UFLDv2 (0,40) um pouco acima. Se o horizonte da câmara estiver noutra altura, o modelo recebe a estrada mais acima ou mais abaixo do que no treino (linhas curtas, tortas ao longe, ou falhadas). As linhas desenhadas estão sempre onde o modelo as deteta (a conversão de coordenadas é exata para qualquer corte); o que muda é **a qualidade da deteção**. Para o ajustar:
+1. pause num troço reto e plano; no `original.png` (ou `corrigida.png`) desse instante, veja a altura `y` (em píxeis) do ponto de fuga das linhas e divida pela altura da imagem: é a posição do horizonte, `h` (por exemplo, `y = 230` numa imagem de 480 px dá `h = 0,48`);
+2. mantenha a relação de cada modelo com o horizonte: `--corte-linhas` perto de `h` e `--corte-ufld` cerca de 0,06 acima (`h − 0,06`):
+   ```bash
+   python comparar_linhas.py <entrada> --corte-linhas 0.48 --corte-ufld 0.42
+   ```
+3. compare os `comparacao.png` do mesmo instante com os cortes por omissão e com os ajustados.
+
+**O que o corte do topo não corrige: a proporção da imagem.** O CULane tem 2,78:1 e a Astra 4:3. Ao passar para a entrada fixa de cada modelo (CLRNet 800x320, UFLDv2 1600x320), a imagem da Astra fica, em relação às do treino, cerca de **2 vezes mais esticada na horizontal**: as linhas aparecem mais "abertas" (menos inclinadas) do que o modelo viu no treino. Isto acontece **por igual aos dois modelos** (a diferença depende só da proporção da imagem: 2,78 ÷ 1,33 ≈ 2,1 nas Astra; ≈ 1,6 em vídeos 16:9, como o nuScenes), por isso a comparação continua justa, mas os dois ficam abaixo dos valores publicados. Cortar só o topo não muda a proporção da parte que os modelos veem; para a aproximar do CULane seria preciso cortar também em baixo (uma faixa horizontal da imagem com a proporção do CULane, à volta do horizonte), o que perde a estrada mais perto do carro.
 
 ## 8. Desempenho e GPU
 * A GPU é escolhida como no resto do projeto (README 3.10), pelo `gpu.py`: CUDA se o `onnxruntime-gpu` estiver instalado, senão CPU. No arranque, cada modelo corre uma vez numa imagem neutra, e o dispositivo indicado (terminal, registo e resumo) é o que fica **de facto** em uso; se a GPU falhar, aparece `Aviso: a GPU (CUDA) falhou ao correr o modelo de ...; a usar o CPU`.
@@ -228,7 +268,7 @@ Se o UFLDv2 tiver linhas claramente piores na parte de longe do que o CLRNet, pa
   | **CPU** | cerca de 184 ms | cerca de 296 ms |
 
   (GPU: valores do painel, que mostra a média recente; CPU: média de uma sessão de 117 imagens.)
-* **Nestas condições, o UFLDv2 é mais lento do que o CLRNet** (cerca de 2 vezes em GPU e 1,6 vezes em CPU): a versão CULane ResNet34 recebe uma imagem de 1600x320 (o dobro da do CLRNet, 800x320) e tem uma última camada muito grande. A rapidez anunciada do UFLD é a de outras versões (backbones e entradas menores) e de outras GPUs. Para a parte 2, a vantagem a procurar no UFLDv2 não é a velocidade, mas o comportamento em casos onde o CLRNet falha (secção 4).
+* **Nestas condições, o UFLDv2 é mais lento do que o CLRNet** (cerca de 2 vezes em GPU e 1,6 vezes em CPU): a versão CULane ResNet34 recebe uma imagem de 1600x320 (o dobro da do CLRNet, 800x320) e tem uma última camada muito grande. A rapidez anunciada do UFLD é a de outras versões (backbones e entradas menores) e de outras GPUs. Como o UFLDv2 também tem resultados publicados mais baixos em todas as situações (7.2), para a parte 2 não há, à partida, razão para trocar o CLRNet; a comparação serve para o confirmar nas imagens das Astra e para mostrar as diferenças com casos concretos (secção 4).
 * Os valores de cada sessão ficam no painel, no terminal, no `ensaio.json` e no resumo.
 * Os ms mostrados são só do modelo (sem leitura, correção nem desenho), para comparar os dois de forma justa. Em GPU, a primeira deteção (mais lenta, de preparação) é feita no arranque e não entra nas médias.
 
