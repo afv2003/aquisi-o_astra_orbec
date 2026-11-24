@@ -30,7 +30,7 @@ Cada processamento com registo cria uma pasta (um "ensaio") com:
 Duas câmaras: o ensaio é um só (os trechos são os mesmos para as duas) e o deteccoes.mcap tem um
 tópico por câmara (/camara5/processamento/dados_deteccoes e /camara8/...), como no tempo real.
 O ensaio.json tem a lista "camaras", com o tópico da imagem, o tópico das deteções, a calibração e
-o tamanho da imagem de cada câmara (camaras_do_ensaio lê também os ensaios antigos, de uma câmara).
+o tamanho da imagem de cada câmara.
 """
 import bisect
 import re
@@ -234,15 +234,8 @@ def camaras_do_ensaio(ensaio):
     """
     Câmaras de um ensaio, pela ordem do ecrã (5 à esquerda, 8 à direita): lista de dicionários com
     camara, topico_imagem, topico_deteccoes, calibracao (dict ou None) e imagem ({largura, altura}).
-    Funciona com os ensaios novos (lista "camaras") e com os antigos (uma câmara, campos no topo).
     """
-    if ensaio.get("camaras"):
-        cams = [dict(c) for c in ensaio["camaras"]]
-    else:
-        c = ensaio.get("camara")
-        cams = [{"camara": c, "topico_imagem": ensaio.get("bag", {}).get("topico_imagem"),
-                 "topico_deteccoes": ensaio.get("topico_deteccoes") or topico_deteccoes(c),
-                 "calibracao": ensaio.get("calibracao"), "imagem": ensaio.get("imagem")}]
+    cams = [dict(c) for c in ensaio["camaras"]]
     from . import visual
     ordem = visual.ordenar_camaras([c["camara"] for c in cams])
     return sorted(cams, key=lambda c: ordem.index(c["camara"]))

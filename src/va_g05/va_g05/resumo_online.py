@@ -130,9 +130,7 @@ class ResumoOnline(ctk.CTk):
         for c_, ints in desligadas:
             pares.append((f"Câmara {c_} desligada", intervalos_txt(ints)))
         grav = r.get("gravacao")
-        if grav is None:                                  # resumos antigos (bag da sessão inteira)
-            pares.append(("Gravação", self.ficheiro.parent.name))
-        elif grav.get("ficheiro"):
+        if grav.get("ficheiro"):
             pares.append(("Gravação", f"{grav['ficheiro']}  ({grav['tamanho_bytes'] / 1e9:.2f} GB)"))
             pares.append(("Trechos gravados", f"{len(self.trechos)}  ("
                           f"{tempo_txt(sum(t['duracao_s'] for t in self.trechos))} de vídeo)"))
