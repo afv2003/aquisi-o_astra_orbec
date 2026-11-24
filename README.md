@@ -98,7 +98,7 @@ Há **dois modos de trabalho**, com o mesmo código de deteção e o mesmo desen
 
 | Secção | Conteúdo | Onde corre |
 |---|---|---|
-| [1](#1-visão-geral) | Visão geral: os dois modos, quando usar cada um, relevância para a parte 2, ficheiros e estrutura do repositório, pré-requisitos, preparação do PC Linux (Docker, projeto, disco externo) e testes automáticos (CI) | — |
+| [1](#1-visão-geral) | Visão geral: os dois modos, quando usar cada um, relevância para a parte 2, ficheiros e estrutura do repositório, pré-requisitos, preparação do PC Linux (Docker, projeto, disco externo), testes automáticos (CI) e organização do repositório (branches, fluxo de trabalho, tag) | — |
 | [2](#2-preparação-calibração-das-câmaras) | Preparação: calibração das câmaras (correção da distorção da lente) | Windows (ou Linux), com Python |
 | [3](#3-modo-offline-processar-os-bags-gravados-em-qualquer-sistema) | **Modo offline**: bag gravado → processar → registar → reproduzir → janela de resultados | Windows, Linux ou macOS, com `venv` (sem Docker nem câmaras) |
 | [4](#4-modo-online-aquisição-e-processamento-no-veículo-docker) | **Modo online**: câmaras → processamento ao vivo → gravação dos trechos (JPEG) → resumo; visualizador e RViz; reprodução de um bag sem câmaras; hora certa (NTP) | Linux com Docker (CPU ou GPU NVIDIA) |
@@ -286,6 +286,48 @@ O mesmo comando corre no PC, depois do `docker compose build`. Os testes não pr
 * `src/va_g05/test/test_modelos.py`: os três modelos ONNX estão na imagem e correm com o `onnxruntime` dela.
 
 No `venv` do offline também correm (com `pip install pytest`): `python -m pytest -q src/va_g05/test`.
+
+Na imagem, o `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` (no `Dockerfile`) impede o `pytest` de carregar os plugins de testes do ROS (`launch_testing`), que precisam de bibliotecas do Python do sistema que o `venv` não vê; os testes do projeto não os usam.
+
+### 1.8 Organização do repositório e fluxo de trabalho
+**Branches:**
+
+| Branch | Para quê | Vai para o `main`? |
+|---|---|---|
+| `main` | a versão do projeto: a que o CI verifica, a que os docentes e os outros grupos usam, e a que a tag `aula10` marca | — |
+| `online-decisao-local` (ou outra, por tarefa) | desenvolvimento: as alterações fazem-se aqui, testam-se e só depois se juntam ao `main` | sim, com `git merge` (depois de o CI passar) |
+| `Extra-Line-Comparison` | a comparação CLRNet vs UFLDv2 (`comparacao_linhas/`, `COMPARACAO_LINHAS.md`), à parte | **não**; recebe o `main` (`git merge main`) para ficar atualizada |
+
+**Uma alteração, do princípio ao fim:**
+```
+ editar (na pasta certa, abaixo) ─▶ testar ─▶ commit + push da branch ─▶ CI no GitHub (Actions) ─▶ merge no main
+                                      │                                      │
+            offline: venv (secção 3)  │            docker compose build + pytest (1.7): tem de ficar verde
+            online: docker compose build + scripts/online.sh --bag <bag> (4.11)
+```
+```bash
+git switch online-decisao-local
+# ... alterações, testes ...
+git add -A && git commit -m "o que mudou" && git push      # o CI corre sozinho
+git switch main && git merge --ff-only online-decisao-local && git push
+git switch Extra-Line-Comparison && git merge main && git push && git switch main   # manter a comparação atualizada
+```
+
+**Onde fica cada coisa:**
+
+| Alteração | Pasta | Depois |
+|---|---|---|
+| código do online ou comum aos dois modos (nós, modelos, grelha, avisos, desenho) | `src/va_g05/va_g05/` | `docker compose build` (o código está dentro da imagem) |
+| calibração, montagem das câmaras, parâmetros dos avisos e do planeador, RViz | `src/va_g05/config/` | `docker compose build` |
+| modelos ONNX | `src/va_g05/modelos/` | `docker compose build` |
+| arranque do online e comandos auxiliares | `scripts/` | — |
+| processamento offline, registos, janela de resultados | `offline/` | — |
+| calibração, figuras para o relatório, exportação de modelos | `tools/` | — |
+| testes | `src/va_g05/test/` | correm no CI |
+| dependências Python | `requirements.txt` (sistema: `Dockerfile`) | `docker compose build` e `pip install` no `venv` |
+| bags, gravações, registos | `data/` (ou o disco do `DADOS`) | não vão para o git |
+
+**Tag `aula10`:** marca o commit do `main` que corresponde à entrega da aula 10 (o ponto fixo que os docentes avaliam: `git tag aula10` e `git push origin --tags`). Não muda nada no código nem é precisa para o correr. Se o `main` mudar antes da avaliação (por exemplo, para o CI passar), a tag move-se para o commit novo: `git tag -f aula10` e `git push -f origin aula10`.
 
 ---
 

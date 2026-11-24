@@ -49,6 +49,9 @@ RUN source /opt/ros/jazzy/setup.bash \
     && rm -rf build log
 # Configuração e modelos lidos da pasta do pacote (não se copiam outra vez para install/)
 ENV VA_G05_DIR=/ws/src/va_g05
+# pytest (testes, CI): sem os plugins de testes do ROS (launch_testing), que precisam do Python do
+# sistema (lark, ...); os testes do projeto não os usam
+ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 # Os executáveis no PATH, para o compose os chamar diretamente: o "ros2 run" não passa o Ctrl+C
 # (SIGINT do docker stop) ao nó, que assim não fecharia a gravação nem gravaria o resumo
 ENV PATH="/ws/install/va_g05/lib/va_g05:/ws/install/va_planeamento/lib/va_planeamento:$PATH"

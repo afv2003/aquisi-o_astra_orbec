@@ -39,3 +39,8 @@ CLRNet/
 # Scripts pessoais e de teste (ficam só no PC de quem os usa)
 corrigir_calibracao.py
 processar_video_teste.py
+
+# Modelo do UFLDv2 da branch Extra-Line-Comparison (866 MB): fica na pasta ao mudar para o main
+comparacao_linhas/modelos/ufld.onnx
+comparacao_linhas/modelos/ufld.parcial
+data_comparacao/
