@@ -302,7 +302,7 @@ Na imagem, o `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` (no `Dockerfile`) impede o `pyte
 | Branch | Para quê | Vai para o `main`? |
 |---|---|---|
 | `main` | a versão do projeto: a que o CI verifica, a que os docentes e os outros grupos usam, e a que a tag `aula10` marca | — |
-| `online-decisao-local` (ou outra, por tarefa) | desenvolvimento: as alterações fazem-se aqui, testam-se e só depois se juntam ao `main` | sim, com `git merge` (depois de o CI passar) |
+| uma por tarefa (ex.: `metricas`, `aviso-colisao`) | desenvolvimento: cria-se a partir do `main`, as alterações fazem-se e testam-se aqui, e depois juntam-se ao `main`; no fim apaga-se | sim, com `git merge` (depois de o CI passar) |
 | `Extra-Line-Comparison` | a comparação CLRNet vs UFLDv2 (`comparacao_linhas/`, `COMPARACAO_LINHAS.md`), à parte | **não**; recebe o `main` (`git merge main`) para ficar atualizada |
 
 **Uma alteração, do princípio ao fim:**
@@ -313,10 +313,12 @@ Na imagem, o `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` (no `Dockerfile`) impede o `pyte
             online: docker compose build + scripts/online.sh --bag <bag> (4.11)
 ```
 ```bash
-git switch online-decisao-local
+git switch main && git pull
+git switch -c <tarefa>                                      # branch nova, a partir do main
 # ... alterações, testes ...
-git add -A && git commit -m "o que mudou" && git push      # o CI corre sozinho
-git switch main && git merge --ff-only online-decisao-local && git push
+git add -A && git commit -m "o que mudou" && git push -u origin <tarefa>   # o CI corre sozinho
+git switch main && git merge --ff-only <tarefa> && git push
+git branch -d <tarefa> && git push origin --delete <tarefa>                 # apagar a branch da tarefa
 git switch Extra-Line-Comparison && git merge main && git push && git switch main   # manter a comparação atualizada
 ```
 
