@@ -104,7 +104,7 @@ Há **dois modos de trabalho**, com o mesmo código de deteção e o mesmo desen
 
 | Secção | Conteúdo | Onde corre |
 |---|---|---|
-| [1](#1-visão-geral) | Visão geral: os dois modos, quando usar cada um, relevância para a parte 2, ficheiros e estrutura do repositório, pré-requisitos, preparação do PC Linux (Docker, projeto, disco externo), testes automáticos (CI) e organização do repositório (branches, fluxo de trabalho, tag) | — |
+| [1](#1-visão-geral) | Visão geral: os dois modos, quando usar cada um, relevância para a parte 2, ficheiros e estrutura do repositório, pré-requisitos, preparação do PC Linux (Docker, projeto, disco externo), testes automáticos (CI) e organização do repositório (branches, fluxo de trabalho) | — |
 | [2](#2-preparação-calibração-das-câmaras) | Preparação: calibração das câmaras (correção da distorção da lente) | Windows (ou Linux), com Python |
 | [3](#3-modo-offline-processar-os-bags-gravados-em-qualquer-sistema) | **Modo offline**: bag gravado → processar → registar → reproduzir → janela de resultados; métricas de desempenho contra uma referência marcada à mão | Windows, Linux ou macOS, com `venv` (sem Docker nem câmaras) |
 | [4](#4-modo-online-aquisição-e-processamento-no-veículo-docker) | **Modo online**: câmaras → processamento ao vivo → gravação dos trechos (JPEG) → resumo; visualizador e RViz; reprodução de um bag sem câmaras; hora certa (NTP) | Linux com Docker (CPU ou GPU NVIDIA) |
@@ -304,7 +304,7 @@ Na imagem, o `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` (no `Dockerfile`) impede o `pyte
 
 | Branch | Para quê | Vai para o `main`? |
 |---|---|---|
-| `main` | a versão do projeto: a que o CI verifica, a que os docentes e os outros grupos usam, e a que a tag `aula10` marca | — |
+| `main` | a versão do projeto: a que o CI verifica e a que os docentes e os outros grupos usam | — |
 | uma por tarefa (ex.: `metricas`, `aviso-colisao`) | desenvolvimento: cria-se a partir do `main`, as alterações fazem-se e testam-se aqui, e depois juntam-se ao `main`; no fim apaga-se | sim, com `git merge` (depois de o CI passar) |
 | `Extra-Line-Comparison` | a comparação CLRNet vs UFLDv2 (`comparacao_linhas/`, `COMPARACAO_LINHAS.md`), à parte | **não**; recebe o `main` (`git merge main`) para ficar atualizada |
 
@@ -340,7 +340,6 @@ git switch Extra-Line-Comparison && git merge main && git push && git switch mai
 | dependências Python | `requirements.txt` (sistema: `Dockerfile`) | `docker compose build` e `pip install` no `venv` |
 | bags, gravações, registos | `data/` (ou o disco do `DADOS`) | não vão para o git |
 
-**Tag `aula10`:** marca o commit do `main` que corresponde à entrega da aula 10 (o ponto fixo que os docentes avaliam: `git tag aula10` e `git push origin --tags`). Não muda nada no código nem é precisa para o correr. Se o `main` mudar antes da avaliação (por exemplo, para o CI passar), a tag move-se para o commit novo: `git tag -f aula10` e `git push -f origin aula10`.
 
 ---
 
