@@ -7,11 +7,13 @@ ARG ONNX_PKG=onnxruntime
 # Instalar ROS, driver da câmara e dependências para Python e OpenCV
 # (compressed-image-transport: o driver publica também a imagem em JPEG, que é a que se grava;
 #  rviz2: validação das câmaras e da grelha, processar_inter.sh --rviz;
+#  foxglove-bridge: ver os tópicos ao vivo no Foxglove Studio, processar_inter.sh --foxglove;
 #  python3-tk: janela do resumo no fim do processamento, resumo_online.py)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-usb-cam \
     ros-jazzy-compressed-image-transport \
     ros-jazzy-rviz2 \
+    ros-jazzy-foxglove-bridge \
     python3-venv \
     python3-pip \
     python3-tk \

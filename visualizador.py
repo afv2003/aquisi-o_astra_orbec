@@ -13,7 +13,9 @@ Subscreve:
   /camara<N>/processamento/dados_deteccoes      deteções de cada imagem (JSON, com o instante dela)
   /processamento/painel                         tempos dos modelos, deteções/s, gravação, correção
   /processamento/estado_camaras                 câmaras ligadas / desligadas (tecla D)
-  /<grupo>/grelha_local, /<grupo>/aviso_faixa   grelha local e aviso de mudança de faixa
+  /<grupo>/grelha_local                         grelha local (vista de cima)
+  /<grupo>/aviso_faixa, aviso_saida_faixa, aviso_colisao   os três avisos (coluna "Avisos", zonas na vista
+                                                de cima e destaque dos objetos com aviso de colisão)
   /<grupo>/estado                               estado do planeador A* comum
   /processamento/reproducao                     estado do reprodutor (só em reprodução)
 Cada deteção é desenhada sobre a sua imagem (a do mesmo instante, header.stamp), corrigida da
@@ -76,6 +78,9 @@ class Visualizador(Node):
         self.estado = {}
         self.grelha = None
         self.aviso = None
+        self.saida = None
+        self.colisao = None
+        self.objetos_colisao = OrderedDict()                     # (câmara, stamp_ns) -> objetos
         self.planeador = None
         self.reproducao = {}
         self.pubs_anotada = {}
@@ -88,6 +93,8 @@ class Visualizador(Node):
         self.create_subscription(String, TOPICO_ESTADO, self.cb_estado, QOS_ESTADO)
         self.create_subscription(String, TOPICO_REPRODUCAO, self.cb_reproducao, QOS_ESTADO)
         self.create_subscription(String, f"/{grupo}/aviso_faixa", self.cb_aviso, 10)
+        self.create_subscription(String, f"/{grupo}/aviso_saida_faixa", self.cb_saida, 10)
+        self.create_subscription(String, f"/{grupo}/aviso_colisao", self.cb_colisao, 10)
         self.create_subscription(String, f"/{grupo}/estado", self.cb_planeador, 10)
         try:
             from nav_msgs.msg import OccupancyGrid
@@ -131,6 +138,27 @@ class Visualizador(Node):
 
     def cb_aviso(self, msg):
         self.aviso = self._json(msg)
+
+    def cb_saida(self, msg):
+        self.saida = self._json(msg)
+
+    def cb_colisao(self, msg):
+        c = self._json(msg)
+        if not c:
+            return
+        self.colisao = c
+        with self.lock:
+            por = {}
+            for o in c.get("objetos", []):
+                por.setdefault((str(o.get("camara")), o.get("stamp_ns")), []).append(o)
+            for chave, objs in por.items():
+                self.objetos_colisao[chave] = objs
+            while len(self.objetos_colisao) > 60:
+                self.objetos_colisao.popitem(last=False)
+
+    def objetos_da(self, cam, stamp_ns):
+        with self.lock:
+            return list(self.objetos_colisao.get((str(cam), stamp_ns), []))
 
     def cb_planeador(self, msg):
         self.planeador = (msg.data, time.time())
@@ -286,6 +314,8 @@ def main():
                     valores = painel.valores(caixas, linhas, dados.get("estrada_percentagem", 0.0))
                     ecra[cam] = painel.camara(frame, caixas, linhas, mascara,
                                               info_painel(cam, p, len(caixas), valores, corrigida))
+                    painel.desenhar_alertas(ecra[cam], no.objetos_da(cam, dados.get("stamp_ns")), cam,
+                                            dados.get("stamp_ns"))
                     no.publicar_anotada(cam, ecra[cam], dados["stamp_ns"], msg.header.frame_id)
                     if grelha is not None and cam in montagem["camaras"] and cam in calib:
                         k = geometria.matriz_intrinseca(calib[cam], w, h, corrigida)
@@ -321,8 +351,10 @@ def main():
                         vista = painel.vista_de_cima(grelha, g, juntas.shape[0],
                                                      {c: v for c, v in linhas_chao.items() if c not in desligadas},
                                                      {c: v for c, v in geos.items() if c not in desligadas},
-                                                     avisos, p_aviso, titulo)
-                        juntas = visual.lado_a_lado([juntas, vista])
+                                                     avisos, p_aviso, titulo, no.colisao)
+                        quadro = painel.quadro_avisos(juntas.shape[0], avisos, no.saida, no.colisao,
+                                                      est[0] if est and time.time() - est[1] < 2.0 else "")
+                        juntas = visual.lado_a_lado([juntas, vista, quadro])
                 if juntas is not None:
                     if direita and not janela_ajustada and any(v is not None for v in ecra.values()):
                         cv2.resizeWindow(JANELA, juntas.shape[1], juntas.shape[0])

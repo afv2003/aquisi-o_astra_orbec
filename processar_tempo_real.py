@@ -21,8 +21,14 @@ Decisão local (aula 10): com o config/montagem_camaras.yaml (posição das câm
 também a posição das câmaras em /tf_static (base_link -> camara<N>_link -> camara<N>) e a grelha
 de ocupação local em /<grupo>/grelha_local (nav_msgs/OccupancyGrid no base_link, grelha_local.py),
 que o planeador A* comum (src/va_planeamento, serviço "planeador" do compose) usa. A partir da
-mesma grelha publica o aviso de mudança de faixa em /<grupo>/aviso_faixa (aviso_faixa.py: para cada
-lado, LIVRE / OCUPADA / SEM_FAIXA / SEM_INFORMACAO).
+mesma grelha, das linhas e dos objetos seguidos (decisao.py, o mesmo do offline) publica três avisos
+(std_msgs/String, JSON):
+  /<grupo>/aviso_faixa         mudança de faixa (aviso_faixa.py): por lado, LIVRE / OCUPADA / SEM_FAIXA /
+                               SEM_INFORMACAO, com a faixa ao lado pelas linhas detetadas ou pelo centro;
+  /<grupo>/aviso_saida_faixa   saída de faixa (aviso_saida_faixa.py): por lado, OK / A_APROXIMAR / PERTO /
+                               A_PISAR / SEM_LINHA;
+  /<grupo>/aviso_colisao       colisão (aviso_colisao.py): LIVRE / ATENCAO / AVISO / PERIGO, pelo tempo até
+                               contacto (crescimento das caixas) e pela faixa de cada objeto.
 
 Três modos (o processar_inter.sh escolhe):
 * Ao vivo (câmaras): a deteção corre sempre, mas o vídeo original e as deteções só são gravados
@@ -75,8 +81,10 @@ import leitura_bag   # só para a correção da distorção (a mesma do offline)
 import registo       # formato das deteções e resumo (os mesmos do offline)
 import gravacao_online   # gravação do vídeo original (comprimido) e das deteções, só nos trechos
 import geometria         # posição das câmaras no carro (TF) e passagem imagem <-> chão
-import grelha_local      # grelha de ocupação local (contrato comum da aula 10)
-import aviso_faixa       # aviso de mudança de faixa (zonas da grelha ao lado do carro)
+import decisao           # grelha local (contrato da aula 10) e os três avisos (o mesmo do offline)
+import aviso_faixa       # aviso de mudança de faixa
+import aviso_saida_faixa  # aviso de saída de faixa
+import aviso_colisao     # aviso de colisão
 import relogio           # verificação da hora do PC (NTP)
 
 PASTA_REGISTO = Path(os.environ.get("PASTA_REGISTO", "data_realtime_inter"))
@@ -132,6 +140,8 @@ class ProcessadorMultiCamara(Node):
         self.OccupancyGrid = OccupancyGrid
         self.pub_grelha = self.create_publisher(OccupancyGrid, topico, 10)
         self.pub_aviso = self.create_publisher(String, f"/{grupo}/aviso_faixa", 10)
+        self.pub_saida = self.create_publisher(String, f"/{grupo}/aviso_saida_faixa", 10)
+        self.pub_colisao = self.create_publisher(String, f"/{grupo}/aviso_colisao", 10)
         for chave, tipo, nome in (("estado", String, "estado"), ("caminho", RosPath, "caminho_local"),
                                   ("zona", OccupancyGrid, "zona_proibida")):
             self.create_subscription(tipo, f"/{grupo}/{nome}", partial(self.planeador_callback, chave=chave),
@@ -302,9 +312,9 @@ def main():
             else:
                 print(f"Aviso: câmara {cam}: '{ficheiro}' não existe; a imagem NÃO é corrigida (README, secção 2).")
 
-    # --- Decisão local: posição das câmaras no carro (TF) e grelha de ocupação local ---
+    # --- Decisão local: posição das câmaras no carro (TF), grelha de ocupação local e avisos ---
     montagem = geometria.carregar_montagem()
-    grelha = topico_grelha = None
+    grelha = topico_grelha = decisao_local = None
     if montagem is None:
         print(f"Aviso: falta {geometria.CONFIG}; sem TF das câmaras nem grelha local.")
     else:
@@ -317,7 +327,8 @@ def main():
             topico_grelha = f"/{montagem.get('grupo', 'g05')}/grelha_local"
             try:
                 no_ros.preparar_grelha(topico_grelha, montagem.get("grupo", "g05"))
-                grelha = grelha_local.GrelhaLocal(montagem)
+                decisao_local = decisao.DecisaoLocal(montagem)
+                grelha = decisao_local.grelha
                 print(f"Grelha local: {topico_grelha} (nav_msgs/OccupancyGrid, "
                       f"{montagem.get('frame_carro', 'base_link')}, {grelha.res:g} m, x {grelha.x_min:g} a "
                       f"{grelha.x_max:g} m, y {grelha.y_min:g} a {grelha.y_max:g} m)"
@@ -336,6 +347,8 @@ def main():
         grupo = montagem.get("grupo", "g05")
         extra = {"grelha": (topico_grelha, "nav_msgs/msg/OccupancyGrid", gravacao_online.DEFINICAO_GRELHA),
                  "aviso": (f"/{grupo}/aviso_faixa", "std_msgs/msg/String", gravacao_online.DEFINICAO_STRING),
+                 "aviso_saida": (f"/{grupo}/aviso_saida_faixa", "std_msgs/msg/String", gravacao_online.DEFINICAO_STRING),
+                 "aviso_colisao": (f"/{grupo}/aviso_colisao", "std_msgs/msg/String", gravacao_online.DEFINICAO_STRING),
                  "planeador_estado": (f"/{grupo}/estado", "std_msgs/msg/String", gravacao_online.DEFINICAO_STRING),
                  "planeador_caminho": (f"/{grupo}/caminho_local", "nav_msgs/msg/Path",
                                        gravacao_online.DEFINICAO_CAMINHO),
@@ -389,10 +402,14 @@ def main():
     freq = {c: None for c in camaras}             # deteções por segundo de cada câmara (média móvel)
     t_ant = {c: None for c in camaras}
     resumo_det = {c: {} for c in camaras}         # deteções em memória (compactas), para o resumo do fim
-    p_aviso = aviso_faixa.parametros(montagem)
-    ultimo_aviso = {}                             # último texto mostrado no terminal, por lado
-    contagem_aviso = {l: {} for l in aviso_faixa.LADOS}          # estados do aviso (sessão inteira)
-    contagem_aviso_trechos = {l: {} for l in aviso_faixa.LADOS}  # estados do aviso (só nos trechos)
+    ultimo_aviso = {}                             # último estado mostrado no terminal, por aviso e lado
+    # estados de cada aviso (imagens processadas em cada estado), na sessão inteira e só nos trechos
+    contagem = {f: {"faixa": {l: {} for l in aviso_faixa.LADOS}, "saida": {l: {} for l in aviso_faixa.LADOS},
+                    "colisao": {}} for f in ("sessao", "trechos")}
+
+    def contar(filtro, aviso, estado, lado=None):
+        c_ = contagem[filtro][aviso] if lado is None else contagem[filtro][aviso][lado]
+        c_[estado] = c_.get(estado, 0) + 1
     t_painel = {c: 0.0 for c in camaras}          # sem processamento: último painel publicado
 
     def media(k, ms):
@@ -449,8 +466,8 @@ def main():
             return
         agora = agora_s()
         ativa[cam] = not ativa[cam]
-        if grelha is not None:
-            grelha.remover(cam)                   # a parte desta câmara fica desconhecida
+        if decisao_local is not None:
+            decisao_local.remover(cam)            # a parte desta câmara fica desconhecida
         if ativa[cam]:
             desligada[cam].append((desligada_desde[cam], agora))
             desligada_desde[cam] = None
@@ -548,38 +565,55 @@ def main():
                 t_img = stamp_ns(msg)
                 dados = registo.dados_deteccoes(caixas, linhas_frame, mascara_estrada, t_img,
                                                 corrigida=corrigida, camara=cam)
-                texto = no_ros.publicar_dados(cam, dados)
+                texto = json.dumps(dados, separators=(",", ":"))
                 trecho = gravador.deteccoes(cam, texto, t_img)    # gravada só dentro de um trecho
 
-                # Grelha local: a camada desta câmara (a partir das mesmas deteções) e a grelha junta
-                if grelha is not None and cam in montagem["camaras"]:
+                # Decisão local: a camada desta câmara na grelha (a partir das mesmas deteções), a grelha
+                # junta, as faixas, os objetos seguidos e os três avisos (decisao.py, o mesmo do offline)
+                if decisao_local is not None and cam in montagem["camaras"]:
                     calib = corretor[cam].calibracao if cam in corretor else calibracao_sem_correcao.get(cam)
                     k = geometria.matriz_intrinseca(calib, frame.shape[1], frame.shape[0], corrigida)
                     if k is not None:
                         t = time.perf_counter()
-                        grelha.atualizar(cam, k, frame.shape[1], frame.shape[0], t_img, mascara_estrada, caixas)
-                        grelha_atual = grelha.combinada(t_img)
-                        msg_g = no_ros.publicar_grelha(grelha_atual, grelha, montagem.get("frame_carro", "base_link"),
+                        r = decisao_local.atualizar(cam, k, frame.shape[1], frame.shape[0], t_img, mascara_estrada,
+                                                    caixas, linhas_frame)
+                        msg_g = no_ros.publicar_grelha(r["grelha"], grelha, montagem.get("frame_carro", "base_link"),
                                                        msg.header.stamp)
                         if gravador.trecho is not None:
                             gravador.mensagem("grelha", serialize_message(msg_g), t_img)
                         media("grelha", (time.perf_counter() - t) * 1000)
-
-                        # Aviso de mudança de faixa (a partir da mesma grelha)
-                        avisos = aviso_faixa.avaliar(grelha, grelha_atual, grelha.veiculos(t_img), p_aviso)
-                        texto_aviso = json.dumps({"stamp_ns": t_img, **avisos}, separators=(",", ":"))
-                        no_ros.publicar_aviso(texto_aviso)
-                        if gravador.trecho is not None:
-                            gravador.mensagem("aviso", gravacao_online.cdr_string(texto_aviso), t_img)
-                        for lado, info in avisos.items():
-                            contagem_aviso[lado][info["estado"]] = contagem_aviso[lado].get(info["estado"], 0) + 1
-                            if trecho is not None:
-                                c_ = contagem_aviso_trechos[lado]
-                                c_[info["estado"]] = c_.get(info["estado"], 0) + 1
-                            txt = aviso_faixa.texto(info)
-                            if txt != ultimo_aviso.get(lado):
-                                ultimo_aviso[lado] = txt
-                                print(f"[{tempo_txt(agora_s())}] Faixa da {lado}: {txt}")
+                        avisos = {"aviso": ({"stamp_ns": t_img, **r["faixa"]}, no_ros.pub_aviso),
+                                  "aviso_saida": ({"stamp_ns": t_img, **r["saida"]}, no_ros.pub_saida),
+                                  "aviso_colisao": ({"stamp_ns": t_img, **r["colisao"]}, no_ros.pub_colisao)}
+                        for chave, (conteudo, pub) in avisos.items():
+                            texto_aviso = no_ros.publicar_texto(pub, json.dumps(conteudo, separators=(",", ":"),
+                                                                                ensure_ascii=False))
+                            if gravador.trecho is not None:
+                                gravador.mensagem(chave, gravacao_online.cdr_string(texto_aviso), t_img)
+                        # contagens (para o resumo) e o terminal (só quando o estado muda)
+                        filtros = ("sessao", "trechos") if trecho is not None else ("sessao",)
+                        mudancas = []
+                        for lado in aviso_faixa.LADOS:
+                            f_, s_ = r["faixa"][lado], r["saida"][lado]
+                            for filtro in filtros:
+                                contar(filtro, "faixa", f_["estado"], lado)
+                                contar(filtro, "saida", s_["estado"], lado)
+                            mudancas.append((("faixa", lado), (f_["estado"], f_.get("angulo_morto"),
+                                                               f_.get("aproximacao_rapida")),
+                                             f"Mudança de faixa ({lado}): {aviso_faixa.texto(f_)}"))
+                            mudancas.append((("saida", lado), (s_["estado"], s_.get("perigo")),
+                                             f"Saída de faixa ({lado}): {aviso_saida_faixa.texto(s_)}"))
+                        for filtro in filtros:
+                            contar(filtro, "colisao", r["colisao"]["estado"])
+                        mudancas.append((("colisao",), (r["colisao"]["estado"], r["colisao"].get("zona")),
+                                         f"Colisão: {aviso_colisao.texto(r['colisao'])}"))
+                        for chave, estado, txt in mudancas:
+                            if ultimo_aviso.get(chave) != estado:
+                                ultimo_aviso[chave] = estado
+                                print(f"[{tempo_txt(agora_s())}] {txt}")
+                # as deteções são publicadas depois dos avisos: o visualizador desenha a imagem quando as
+                # recebe, e já tem os avisos de colisão dessa imagem
+                no_ros.publicar_texto(no_ros.pubs_dados[cam], texto)
                 # resumo em memória: só o que as estatísticas usam (e o trecho, para o filtro do resumo)
                 resumo_det[cam][t_img] = {"objetos": [{"classe": o["classe"], "confianca": o["confianca"]}
                                                       for o in dados["objetos"]],
@@ -616,7 +650,9 @@ def main():
             gravar_resumo(sessao, inicio, fim, camaras, corretor, origem_calib, sem_correcao, sem_interface,
                           n_img, desligada, soma_ms, detetor_objetos, detetor_linhas, detetor_estrada,
                           nome_modelo, resumo_det, trechos, gravador,
-                          avisos={"sessao": contagem_aviso, "trechos": contagem_aviso_trechos,
+                          avisos={"sessao": contagem["sessao"]["faixa"], "trechos": contagem["trechos"]["faixa"],
+                                  "saida": {f: contagem[f]["saida"] for f in contagem},
+                                  "colisao": {f: contagem[f]["colisao"] for f in contagem},
                                   "planeador": dict(no_ros.contagem_planeador)} if grelha is not None else None,
                           info_grelha=None if grelha is None else {
                               "topico": topico_grelha, "frame": montagem.get("frame_carro", "base_link"),
@@ -740,7 +776,8 @@ def gravar_resumo(sessao, inicio, duracao_s, camaras, corretor, origem_calib, se
                      "comprimidas_pelo_processamento": dict(gravador.comprimidas_aqui) if gravador else {}},
         "trechos": [_trecho_para_json(t, gravador) for t in trechos],
         "grelha_local": info_grelha,                # tópico, limites e montagem das câmaras (ou None)
-        # aviso de mudança de faixa (imagens processadas em cada estado, por lado) e estados do planeador
+        # avisos (imagens processadas em cada estado): mudança de faixa por lado ("sessao", "trechos"),
+        # saída de faixa por lado ("saida"), colisão ("colisao"), e estados do planeador
         "decisao_local": avisos,
         "resumos": resumos,                         # a sessão inteira (como antes)
         "resumos_por_filtro": resumos_por_filtro,   # "sessao", "trechos" e "1", "2", ... (cada trecho)

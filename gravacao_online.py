@@ -15,6 +15,8 @@ que o "ros2 bag record" gravava (mesmos tópicos, tipos e formato), mas só com 
   /<grupo>/grelha_local                       nav_msgs/msg/OccupancyGrid  grelha local (só nos trechos)
   /tf_static                                  tf2_msgs/msg/TFMessage posição das câmaras no carro (no início)
   /<grupo>/aviso_faixa                        std_msgs/msg/String    aviso de mudança de faixa (JSON, nos trechos)
+  /<grupo>/aviso_saida_faixa                  std_msgs/msg/String    aviso de saída de faixa (JSON, nos trechos)
+  /<grupo>/aviso_colisao                      std_msgs/msg/String    aviso de colisão (JSON, nos trechos)
   /<grupo>/estado, caminho_local, zona_proibida  saídas do planeador A* comum (nos trechos)
 
 * As imagens são gravadas comprimidas (JPEG), como pede o enunciado (passo 4): o driver da câmara

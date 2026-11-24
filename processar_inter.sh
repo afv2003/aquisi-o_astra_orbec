@@ -22,6 +22,7 @@ uso() {
     echo "Opções:"
     echo "  -i                  : sem janela (sem o visualizador; corre só no terminal)"
     echo "  --rviz              : abre também o RViz (TF das câmaras, grelha local, caminho do A*, imagens)"
+    echo "  --foxglove          : lança também o foxglove_bridge (Foxglove Studio em ws://localhost:8765)"
     echo "  --sem-correcao      : não corrige a distorção da lente (por omissão usa config/camera_astra_<N>.yaml)"
     echo "  ao vivo:"
     echo "  --registar-tudo     : começa logo um trecho (grava a sessão toda; a tecla R continua a funcionar)"
@@ -43,6 +44,7 @@ uso() {
 
 export SEM_INTERFACE=0 SEM_CORRECAO=0 REGISTAR_TUDO=0 SEM_PROCESSAMENTO=0 REPRODUCAO="" TAXA=1
 RVIZ=0
+FOXGLOVE=0
 BAG_PEDIDO=""
 CAMARA_BAG=""
 camaras=()
@@ -54,6 +56,7 @@ while [ $# -gt 0 ]; do
         --registar-tudo) REGISTAR_TUDO=1 ;;
         --sem-processamento) SEM_PROCESSAMENTO=1 ;;
         --rviz) RVIZ=1 ;;
+        --foxglove) FOXGLOVE=1 ;;
         --bag) [ $# -ge 2 ] || uso; BAG_PEDIDO="$2"; shift ;;
         --taxa) [ $# -ge 2 ] || uso; TAXA="$2"; shift ;;
         --camara) [ $# -ge 2 ] || uso; CAMARA_BAG="$2"; shift ;;
@@ -192,9 +195,14 @@ else
 fi
 echo
 
-# O RViz arranca à parte: fechá-lo não termina a sessão
+# O RViz e o foxglove_bridge arrancam à parte: fechá-los não termina a sessão
 if [ "$RVIZ" = "1" ]; then
     compose --profile rviz up -d --no-deps rviz || echo "Aviso: o RViz não arrancou."
+fi
+if [ "$FOXGLOVE" = "1" ]; then
+    compose --profile foxglove up -d --no-deps foxglove || echo "Aviso: o foxglove_bridge não arrancou."
+    echo "Foxglove: no Foxglove Studio, abrir ligação Foxglove WebSocket em ws://localhost:8765"
+    echo "  (layout dos painéis: docs/foxglove_layout.json)"
 fi
 
 # --abort-on-container-exit: ao terminar o processamento (tecla Q, fim do bag, Ctrl+C), pára os outros.
@@ -209,6 +217,9 @@ fi
 trap - INT
 if [ "$RVIZ" = "1" ]; then
     compose --profile rviz rm -sf rviz >/dev/null 2>&1 || true
+fi
+if [ "$FOXGLOVE" = "1" ]; then
+    compose --profile foxglove rm -sf foxglove >/dev/null 2>&1 || true
 fi
 
 echo

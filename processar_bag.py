@@ -15,8 +15,7 @@ import painel        # o mesmo desenho do ecrã no offline e no visualizador do 
 import leitura_bag   # leitura dos bags e correção da distorção (também usado pelo reproduzir_registo.py)
 import registo       # registo das deteções (mesmo formato do processamento em tempo real)
 import geometria     # posição das câmaras no carro (config/montagem_camaras.yaml) e imagem <-> chão
-import grelha_local  # grelha de ocupação local (a mesma do online), vista de cima ao lado do vídeo
-import aviso_faixa   # aviso de mudança de faixa (o mesmo do online), sobre a vista de cima
+import decisao       # grelha local e os três avisos (os mesmos do online), vista de cima ao lado do vídeo
 from teclado import TecladoTerminal
 
 # Classes do YOLO mostradas por omissão: só elementos de estrada (as mesmas do tempo real).
@@ -356,7 +355,7 @@ corrigir = com_calibracao
 # Usa a posição das câmaras no carro (config/montagem_camaras.yaml) e a calibração de cada câmara.
 # Serve para ver o que o planeador recebe e para afinar a montagem (as linhas da faixa projetadas
 # no chão devem sair paralelas ao carro).
-grelha, mostrar_grelha, linhas_chao, geos_cam = None, False, {}, {}
+grelha, mostrar_grelha, decisao_local, resultado = None, False, None, None
 if com_interface and not args.sem_grelha:
     montagem = geometria.carregar_montagem()
     cams_grelha = [c for c in camaras if montagem and c in montagem["camaras"] and calibracao.get(c) is not None]
@@ -365,9 +364,9 @@ if com_interface and not args.sem_grelha:
     elif not cams_grelha:
         print("Grelha local: desligada (nenhuma câmara com posição no montagem_camaras.yaml e calibração)")
     else:
-        grelha, mostrar_grelha = grelha_local.GrelhaLocal(montagem), True
-        p_aviso = aviso_faixa.parametros(montagem)
-        print(f"Grelha local (vista de cima, à direita): câmara{'s' if len(cams_grelha) > 1 else ''} "
+        decisao_local, mostrar_grelha = decisao.DecisaoLocal(montagem), True
+        grelha = decisao_local.grelha
+        print(f"Grelha local e avisos (vista de cima e coluna à direita): câmara{'s' if len(cams_grelha) > 1 else ''} "
               f"{registo.texto_camaras(cams_grelha)}, config/montagem_camaras.yaml  ·  [G] mostra / esconde")
 
 janela_nome = "Visualizador OpenCV - Leitura em Tempo Real"
@@ -614,6 +613,17 @@ for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
                 "registo": texto_registo if (cam == camaras[-1] or ecra_cam[camaras[-1]] is None
                                              or (bag_online and camaras[-1] not in ativas_online)) else None}
         ecra_cam[cam] = visual.compor(frame, caixas, info)
+        if decisao_local is not None:
+            # grelha local e avisos (decisao.py, os mesmos do online), a partir das deteções desta imagem
+            k = (geometria.matriz_intrinseca(calibracao[cam], width, height, bool(corrigida))
+                 if cam in grelha.montagem["camaras"] and calibracao.get(cam) is not None else None)
+            if k is not None:
+                resultado = decisao_local.atualizar(cam, k, width, height, msg.log_time_ns,
+                                                    mascara_estrada if ativo["estrada"] else None, caixas, linhas_frame)
+                painel.desenhar_alertas(ecra_cam[cam], resultado["colisao"]["objetos"], cam, msg.log_time_ns)
+            for c in camaras:
+                if bag_online and c not in ativas_online:      # desligada no online: sem camada
+                    decisao_local.remover(c)
         if bag_online:                    # câmara desligada no online (tecla D): não há vídeo dela aqui
             for c in camaras:
                 if c != cam and c not in ativas_online:
@@ -622,26 +632,12 @@ for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
                         w_, h_, f"Câmara {c}: desligada no online",
                         "tecla D no online: sem vídeo nem deteções desta câmara aqui")
         ecra = juntar(ecra_cam)
-        if grelha is not None:
-            # a camada desta câmara (a partir das mesmas deteções) e a grelha com as duas câmaras
-            k = (geometria.matriz_intrinseca(calibracao[cam], width, height, bool(corrigida))
-                 if cam in grelha.montagem["camaras"] and calibracao.get(cam) is not None else None)
-            if k is not None:
-                grelha.atualizar(cam, k, width, height, msg.log_time_ns, mascara_estrada if ativo["estrada"] else None,
-                                 caixas)
-                linhas_chao[cam] = grelha.linhas_no_chao(cam, k, linhas_frame)
-                geos_cam[cam] = grelha.geometria(cam, k)[0]
-            for c in camaras:
-                if bag_online and c not in ativas_online:      # desligada no online: sem camada
-                    grelha.remover(c)
-                    linhas_chao.pop(c, None)
-            if mostrar_grelha:
-                g_atual = grelha.combinada(msg.log_time_ns)
-                vista = painel.vista_de_cima(
-                    grelha, g_atual, ecra.shape[0], linhas_chao, geos_cam,
-                    aviso_faixa.avaliar(grelha, g_atual, grelha.veiculos(msg.log_time_ns), p_aviso), p_aviso,
-                    titulo="grelha local (vista de cima)")
-                ecra = visual.lado_a_lado([ecra, vista])
+        if decisao_local is not None and mostrar_grelha and resultado is not None:
+            r = resultado
+            vista = painel.vista_de_cima(grelha, r["grelha"], ecra.shape[0], r["linhas_chao"], r["geos"], r["faixa"],
+                                         decisao_local.p_faixa, "grelha local (vista de cima)", r["colisao"])
+            quadro = painel.quadro_avisos(ecra.shape[0], r["faixa"], r["saida"], r["colisao"], None)
+            ecra = visual.lado_a_lado([ecra, vista, quadro])
         if duas and not janela_ajustada:
             cv2.resizeWindow(janela_nome, ecra.shape[1], ecra.shape[0])
             janela_ajustada = True

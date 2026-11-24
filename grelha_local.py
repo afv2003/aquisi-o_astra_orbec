@@ -13,9 +13,10 @@ Como as câmaras enchem a grelha (geometria.py faz a passagem imagem <-> chão, 
   * O próprio carro (secção "carro" do yaml) fica livre: é onde o planeador começa.
   * Livre (0): chão visto que o YOLOP marca como área circulável.
   * Ocupado (100): chão visto que não é área circulável (passeio, berma, obstáculos) e a "pegada"
-    de cada veículo ou peão detetado pelo YOLO: a base da caixa projetada no chão, estendida para
-    trás, ao longo da linha de vista, com o comprimento típico do objeto. O chão escondido por trás
-    do objeto (o resto da sua caixa na imagem) fica desconhecido.
+    de cada veículo ou peão detetado pelo YOLO: a posição aproximada do objeto (o meio da base da caixa
+    projetado no chão, posicao_objeto) e, a partir daí, um retângulo alinhado com a estrada, com a
+    largura e o comprimento típicos do objeto. O chão
+    escondido por trás do objeto (o resto da sua caixa na imagem) fica desconhecido.
   * As linhas da faixa (CLRNet) não entram na grelha (uma linha pode ser atravessada numa mudança de
     faixa); são projetadas no chão à parte (linhas_no_chao), para a vista de cima e para validação.
 
@@ -27,6 +28,7 @@ import numpy as np
 import geometria
 
 OBJETOS_OCUPAM = {"car": 4.5, "truck": 8.0, "bus": 10.0, "motorcycle": 2.0, "bicycle": 1.8, "person": 0.6}
+LARGURA_OBJETO = {"car": 1.8, "truck": 2.5, "bus": 2.6, "motorcycle": 0.8, "bicycle": 0.7, "person": 0.6}
 DESCONHECIDO, LIVRE, OCUPADO = -1, 0, 100
 
 
@@ -92,7 +94,7 @@ class GrelhaLocal:
                 tapado |= dentro & (u >= x1) & (u <= x2) & (v >= y1) & (v <= y2)
         camada[tapado] = DESCONHECIDO
         veiculos = np.zeros((self.altura, self.largura), dtype=np.uint8)
-        for poligono in self.pegadas(geo, caixas):
+        for poligono in self.pegadas(geo, caixas, largura_img):
             ii, jj = self.celulas(poligono[:, 0], poligono[:, 1])
             pts = np.stack([jj, ii], axis=1).round().astype(np.int32)
             cv2.fillPoly(camada, [pts], OCUPADO)
@@ -101,21 +103,51 @@ class GrelhaLocal:
         self.camadas_veiculos[str(cam)] = (veiculos.astype(bool), int(stamp_ns))
         return camada
 
-    def pegadas(self, geo, caixas):
-        """Polígonos (x, y) no chão ocupados pelos objetos: base da caixa + comprimento para trás."""
+    def posicao_objeto(self, geo, caixa, classe, largura_img=None):
+        """
+        Posição aproximada de um objeto no chão: (x da frente, y do centro), ou None (base acima do
+        horizonte ou mais longe do que distancia_maxima). O meio da aresta de baixo da caixa é projetado
+        no chão; esse ponto fica na frente do objeto mas, visto de lado, perto da sua aresta interior (a
+        mais próxima da câmara): o centro fica meia largura para o lado de lá, tanto mais quanto mais de
+        lado é visto (seno do ângulo entre a linha de vista e o eixo do carro).
+        Uma caixa cortada pela borda esquerda ou direita da imagem não dá posição (só se vê parte do
+        objeto: o meio da caixa não é o do objeto).
+        """
+        x1, y1, x2, y2 = caixa[:4]
+        if largura_img is not None and (x1 <= 2 or x2 >= largura_img - 3):
+            return None
+        xs, ys, ok = geo.pixel_para_chao(np.array([(x1 + x2) / 2.0]), np.array([float(y2)]))
+        if not ok[0] or geo.distancia(xs, ys)[0] > self.dist_max:
+            return None
+        x0, y0 = float(xs[0]), float(ys[0])
+        dx, dy = x0 - geo.t[0], y0 - geo.t[1]
+        seno = abs(dy) / max(np.hypot(dx, dy), 1e-6)
+        larg = LARGURA_OBJETO.get(classe, 1.0)
+        return x0, y0 + np.sign(dy) * larg / 2 * seno
+
+    def pegadas(self, geo, caixas, largura_img=None):
+        """
+        Polígonos (x, y) no chão ocupados pelos objetos: a partir da posição aproximada (posicao_objeto),
+        um retângulo alinhado com a estrada (paralelo ao carro: os veículos andam na mesma direção), com a
+        largura típica da classe e o comprimento típico para o lado de lá (para longe da câmara, ao longo
+        de x). Usar só o meio da base da caixa, e não os cantos, evita que um veículo visto de lado (a
+        caixa inclui o comprimento dele) "transborde" para a faixa ao lado.
+        """
         res = []
-        for x1, y1, x2, y2, classe, _ in caixas:
+        for caixa in caixas:
+            classe = caixa[4]
             comp = OBJETOS_OCUPAM.get(classe)
             if comp is None:
                 continue
-            comp = self.comp_veiculo if classe == "car" else comp
-            xs, ys, ok = geo.pixel_para_chao(np.array([x1, x2], float), np.array([y2, y2], float))
-            if not ok.all() or geo.distancia(xs, ys).max() > self.dist_max:
+            pos = self.posicao_objeto(geo, caixa, classe, largura_img)
+            if pos is None:
                 continue                                   # base acima do horizonte ou muito longe
-            direcao = np.array([xs.mean() - geo.t[0], ys.mean() - geo.t[1]])
-            direcao /= max(np.linalg.norm(direcao), 1e-6)    # para longe da câmara, ao longo da linha de vista
-            a, b = np.array([xs[0], ys[0]]), np.array([xs[1], ys[1]])
-            res.append(np.array([a, b, b + comp * direcao, a + comp * direcao]))
+            comp = self.comp_veiculo if classe == "car" else comp
+            larg = LARGURA_OBJETO.get(classe, 1.0)
+            x0, yc = pos
+            x_fim = x0 + (-1.0 if x0 < geo.t[0] else 1.0) * comp   # para longe da câmara, ao longo de x
+            res.append(np.array([[x0, yc - larg / 2], [x0, yc + larg / 2], [x_fim, yc + larg / 2],
+                                 [x_fim, yc - larg / 2]]))
         return res
 
     def remover(self, cam):

@@ -184,10 +184,17 @@ class ResumoOnline(ctk.CTk):
             tot = sum(cont.values())
             return "  ·  ".join(f"{k.replace('_', ' ')} {v / tot:.0%}" for k, v in
                                 sorted(cont.items(), key=lambda kv: -kv[1])) if tot else "—"
-        avisos = dl.get("trechos" if filtro != "sessao" and dl.get("trechos") else "sessao") or {}
+        f_ = "trechos" if filtro != "sessao" and dl.get("trechos") else "sessao"
+        avisos = dl.get(f_) or {}
         for lado in ("esquerda", "direita"):
             if avisos.get(lado):
-                pares.append((f"Aviso ({lado[:3]}.)", percentagens(avisos[lado])))
+                pares.append((f"Mudança ({lado[:3]}.)", percentagens(avisos[lado])))
+        saida = (dl.get("saida") or {}).get(f_) or {}
+        for lado in ("esquerda", "direita"):
+            if saida.get(lado):
+                pares.append((f"Saída ({lado[:3]}.)", percentagens(saida[lado])))
+        if (dl.get("colisao") or {}).get(f_):
+            pares.append(("Colisão", percentagens(dl["colisao"][f_])))
         if dl.get("planeador"):
             pares.append(("A* (sessão)", percentagens(dl["planeador"])))
         if tempos.get("total"):

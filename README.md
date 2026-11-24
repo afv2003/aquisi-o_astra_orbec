@@ -5,7 +5,7 @@ Sistema para recolher e analisar o vídeo de duas câmaras Orbbec Astra (**5** e
 * **linhas da estrada** (CLRNet);
 * **área circulável** (YOLOP), a estrada por onde o veículo pode seguir.
 
-A partir delas, uma **grelha local** à volta do carro alimenta o planeador A\* comum da aula 10 e um **aviso de mudança de faixa** (secção 5.4).
+A partir delas, uma **grelha local** à volta do carro alimenta o planeador A\* comum da aula 10 e três **avisos**, como os de um retrovisor: mudança de faixa, saída de faixa e colisão (secção 5.4).
 
 Há **dois modos de trabalho**, com o mesmo código de deteção e o mesmo desenho do ecrã, ligados pelo bag `.mcap` gravado no veículo:
 * **Modo online** (secção 4, Docker em Linux): é a **aquisição**. No veículo, as câmaras, o processamento ao vivo e a gravação correm todos no Docker; a deteção corre sempre, e o vídeo (em JPEG) e as deteções são gravados nos **trechos** marcados durante a viagem. O processamento só processa e publica; o ecrã é outro nó (o visualizador), e há também o RViz. O mesmo Docker **reproduz um bag sem câmaras**, com o mesmo processamento.
@@ -19,7 +19,7 @@ Há **dois modos de trabalho**, com o mesmo código de deteção e o mesmo desen
 | [2](#2-preparação-calibração-das-câmaras) | Preparação: calibração das câmaras (correção da distorção da lente) | Windows (ou Linux), com Python |
 | [3](#3-modo-offline-processar-os-bags-gravados-em-qualquer-sistema) | **Modo offline**: bag gravado → processar → registar → reproduzir → janela de resultados | Windows, Linux ou macOS, com `venv` (sem Docker nem câmaras) |
 | [4](#4-modo-online-aquisição-e-processamento-no-veículo-docker) | **Modo online**: câmaras → processamento ao vivo → gravação dos trechos (JPEG) → resumo; visualizador e RViz; reprodução de um bag sem câmaras; hora certa (NTP) | Linux com Docker (CPU ou GPU NVIDIA) |
-| [5](#5-modelos-de-deteção-comuns-aos-dois-modos) | Modelos de deteção (comuns aos dois modos): linhas (CLRNet), objetos (YOLO) e estrada (YOLOP); decisão local: posição das câmaras, grelha local, aviso de mudança de faixa e planeador A\* | dentro do processamento |
+| [5](#5-modelos-de-deteção-comuns-aos-dois-modos) | Modelos de deteção (comuns aos dois modos): linhas (CLRNet), objetos (YOLO) e estrada (YOLOP); decisão local: posição das câmaras, grelha local, avisos de mudança de faixa, saída de faixa e colisão, planeador A\* | dentro do processamento |
 | [6](#6-referência-rápida-comandos-opções-teclas-e-pastas) | Referência rápida: todos os comandos, opções, teclas, variáveis e pastas | — |
 
 ---
@@ -92,7 +92,7 @@ O que **não** muda entre os dois modos (o mesmo código, os mesmos ficheiros):
 
 **Use o offline quando:**
 * precisar de **todas as imagens** processadas (o online, com as duas câmaras, só consegue processar uma parte, sobretudo em CPU);
-* quiser **afinar** a deteção: experimentar limiares, classes, com e sem correção da distorção (opções e teclas em 3.4), ou afinar a posição das câmaras com a vista de cima (5.4.6);
+* quiser **afinar** a deteção: experimentar limiares, classes, com e sem correção da distorção (opções e teclas em 3.4), ou afinar a posição das câmaras com a vista de cima (5.4.8);
 * quiser analisar **trechos**, **reproduzir** ou **exportar vídeos** com as deteções desenhadas (3.6 a 3.9);
 * quiser o **percurso no mapa**, com as cores do trânsito por intervalo (3.10.2);
 * estiver em **Windows** ou noutro PC sem Docker nem câmaras.
@@ -123,6 +123,8 @@ O offline serve para desenvolver e validar a deteção (todas as imagens, parâm
 | `gravacao_online.py` | gravação do bag do online, só nos trechos, com as imagens em JPEG (4.9) | online |
 | `relogio.py` | verificação da hora do PC (NTP) no arranque (4.12) | online |
 | `config/g05.rviz` | configuração do RViz: câmaras, TF, grelha local e caminho do A\* (4.13) | online |
+| `docs/foxglove_layout.json` | layout dos painéis do Foxglove Studio (4.13) | ambos |
+| `tools/figura_bag.py` | figuras, GIF e métricas para o relatório, a partir de um bag do online (4.13) | relatório |
 | `trecho.sh` | começar/terminar um trecho sem janela (4.7) | online |
 | `alternar_camara.sh` | desligar/ligar a câmara da direita sem janela (4.7) | online |
 | `resumo_online.py` | janela do resumo no fim do online (4.8) | online |
@@ -131,9 +133,12 @@ O offline serve para desenvolver e validar a deteção (todas as imagens, parâm
 | `config/montagem_camaras.yaml` | posição e orientação de cada câmara no carro, e limites da grelha local (5.4.2) | ambos |
 | `geometria.py` | passagem imagem ↔ chão e TF das câmaras (5.4) | ambos |
 | `grelha_local.py` | grelha de ocupação local (`nav_msgs/OccupancyGrid`) e vista de cima (5.4) | ambos |
-| `aviso_faixa.py` | aviso de mudança de faixa, a partir da grelha (5.4.3) | ambos |
-| `src/va_planeamento/` | planeador A\* comum da aula 10, copiado sem alterações (5.4.4) | online |
-| `config/planeador.yaml` | parâmetros do planeador A\* (5.4.4) | online |
+| `decisao.py` | grelha local e os três avisos a partir das deteções de cada imagem (o mesmo no online e no offline) (5.4) | ambos |
+| `aviso_faixa.py` | faixas (pelas linhas ou pelo centro) e aviso de mudança de faixa (5.4.3) | ambos |
+| `aviso_saida_faixa.py` | aviso de saída de faixa (5.4.4) | ambos |
+| `aviso_colisao.py`, `seguimento.py` | aviso de colisão; seguimento dos objetos e tempo até contacto (5.4.5) | ambos |
+| `src/va_planeamento/` | planeador A\* comum da aula 10, copiado sem alterações (5.4.6) | online |
+| `config/planeador.yaml` | parâmetros do planeador A\* (5.4.6) | online |
 | `modelos/` | `objetos.onnx`, `linhas.onnx` + `linhas.json`, `estrada.onnx` (secção 5) | ambos |
 | `painel.py` | o desenho do ecrã, comum ao visualizador do online, ao `processar_bag.py` e à reprodução dos registos | ambos |
 | `visual.py` | desenho das deteções, painel e câmaras lado a lado | ambos |
@@ -358,7 +363,7 @@ pip install -r requirements.txt
 **Informação no vídeo:**
 * **Painel** (canto superior esquerdo de cada câmara): tempo decorrido e total, com barra de progresso; câmara e estado da correção (a laranja quando a imagem não está corrigida); uma linha por modelo, identificado pelo nome (`YOLOv8n`, `CLRNet`, `YOLOP`) e por um marcador da sua cor, com o resultado (número de objetos, número de linhas, percentagem da imagem que é área circulável) e o tempo da etapa; no fim, as imagens processadas por segundo e o ritmo da gravação.
 * **Indicador de registo** (canto superior direito, a vermelho): `REGISTO · trecho N · tempo`, enquanto um trecho está a ser registado.
-* **Grelha local** (à direita do vídeo, com o `config/montagem_camaras.yaml`): a vista de cima à volta do carro, com o que as câmaras veem livre, ocupado ou desconhecido e as linhas da faixa projetadas no chão; é a mesma grelha que o online publica para o planeador (5.4). Serve também para afinar a posição das câmaras (5.4.6). **G** mostra/esconde; `--sem-grelha` desliga (o terminal diz `Grelha local (vista de cima, à direita): câmaras 5 e 8, ...`).
+* **Grelha local e avisos** (à direita do vídeo, com o `config/montagem_camaras.yaml`): a vista de cima à volta do carro, com o que as câmaras veem livre, ocupado ou desconhecido, as linhas da faixa projetadas no chão, a faixa ao lado de cada lado (na cor do aviso de mudança de faixa) e os objetos seguidos; é a mesma grelha que o online publica para o planeador (5.4). Ao lado, a coluna **Avisos**: mudança de faixa, saída de faixa e colisão (5.4.3 a 5.4.5); nas câmaras, os objetos com aviso de colisão ficam destacados. Serve também para afinar a posição das câmaras (5.4.8). **G** mostra/esconde; `--sem-grelha` desliga (o terminal diz `Grelha local e avisos (vista de cima e coluna à direita): câmaras 5 e 8, ...`).
 * **Cores fixas**, as mesmas em todas as imagens e nos dois modos (definidas no `visual.py`):
 
   | Modelo (nome no painel) | Deteta | Desenho | Cor |
@@ -582,7 +587,7 @@ As gamas estão em `GAMAS_VEICULOS`, no `registo.py`, e as cores em `CORES_GAMAS
 * **Num PC fraco**, `--sem-processamento` deixa só as câmaras e a gravação dos trechos (sem os modelos), e o processamento faz-se depois, no offline (4.6).
 
 ### 4.2 Ficheiros, serviços e tópicos
-* `Dockerfile_realtime_inter`: imagem Docker com ROS 2 Jazzy, o driver `usb_cam`, o `compressed_image_transport` (o driver publica também a imagem em JPEG), o `rviz2`, as bibliotecas do sistema para o OpenCV e para a janela do resumo (`python3-tk`) e um ambiente Python (`/opt/venv`) instalado a partir do `requirements.txt` (sem `ultralytics` nem PyTorch; o `tkintermapview`, só do mapa do offline, também não é instalado). Recebe o argumento `ONNX_PKG` (por omissão `onnxruntime`, em CPU) para instalar apenas a versão certa para o computador (CPU ou GPU).
+* `Dockerfile_realtime_inter`: imagem Docker com ROS 2 Jazzy, o driver `usb_cam`, o `compressed_image_transport` (o driver publica também a imagem em JPEG), o `rviz2`, o `foxglove_bridge`, as bibliotecas do sistema para o OpenCV e para a janela do resumo (`python3-tk`) e um ambiente Python (`/opt/venv`) instalado a partir do `requirements.txt` (sem `ultralytics` nem PyTorch; o `tkintermapview`, só do mapa do offline, também não é instalado). Recebe o argumento `ONNX_PKG` (por omissão `onnxruntime`, em CPU) para instalar apenas a versão certa para o computador (CPU ou GPU).
 * `compose_realtime_inter.yaml`: os serviços (nós ROS), todos na mesma rede (`network_mode: host`), com a pasta do projeto montada em `/workspace` (editar um `.py` não obriga a reconstruir a imagem):
 
   | Serviço | O que faz | Quando arranca |
@@ -590,20 +595,21 @@ As gamas estão em `GAMAS_VEICULOS`, no `registo.py`, e as cores em `CORES_GAMAS
   | `driver_camara5`, `driver_camara8` | drivers `usb_cam`: publicam `/camara<N>/image_raw` e `/camara<N>/image_raw/compressed` | ao vivo |
   | `reprodutor` | publica as imagens de um bag nos mesmos tópicos dos drivers (`reprodutor.py`, perfil `reproduzir`) | em reprodução (`--bag`) |
   | `processador` | o `processar_tempo_real.py`: deteções, grelha, aviso, TF e, ao vivo, a gravação dos trechos | sempre |
-  | `planeador` | o planeador A\* comum da aula 10 (`src/va_planeamento`, sem alterações), 5.4.4 | sempre (exceto `--sem-processamento`) |
+  | `planeador` | o planeador A\* comum da aula 10 (`src/va_planeamento`, sem alterações), 5.4.6 | sempre (exceto `--sem-processamento`) |
   | `visualizador` | a janela (`visualizador.py`) e, no fim, o resumo | sempre (exceto `-i`) |
   | `rviz` | o RViz com o `config/g05.rviz` (perfil `rviz`) | com `--rviz` |
+  | `foxglove` | o `foxglove_bridge` (perfil `foxglove`): os tópicos para o Foxglove Studio, em `ws://localhost:8765` | com `--foxglove` |
 
 * `compose_realtime_gpu.yaml`: ficheiro complementar que dá acesso da placa gráfica NVIDIA ao contentor `processador`. **Não precisa de o editar**: é carregado automaticamente pelo `processar_inter.sh` quando o PC tem GPU NVIDIA pronta para Docker.
 * `processar_inter.sh`: o script que deve usar sempre para arrancar. Ao vivo, associa as câmaras (5 e/ou 8) aos `/dev/video` e verifica a hora do PC (4.12); em reprodução, lê as câmaras e os trechos do bag. **Deteta sozinho se deve usar GPU NVIDIA ou CPU** (ficheiros do Docker a usar), lança os serviços e, no fim, abre a janela do resumo. **Não constrói a imagem**: isso faz-se antes, uma vez (4.6, passo 1). Corre na pasta do terminal: lance-o sempre a partir da pasta do projeto.
 * `processar_tempo_real.py` (serviço `processador`): nó ROS 2 que recebe todas as imagens das câmaras, corrige a distorção, corre os três modelos (na imagem mais recente de cada câmara) e publica:
   * `/camara<N>/processamento/dados_deteccoes` (`std_msgs/String`, o JSON das deteções, com os contornos da estrada);
   * `/processamento/painel` (o que o painel da janela mostra: tempos dos modelos, deteções por segundo, correção, indicador de gravação) e `/processamento/estado_camaras` (que câmaras estão a ser processadas; muda com a tecla **D**);
-  * `/g05/grelha_local` (`nav_msgs/OccupancyGrid`, a grelha local para o planeador, 5.4), `/g05/aviso_faixa` (aviso de mudança de faixa, 5.4.3) e, no arranque, `/tf_static` (posição das câmaras no carro: `base_link` → `camara<N>_link` → `camara<N>`), a partir do `config/montagem_camaras.yaml`.
+  * `/g05/grelha_local` (`nav_msgs/OccupancyGrid`, a grelha local para o planeador, 5.4), os três avisos `/g05/aviso_faixa`, `/g05/aviso_saida_faixa` e `/g05/aviso_colisao` (5.4.3 a 5.4.5, calculados com o `decisao.py`, o mesmo do offline) e, no arranque, `/tf_static` (posição das câmaras no carro: `base_link` → `camara<N>_link` → `camara<N>`), a partir do `config/montagem_camaras.yaml`.
 
   Recebe os comandos em `/processamento/comando` (`trecho`, `alternar_direita`, `terminar`). Ao vivo, passa a imagem comprimida de cada câmara e cada deteção ao `gravacao_online.py` (só nos trechos); no fim fecha o bag e grava o `resumo_online.json` na pasta da sessão.
-* `visualizador.py` (serviço `visualizador`): nó ROS 2 que **não processa nada**: subscreve as imagens, as deteções, o painel, a grelha, o aviso e o estado do planeador, junta cada deteção à sua imagem (pelo instante, `header.stamp`), corrige a imagem com a mesma calibração e desenha com o `painel.py` (o mesmo desenho do `processar_bag.py`). As teclas da janela publicam os comandos em `/processamento/comando`. Se alguém o subscrever (RViz, Foxglove), publica também `/camara<N>/processamento/imagem_anotada`.
-* `gravacao_online.py`: grava o bag, **só nos trechos**: as imagens em JPEG tal como o driver as publica (`sensor_msgs/CompressedImage`, sem voltar a codificar; se o driver não as publicar, comprime-as aqui, com a mesma qualidade), as deteções, a grelha, o aviso, as saídas do planeador, o `/tf_static`, o estado das câmaras e o início e o fim de cada trecho, num `.mcap` igual ao do `ros2 bag record` (os mesmos tópicos e tipos). Escreve no disco numa thread à parte, para não atrasar a deteção.
+* `visualizador.py` (serviço `visualizador`): nó ROS 2 que **não processa nada**: subscreve as imagens, as deteções, o painel, a grelha, os três avisos e o estado do planeador, junta cada deteção à sua imagem (pelo instante, `header.stamp`), corrige a imagem com a mesma calibração e desenha com o `painel.py` (o mesmo desenho do `processar_bag.py`). As teclas da janela publicam os comandos em `/processamento/comando`. Se alguém o subscrever (RViz, Foxglove), publica também `/camara<N>/processamento/imagem_anotada`.
+* `gravacao_online.py`: grava o bag, **só nos trechos**: as imagens em JPEG tal como o driver as publica (`sensor_msgs/CompressedImage`, sem voltar a codificar; se o driver não as publicar, comprime-as aqui, com a mesma qualidade), as deteções, a grelha, os três avisos, as saídas do planeador, o `/tf_static`, o estado das câmaras e o início e o fim de cada trecho, num `.mcap` igual ao do `ros2 bag record` (os mesmos tópicos e tipos). Escreve no disco numa thread à parte, para não atrasar a deteção.
 * `reprodutor.py` (serviço `reprodutor`): reprodução de um bag (4.11).
 * `relogio.py`: verificação da hora do PC no arranque (4.12).
 * `resumo_online.py`: janela do resumo, aberta pelo `processar_inter.sh` no fim (usa o `gui_comum.py`, o mesmo da tab Resumo do offline).
@@ -709,7 +715,7 @@ A deteção começa assim que chegam as primeiras imagens; a gravação, só no 
 **Só gravação (`--sem-processamento`):** sem os modelos, nem a grelha, nem o planeador; ficam as câmaras, os trechos (tecla **R**) e a gravação (o mesmo bag, com o vídeo em JPEG, sem deteções). A janela mostra as imagens das câmaras, sem desenhos. Serve para um PC que não aguenta o processamento: os trechos são processados depois, no offline (4.10).
 
 ### 4.7 Durante a viagem: a janela do visualizador, os trechos e a câmara da direita
-* **Janela (`Online - G5`):** as câmaras **lado a lado, a 5 à esquerda e a 8 à direita** (qualquer que seja a ordem dos `/dev/video`), com a estrada, as linhas e os objetos desenhados, com as cores e o painel do offline (3.4), e, à direita, a **grelha local** (vista de cima, a que é publicada para o planeador, com o aviso de cada lado e o estado do A\*, 5.4). Pode ser redimensionada com o rato. É desenhada pelo visualizador a partir dos tópicos do processador (4.2): cada câmara mostra a última imagem processada, com as suas deteções.
+* **Janela (`Online - G5`):** as câmaras **lado a lado, a 5 à esquerda e a 8 à direita** (qualquer que seja a ordem dos `/dev/video`), com a estrada, as linhas e os objetos desenhados, com as cores e o painel do offline (3.4), e, à direita, a **grelha local** (vista de cima, a que é publicada para o planeador, com a faixa ao lado de cada lado na cor do aviso, os objetos seguidos e o estado do A\*, 5.4) e a coluna **Avisos** (mudança de faixa e saída de faixa de cada lado, colisão e planeador, 5.4.3 a 5.4.6). Nas câmaras, os objetos com aviso de colisão ficam com a caixa grossa na cor do nível e o tempo até contacto (`TTC 1.2 s`). Pode ser redimensionada com o rato. É desenhada pelo visualizador a partir dos tópicos do processador (4.2): cada câmara mostra a última imagem processada, com as suas deteções.
 * **Painel de cada câmara:** tempo desde o arranque, câmara, modo (`tempo real`, `reprodução`) e estado da correção (`corrigida`; a laranja `sem correção` ou `sem calibração`), resultado e tempo médio (ms) de cada modelo e **deteções por segundo** dessa câmara.
 * **Frequência de deteção:** os modelos processam uma câmara de cada vez, sempre a imagem mais recente. Com as duas câmaras, cada uma é processada metade das vezes. Em CPU, isso significa menos de uma deteção por segundo em cada câmara; com GPU, várias por segundo (o painel e o resumo mostram o valor real). Nos trechos, as imagens que não são processadas ficam gravadas na mesma (o vídeo do trecho fica completo).
 * **Sem janela (`-i`):** o visualizador não arranca (fica mais leve); o processamento, os tópicos ROS, os trechos e a gravação funcionam igual. O RViz (`--rviz`) pode na mesma ser usado.
@@ -771,7 +777,9 @@ O bag só existe se houver pelo menos um trecho com imagens. Começa no arranque
   | `/g05/grelha_local` | a grelha local (`nav_msgs/OccupancyGrid`, 5.4), uma por imagem processada, só nos trechos |
   | `/tf_static` | posição das câmaras no carro (`tf2_msgs/TFMessage`), uma vez no início da sessão |
   | `/g05/aviso_faixa` | aviso de mudança de faixa (JSON, 5.4.3), um por imagem processada, só nos trechos |
-  | `/g05/estado`, `/g05/caminho_local`, `/g05/zona_proibida` | saídas do planeador A\* (5.4.4), só nos trechos |
+  | `/g05/aviso_saida_faixa` | aviso de saída de faixa (JSON, 5.4.4), um por imagem processada, só nos trechos |
+  | `/g05/aviso_colisao` | aviso de colisão (JSON, 5.4.5), um por imagem processada, só nos trechos |
+  | `/g05/estado`, `/g05/caminho_local`, `/g05/zona_proibida` | saídas do planeador A\* (5.4.6), só nos trechos |
 
   **Espaço:** as imagens em JPEG ocupam cerca de 4 a 8 vezes menos do que sem compressão (que eram cerca de 1 GB por minuto por câmara); conte com **0,3 a 0,6 GB por minuto de trecho** com as duas câmaras (depende da cena). Se o disco não acompanhar (ou encher), a gravação avisa e a deteção continua.
 * **As imagens em JPEG** são as que o driver publica (`compressed_image_transport`), gravadas tal como chegam, sem voltar a codificar. Se o driver não as publicar (por exemplo, sem o plugin), o processamento comprime-as ele próprio, com a mesma qualidade; o resumo diz quantas (`comprimidas pelo processamento`).
@@ -867,8 +875,17 @@ O enunciado: "A gravação é feita com o relógio do portátil. (...) o portát
 ### 4.13 RViz e outras formas de ver os dados
 * **RViz (dentro do Docker):** `bash processar_inter.sh 5 8 --rviz` (ou com `--bag`) abre também o RViz com o `config/g05.rviz`: as imagens das duas câmaras (`/camara<N>/image_raw`, para confirmar a taxa e o `frame_id`, como pede o passo 3 do enunciado), o **TF** das câmaras (`base_link` → `camara<N>_link` → `camara<N>`), a **grelha local** (`/g05/grelha_local`) e o **caminho do A\*** (`/g05/caminho_local`), vistos de cima no `base_link`. Fechar o RViz não termina a sessão. Para ver as imagens com os desenhos, troque o tópico de uma imagem para `/camara<N>/processamento/imagem_anotada` (o visualizador publica-o quando alguém o subscreve).
 * **Confirmar que as câmaras não estão trocadas:** tape a lente da câmara 5 e veja que a imagem que fica preta é a do `/camara5/image_raw` (no RViz ou na janela do visualizador, à esquerda). Se não for, termine e lance com a ordem contrária (`bash processar_inter.sh 8 5`).
-* **Foxglove Studio** (recomendado pelo enunciado para ver os dados gravados, em qualquer sistema e sem ROS): abre o `.mcap` do online diretamente, com as imagens em JPEG, a grelha, o TF e os outros tópicos. Ao vivo também funciona com o `foxglove_bridge` (ainda não está no Docker).
+* **Foxglove Studio** (recomendado pelo enunciado para ver os dados gravados, em qualquer sistema e sem ROS):
+  * **bag gravado:** abra o `.mcap` do online diretamente (imagens em JPEG, grelha, TF, avisos e os outros tópicos);
+  * **ao vivo:** `bash processar_inter.sh 5 8 --foxglove` (ou com `--bag`) lança também o `foxglove_bridge`; no Foxglove, *Abrir ligação* → *Foxglove WebSocket* → `ws://localhost:8765` (noutro PC da mesma rede, o IP deste em vez de `localhost`);
+  * **layout dos painéis:** `docs/foxglove_layout.json` (no Foxglove, *Layouts* → *Importar*): as duas câmaras, a vista de cima no `base_link` (grelha, caminho do A\*, TF) e os três avisos e o estado do planeador em texto. Se um painel aparecer vazio (o formato dos layouts muda entre versões do Foxglove), escolha o tópico no próprio painel e guarde o layout de novo.
 * **A partir de outro PC na mesma rede** (Linux, com ROS 2 Jazzy ou com este Docker): com o mesmo `ROS_DOMAIN_ID`, os tópicos do online aparecem sozinhos (`ros2 topic list`), como pede a arquitetura da parte 2.
+* **Figuras, GIF e métricas para o relatório e a apresentação** (`tools/figura_bag.py`, sem ROS, no `venv` do offline com `pip install matplotlib`; antes: um bag do online, copiado como em 3.2):
+  ```bash
+  python tools/figura_bag.py data/realtime_<data_hora>                                # figuras em docs/img/
+  python tools/figura_bag.py data/realtime_<data_hora> --gif docs/img/demo.gif         # e um GIF
+  ```
+  Gera `docs/img/<bag>_avisos.png` (o estado de cada aviso ao longo do tempo, com os trechos), `docs/img/<bag>_instantes.png` (o ecrã do online nos instantes com os avisos mais graves, refeito do bag com o `painel.py`) e, com `--gif`, o ecrã animado; escreve no terminal uma tabela de métricas em Markdown (mensagens por segundo de cada tópico nos trechos e percentagem do tempo em cada estado de cada aviso), para colar no README ou no relatório. É a adaptação do `tools/figura_bag.py` do modelo da aula 10. Opções: `--instantes N` (3), `--saida <pasta>` (`docs/img`), `--largura-gif` (960), `--fps-gif` (4).
 
 ### 4.14 Problemas comuns
 * **`cannot open display` ou erro de janela gráfica:** falta o `xhost +local:root` (4.5); ou use `-i` se não precisar de janelas.
@@ -884,6 +901,8 @@ O enunciado: "A gravação é feita com o relógio do portátil. (...) o portát
 * **O resumo diz `comprimidas pelo processamento`:** o driver não publicou `/camara<N>/image_raw/compressed` (falta o `ros-jazzy-compressed-image-transport` na imagem: reconstrua-a); a gravação funcionou na mesma, mas gasta mais CPU no processamento.
 * **`Aviso: a gravação falhou`:** o disco encheu ou não acompanhou; a deteção continua, mas o resto do trecho não fica gravado. Liberte espaço.
 * **Aviso do relógio (`NÃO sincronizado`):** 4.12.
+* **O aviso de colisão quase nunca dá AVISO/PERIGO, ou dá tarde:** em CPU há poucas imagens por segundo de cada câmara para o tempo até contacto (5.4.5); use a GPU, ou veja-o no offline, que processa todas as imagens.
+* **A saída de faixa dá sempre `SEM LINHA`:** as linhas laterais não estão a ser detetadas (o CLRNet foi treinado com câmaras viradas para a frente) ou a montagem está errada (as linhas projetadas não saem paralelas ao carro: 5.4.8).
 * **Uma câmara não arranca com `No space left on device`:** falta de largura de banda USB; ligue as câmaras em portas de lados diferentes (4.4).
 * **Poucas deteções por segundo:** use a GPU (4.3), desligue a câmara da direita num trecho (**D**) ou corra sem janela (`-i`). Num PC que não aguenta, grave com `--sem-processamento` e processe no offline.
 
@@ -1105,20 +1124,33 @@ python processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # sem a estr
 * As bordas da área são aproximadas (alguns píxeis), e a máscara pode "falhar" em sombras fortes ou em pisos muito diferentes do habitual (empedrado, terra).
 * O modelo é usado tal como vem pré-treinado: não foi treinado nem afinado com imagens das câmaras Astra.
 
-### 5.4 Decisão local (aula 10): posição das câmaras, grelha local, planeador e aviso de mudança de faixa
+### 5.4 Decisão local (aula 10): posição das câmaras, grelha local, planeador e avisos
 
-Os três modelos dizem **o que** está na imagem; para o carro decidir (parte 2: seguir um veículo, ultrapassar, mudar de faixa, estacionar), é preciso saber **onde** isso está à volta do carro. Por isso, todos os grupos publicam o mesmo resultado comum, a **grelha de ocupação local**, que um **planeador A\*** comum a todos usa para decidir. As câmaras do G5 (laterais, viradas para trás, projeto 3) servem para decidir se **a mudança de faixa para a esquerda ou para a direita é segura**; isso é o **aviso de mudança de faixa**, calculado a partir da mesma grelha. É a primeira ligação à parte 2; o aviso de saída de faixa (*Lane Departure Warning*, com as linhas) e o aviso de colisão (*Collision Warning*, com os veículos e peões) podem seguir o mesmo caminho.
+Os três modelos dizem **o que** está na imagem; para o carro decidir (parte 2: seguir um veículo, ultrapassar, mudar de faixa, manter a distância a um veículo que segue atrás), é preciso saber **onde** isso está à volta do carro e **se se aproxima**. Por isso, todos os grupos publicam o mesmo resultado comum, a **grelha de ocupação local**, que um **planeador A\*** comum a todos usa para decidir.
+
+As câmaras do G5 (laterais, viradas para trás, projeto 3) fazem o papel dos **retrovisores** (o carro mantém os seus, mas a ideia é um carro autónomo, que não os pode usar). Com elas, o sistema dá **três avisos**, calculados pelo mesmo código no online e no offline (`decisao.py`):
+
+| Aviso | Pergunta | Com que informação | Módulo |
+|---|---|---|---|
+| **Mudança de faixa** | posso mudar para a esquerda / direita? | a grelha (veículos na faixa ao lado, do ângulo morto até 20 m atrás) e os veículos dessa faixa que se aproximam (tempo até contacto) | `aviso_faixa.py` (5.4.3) |
+| **Saída de faixa** (*Lane Departure Warning*) | o carro está a sair da sua faixa? | as linhas da própria faixa, projetadas no chão | `aviso_saida_faixa.py` (5.4.4) |
+| **Colisão** (*Collision Warning*) | algum veículo ou peão vai embater no carro? | o tempo até contacto de cada objeto (crescimento da caixa na imagem) e a faixa onde está | `aviso_colisao.py` (5.4.5) |
 
 ```
- imagem (5 | 8) ──▶ YOLOP, YOLO, CLRNet ──▶ projeção no chão (geometria.py) ──▶ grelha local (grelha_local.py)
-                                              ▲ posição da câmara no carro            │ /g05/grelha_local
-                                              │ config/montagem_camaras.yaml          │ (nav_msgs/OccupancyGrid)
-                                              └── /tf_static                          ├──▶ aviso de mudança de faixa (aviso_faixa.py)
-                                                                                      │     /g05/aviso_faixa: esquerda e direita
-                                                                                      │     LIVRE / OCUPADA / SEM_FAIXA / SEM_INFORMACAO
-                                                                                      └──▶ planeador A* comum (src/va_planeamento)
-                                                                                            /g05/estado, /g05/caminho_local, /g05/zona_proibida
+ imagem (5 | 8) ──▶ YOLOP, YOLO, CLRNet ──▶ projeção no chão (geometria.py, chão plano) ──▶ grelha local (grelha_local.py)
+                     │                         ▲ posição da câmara no carro                 │ /g05/grelha_local ──▶ planeador A*
+                     │                         │ config/montagem_camaras.yaml                │                       (src/va_planeamento)
+                     │                         └── /tf_static                                ▼
+                     │                     linhas da faixa ──▶ faixas (pelas linhas, ou pelo centro) ──┬─▶ mudança de faixa  /g05/aviso_faixa
+                     └── caixas do YOLO ──▶ seguimento entre imagens + tempo até contacto (seguimento.py) ├─▶ saída de faixa    /g05/aviso_saida_faixa
+                                                                                                      └─▶ colisão           /g05/aviso_colisao
 ```
+
+**Distâncias e velocidades.** A câmara não mede distâncias nem velocidades. Os avisos usam:
+* **posições aproximadas no chão**, pela geometria (calibração + posição da câmara + chão plano, 5.4.1), só para saber **em que faixa** está cada coisa e se está junto ao carro; os metros que aparecem (`a 10 m atrás`, `0,4 m da linha`) são **aproximados** (o erro cresce com a distância: ~0,1 m a 10 m, ~0,6 m a 25 m, por cada píxel de erro);
+* o **tempo até contacto** (TTC, *time to contact*), tirado do ritmo a que a caixa do objeto cresce na imagem, **sem** distância nem velocidade (5.4.5).
+
+Com outros sensores (LiDAR, radar, GNSS + odometria, o CAN do carro), estes avisos melhoram: distância e velocidade medidas, a velocidade do próprio carro e o estado do pisca (5.4.9).
 
 #### 5.4.1 O que é a grelha local (e o que muda com câmaras)
 * É uma **vista de cima** à volta do carro, dividida em quadrados de **0,2 m**, no referencial do carro (`base_link`: x para a frente, y para a esquerda, origem no chão, ao centro do eixo traseiro). Cada quadrado vale **-1** (desconhecido), **0** (livre) ou **100** (ocupado). É o formato comum da aula 10, igual para todos os sensores, por isso o planeador é o mesmo para todos.
@@ -1128,7 +1160,7 @@ Os três modelos dizem **o que** está na imagem; para o carro decidir (parte 2:
   | Valor | De onde vem |
   |---|---|
   | **0 livre** | chão visto que o **YOLOP** marca como área circulável (cada quadrado da grelha é projetado na imagem e lê-se a máscara nesse píxel) |
-  | **100 ocupado** | chão visto que **não** é área circulável (passeio, berma, obstáculos) e a "pegada" de cada **veículo ou peão** do YOLO: a base da caixa projetada no chão, estendida para trás com o comprimento típico (carro 4,5 m, camião 8 m, autocarro 10 m, mota 2 m, bicicleta 1,8 m, peão 0,6 m) |
+  | **100 ocupado** | chão visto que **não** é área circulável (passeio, berma, obstáculos) e a "pegada" de cada **veículo ou peão** do YOLO: o meio da base da caixa projetado no chão (a frente do objeto; visto de lado, corrigido meia largura para o lado de lá) e, a partir daí, um retângulo **alinhado com a estrada**, com a largura e o comprimento típicos (carro 1,8 x 4,5 m, camião 2,5 x 8 m, autocarro 2,6 x 10 m, mota 0,8 x 2 m, bicicleta 0,7 x 1,8 m, peão 0,6 x 0,6 m). Uma caixa cortada pela borda esquerda ou direita da imagem não dá posição (só se vê parte do objeto) |
   | **-1 desconhecido** | o que nenhuma câmara vê: fora do campo de visão, acima do horizonte, mais longe do que `distancia_maxima` (25 m) ou mais perto do que `distancia_minima` (2,5 m, onde a câmara vê o próprio carro), o chão escondido atrás de um veículo, e a parte de uma câmara desligada (tecla **D**) ou sem imagem há mais de 1 s |
 
   O contorno do próprio carro fica livre (é onde o planeador começa). As **linhas da faixa** (CLRNet) **não** entram na grelha, porque numa mudança de faixa a linha é atravessada; são projetadas no chão à parte e aparecem na vista de cima (amarelo), para validar a montagem. Com as duas câmaras, a grelha junta as duas camadas (ocupado ganha a livre, livre ganha a desconhecido).
@@ -1156,55 +1188,107 @@ base_link ──▶ camara5_link ──▶ camara5      (camara<N>_link: x ao lo
 ```
 Confirma-se no Docker com `ros2 run tf2_ros tf2_echo base_link camara5`.
 
-#### 5.4.3 Aviso de mudança de faixa (`aviso_faixa.py`)
-**Porque não é o planeador a decidir.** O planeador A\* da aula procura um caminho do carro até um objetivo **à frente** (por omissão 25 m; para mudar de faixa, a ±3,5 m para o lado). As câmaras do G5 olham **para trás**: a zona à frente do carro, onde o A\* procura o caminho, fica desconhecida, e um veículo atrás, na faixa ao lado, nunca está no caminho. Testado numa cena sintética com estas câmaras (faixa livre, carro 10 m atrás na faixa da esquerda, carro no ângulo morto): o estado do planeador foi **o mesmo nos três casos**. A pergunta que estas câmaras respondem é a dos sistemas de **ângulo morto** dos carros: há algum veículo na faixa ao lado, junto ao carro ou a aproximar-se por trás?
+#### 5.4.3 Faixas e aviso de mudança de faixa (`aviso_faixa.py`)
+**Porque não é o planeador a decidir.** O planeador A\* da aula procura um caminho do carro até um objetivo **à frente** (por omissão 25 m; para mudar de faixa, a ±3,5 m para o lado). As câmaras do G5 olham **para trás**: a zona à frente do carro, onde o A\* procura o caminho, fica desconhecida, e um veículo atrás, na faixa ao lado, nunca está no caminho. Testado numa cena sintética com estas câmaras (faixa livre, carro 10 m atrás na faixa da esquerda, carro no ângulo morto): o estado do planeador foi **o mesmo nos três casos**. A pergunta que estas câmaras respondem é a de um retrovisor (e dos assistentes de ângulo morto e de mudança de faixa dos carros): há algum veículo na faixa ao lado, junto ao carro, ou a aproximar-se por trás?
 
-**Como funciona.** Para cada lado, olha-se para uma zona da grelha: a **faixa ao lado** (y de 1,75 a 5,25 m à esquerda, e o simétrico à direita, supondo o carro no centro da sua faixa de 3,5 m), **do ângulo morto até 20 m para trás** (x de -20 a 2 m). Em cada imagem processada, cada lado fica num de quatro estados:
+**Onde está a faixa ao lado: duas formas** (`modo_faixa` no `config/montagem_camaras.yaml`):
 
-| Estado | Quando | Significado para a mudança de faixa |
+| `modo_faixa` | Como | Quando serve |
 |---|---|---|
-| **LIVRE** | a zona é bem vista (mais de metade, e parte do ângulo morto), é circulável e não tem veículos | pode mudar |
-| **OCUPADA** | há um veículo ou peão (pegada do YOLO) na zona; diz a que distância está o mais próximo (ex. `OCUPADA (a 10 m atrás)`) ou `no ângulo morto` (a menos de 6 m atrás) | **não** mudar |
-| **SEM_FAIXA** | a zona vista é sobretudo não circulável (mais de 60%: passeio, berma) | não há faixa desse lado |
-| **SEM_INFORMACAO** | as câmaras veem pouco da zona ou do ângulo morto (câmara desligada com **D**, sem imagem recente, ou fora do campo de visão) | não se sabe: **não** mudar |
+| `centro` | supõe o carro **no centro** da sua faixa e faixas de `largura_faixa` (3,5 m): a faixa ao lado vai de 1,75 a 5,25 m para o lado, paralela ao carro | sempre (não precisa de linhas), mas erra se o carro estiver fora do centro ou as faixas tiverem outra largura: um carro duas faixas ao lado pode contar como estando na faixa ao lado, e um na faixa ao lado pode ficar de fora |
+| `linhas` | usa as **linhas detetadas** (CLRNet) e projetadas no chão: de cada lado, a linha da própria faixa mais perto do carro é o limite interior da faixa ao lado, e a seguinte (se for vista) o exterior (senão, o interior + `largura_faixa`). As linhas são ajustadas a retas (só as compridas e quase paralelas ao carro), suavizadas no tempo e guardadas 1,5 s quando a deteção falha | segue a faixa real (carro fora do centro, faixas mais largas ou estreitas, ligeiramente inclinadas); sem linhas desse lado, o lado fica `SEM_INFORMACAO (sem linhas)` |
+| `auto` (omissão) | `linhas` quando há linhas desse lado, `centro` quando não há (cada lado à parte) | o melhor dos dois |
 
-Os limites estão no `config/montagem_camaras.yaml`, secção `aviso_faixa` (`largura_faixa`, `x_tras`, `x_frente`, `x_angulo_morto`, `min_vista`, `min_vista_angulo_morto`, `max_nao_circulavel`, `min_celulas_veiculo`). Testado na cena sintética: faixas livres (LIVRE / LIVRE), carro 10 m atrás à esquerda (OCUPADA a 10 m / LIVRE), carro no ângulo morto à esquerda (OCUPADA no ângulo morto / LIVRE), carro 11 m atrás à direita (LIVRE / OCUPADA a 11 m), sem faixa à esquerda (SEM FAIXA / LIVRE) e câmara 8 desligada (LIVRE / SEM INFORMAÇÃO).
+A coluna **Avisos** do ecrã diz que forma está a ser usada de cada lado (`esq. pelas linhas, dir. pelo centro`). Testado numa cena sintética com o carro 0,5 m fora do centro e um veículo na **segunda** faixa à esquerda: `centro` dá **OCUPADA** (errado), `linhas` dá **LIVRE** (certo).
+
+**Estados.** Para cada lado, olha-se para a faixa ao lado, do ângulo morto até 20 m para trás (x de -20 a 2 m), e para os veículos dessa faixa até 30 m atrás:
+
+| Estado | Quando | Para a mudança de faixa |
+|---|---|---|
+| **LIVRE** | a zona é bem vista (mais de metade, e parte do ângulo morto), é circulável, não tem veículos e nenhum se aproxima depressa | pode mudar |
+| **OCUPADA** | há um veículo ou peão na zona (pegada do YOLO na grelha): `OCUPADA (a 10 m atrás)` ou `(no ângulo morto)` (a menos de 6 m atrás); **ou** um veículo da faixa ao lado, mesmo mais atrás (até 30 m), que chega junto do carro em menos de `ttc_mudanca_s` (4 s): `OCUPADA (aproxima-se: 2.5 s)` | **não** mudar |
+| **SEM_FAIXA** | a zona vista é sobretudo não circulável (mais de 60%: passeio, berma) | não há faixa desse lado |
+| **SEM_INFORMACAO** | as câmaras veem pouco da zona ou do ângulo morto (câmara desligada com **D**, sem imagem recente, fora do campo de visão) ou, no modo `linhas`, não há linhas desse lado | não se sabe: **não** mudar |
 
 **Saída.** `/g05/aviso_faixa` (`std_msgs/String`, JSON, um por imagem processada):
 ```json
 {"stamp_ns": 1795522251000000000,
- "esquerda": {"estado": "OCUPADA", "distancia_m": -8.3, "angulo_morto": false, "vista": 0.73, "vista_angulo_morto": 0.52},
- "direita":  {"estado": "LIVRE", "vista": 0.83, "vista_angulo_morto": 0.52}}
+ "esquerda": {"estado": "OCUPADA", "faixa": "linhas", "zona": [[2.0, 1.25], [2.0, 4.75], [-20.0, 4.75], [-20.0, 1.25]],
+              "distancia_m": -8.3, "angulo_morto": false, "aproximacao_rapida": true,
+              "a_aproximar": {"ttc_s": 2.4, "classe": "car", "x": -8.3}, "vista": 0.73, "vista_angulo_morto": 0.52},
+ "direita":  {"estado": "LIVRE", "faixa": "centro", "zona": [...], "vista": 0.83, "vista_angulo_morto": 0.52}}
 ```
-`distancia_m` é o x do ponto do veículo mais próximo (negativo = atrás do eixo traseiro); `vista` e `vista_angulo_morto` são as frações da zona e do ângulo morto que as câmaras veem.
+`faixa` diz como foi encontrada a faixa ao lado; `zona`, os 4 cantos (x, y) da zona; `distancia_m`, o x do ponto do veículo mais próximo (negativo = atrás do eixo traseiro); `a_aproximar`, o veículo da faixa ao lado que chega primeiro.
 
-#### 5.4.4 Planeador A\* comum (`src/va_planeamento`)
+#### 5.4.4 Aviso de saída de faixa (`aviso_saida_faixa.py`)
+As câmaras laterais veem, de cada lado, a **linha da própria faixa junto ao carro** (o que se vê no retrovisor quando o carro se encosta à linha). A linha detetada é projetada no chão e ajustada a uma reta (a mesma das faixas, 5.4.3). Daí:
+* **distância à linha:** o espaço entre o lado do carro (`carro.largura` / 2) e a linha, no ponto do carro mais perto dela (com a linha inclinada em relação ao carro, a frente ou a traseira chega primeiro); aproximada;
+* **tempo até à linha** (TLC, *time to line crossing*): se a distância está a diminuir, a distância a dividir pelo ritmo a que diminui (reta de mínimos quadrados das amostras do último segundo).
+
+| Estado (de cada lado) | Quando |
+|---|---|
+| **A_PISAR** | a linha está debaixo do carro (distância ≤ 0): está a sair da faixa |
+| **PERTO** | a menos de `limiar_perto_m` (0,3 m) da linha |
+| **A_APROXIMAR** | a aproximar-se da linha, a menos de `tlc_aviso_s` (1 s) de lhe chegar |
+| **OK** | longe da linha e sem se aproximar (ex. `OK (1.0 m)`) |
+| **SEM_LINHA** | a linha desse lado não é vista (sem linhas pintadas, ou a deteção falhou) |
+
+Com a faixa desse lado **OCUPADA** (5.4.3), uma saída para esse lado é **perigo**: `PERTO (0.1 m) + FAIXA OCUPADA`.
+
+Não se sabe se a saída é intencional: sem o estado do **pisca** (CAN do carro, ou de outro grupo), o aviso dispara também numa mudança de faixa voluntária. Testado numa cena sintética com o carro a derivar 0,3 m/s para a esquerda: `OK (1.0 m)` → `OK (0.4 m)` → `PERTO (0.3 m)` → `PERTO (0.1 m)`; com um carro no ângulo morto à esquerda, `+ FAIXA OCUPADA`.
+
+**Saída.** `/g05/aviso_saida_faixa` (JSON): `{"stamp_ns": ..., "esquerda": {"estado": "PERTO", "distancia_m": 0.21, "tlc_s": 0.7, "perigo": false, "linha": [a, b]}, "direita": {...}}` (`linha`: a reta y = a + b·x da linha, no `base_link`).
+
+#### 5.4.5 Aviso de colisão (`aviso_colisao.py`, `seguimento.py`)
+**Sem medir distâncias nem velocidades**, o risco vem do **tempo até contacto** (TTC) de cada objeto:
+1. **Seguimento** (`seguimento.py`): cada caixa do YOLO (veículos, peões, bicicletas) é associada à da imagem anterior da mesma câmara que mais se lhe sobrepõe (IoU), para seguir o mesmo objeto ao longo das imagens.
+2. **Tempo até contacto:** um objeto que se aproxima fica **maior** na imagem. Com s = altura da caixa, **TTC = s / (ds/dt) = 1 / (d ln s / dt)**: o tempo até chegar à câmara, só a partir do ritmo a que a caixa cresce, sem saber a distância nem a velocidade. É o princípio dos avisos de colisão só com câmara. Calcula-se com uma reta de mínimos quadrados de ln(s) nas amostras do último 1,5 s (para não reagir ao tremor de uma só caixa), corrigida para o instante atual. Usa-se a altura, porque visto de lado a largura da caixa inclui o comprimento do veículo. Uma caixa cortada pela borda da imagem não conta.
+3. **Zona** (pela posição aproximada no chão e pelas mesmas faixas de 5.4.3): **atrás** (a própria faixa, atrás do carro), **esquerda** / **direita** (as faixas ao lado, incluindo o ângulo morto) ou **fora** (outras faixas, passeios, objetos sem posição). Assim, um carro que se aproxima duas faixas ao lado, ou que vira, não dá aviso.
+
+| Nível | Quando |
+|---|---|
+| **PERIGO** | TTC ≤ `ttc_perigo_s` (1,5 s) numa zona de interesse; ou, sem posição no chão, TTC ≤ 1,5 s com o objeto já grande na imagem (muito perto) |
+| **AVISO** | TTC ≤ `ttc_aviso_s` (3 s) numa zona de interesse |
+| **ATENCAO** | um veículo na própria faixa, atrás, a menos de 8 m (`segue colado`), mesmo sem se aproximar |
+| **LIVRE** | nada disto |
+
+Um objeto que se afasta ou mantém a distância não tem TTC: com o carro a andar, os objetos parados atrás afastam-se e não dão aviso, como deve ser. Testado numa cena sintética: um carro atrás, na mesma faixa, a aproximar-se a 8 m/s dá `AVISO (car atrás, TTC 2.8 s)` → `PERIGO (car atrás, TTC 1.3 s)` → `TTC 0.9 s` (o TTC real era 0,9 s); a afastar-se, `LIVRE`; à mesma velocidade a 7 m, `ATENÇÃO (car atrás, segue colado)`; a aproximar-se duas faixas ao lado, `LIVRE`.
+
+No ecrã, os objetos com aviso ficam com a **caixa grossa** na cor do nível e o TTC por baixo (`TTC 1.2 s`), e na vista de cima aparecem como pontos, com o TTC ao lado.
+
+**Saída.** `/g05/aviso_colisao` (JSON): `{"stamp_ns": ..., "estado": "AVISO", "zona": "atras", "objeto": {"classe": "car", "camara": "5", "ttc_s": 2.3, "x": -14.2, "y": 0.1, "id": 7}, "zonas": {...}, "objetos": [{"id", "classe", "categoria", "caixa", "conf", "ttc_s", "n", "x", "y", "camara", "stamp_ns", "zona", "nivel"}, ...]}`.
+
+**Limites do TTC com a câmara:** precisa de várias imagens do mesmo objeto (em **CPU**, a cerca de 1 imagem por segundo por câmara, o TTC demora alguns segundos a aparecer e reage tarde; com **GPU**, uma fração de segundo); o tremor das caixas do YOLO dá erros de 10 a 20%; o mesmo veículo visto pelas duas câmaras conta duas vezes (dois objetos). Por isso, no online, o aviso de colisão só é fiável com GPU; no offline, que processa todas as imagens, funciona sempre.
+
+#### 5.4.6 Planeador A\* comum (`src/va_planeamento`)
 * O pacote `va_planeamento` do modelo da aula (`va-projeto-g00`) está em `src/va_planeamento/`, **copiado sem alterações** (grelha `LocalGrid`, A\* e o nó `local_astar`, com os testes da aula). Os testes correm sem ROS: `python3 -m pytest src/va_planeamento`.
 * No online, corre no serviço **`planeador`** do `compose_realtime_inter.yaml`, ao lado do processamento (o `processar_inter.sh` lança-o sozinho), com o namespace `/g05` e os parâmetros do `config/planeador.yaml` (os da aula: objetivo 25 m à frente, inflação 1 m, desconhecido livre). Lê `/g05/grelha_local` e publica `/g05/estado` (`LIVRE`, `DESVIO <m>` ou `BLOQUEADO`), `/g05/caminho_local` (`nav_msgs/Path`) e `/g05/zona_proibida`.
 * O código é o mesmo do `ros2 run va_planeamento local_astar`, mas corre diretamente a partir de `src/` (sem `colcon`), porque o Docker do online ainda não é um workspace ROS; isso muda quando o repositório for reorganizado na estrutura do modelo da aula.
 * Com estas câmaras, o estado do planeador não decide a mudança de faixa (ver 5.4.3); fica a correr para cumprir o contrato comum (as mesmas entradas e saídas de todos os grupos), para a parte 2, e para quando houver informação à frente do carro (outro grupo ou outro sensor).
 
-#### 5.4.5 Onde aparece
-* **Online** (secção 4): o `processar_tempo_real.py` publica o TF estático no arranque e, a cada imagem processada, a grelha em **`/g05/grelha_local`** (`nav_msgs/OccupancyGrid`, `base_link`) e o aviso em **`/g05/aviso_faixa`**; o terminal mostra cada mudança do aviso (`[01:12.4] Faixa da esquerda: OCUPADA (a 10 m atrás)`). O visualizador (4.7) mostra a grelha à direita das câmaras (vista de cima), com as duas zonas na cor do estado (verde LIVRE, vermelho OCUPADA, laranja SEM FAIXA, cinzento SEM INFORMAÇÃO), o texto de cada lado (`E:` e `D:`) e, em baixo, o estado do planeador (`A*: ...`); o RViz (4.13) mostra a grelha, o TF das câmaras e o caminho do A\*. Nos trechos ficam gravados no bag a grelha, o aviso, as saídas do planeador e o `/tf_static` (4.9). O resumo mostra o tópico e o tempo da grelha e a percentagem de tempo em cada estado do aviso (por lado) e do planeador.
-* **Offline** (3.4): o `processar_bag.py` calcula a mesma grelha e o mesmo aviso a partir das deteções de cada imagem e mostra-os à direita do vídeo, com o mesmo desenho do visualizador do online (sem o planeador); **G** mostra/esconde, `--sem-grelha` desliga. Não é gravada no registo (calcula-se de novo sempre que for precisa).
-* **Vista de cima:** frente do carro para cima, esquerda à esquerda; cinzento = desconhecido, claro = livre, vermelho escuro = ocupado; o carro a verde, as câmaras a laranja, as linhas da faixa a amarelo, e a distância em x (m) à esquerda.
+#### 5.4.7 Onde aparece
+* **Online** (secção 4): o `processar_tempo_real.py` publica o TF estático no arranque e, a cada imagem processada, a grelha (**`/g05/grelha_local`**) e os três avisos (**`/g05/aviso_faixa`**, **`/g05/aviso_saida_faixa`**, **`/g05/aviso_colisao`**); o terminal mostra cada mudança de estado (`[01:12.4] Mudança de faixa (esquerda): OCUPADA (a 10 m atrás)`, `[01:15.0] Colisão: AVISO (car atrás, TTC 2.3 s)`). O visualizador (4.7) mostra, à direita das câmaras, a **vista de cima** (grelha, zonas da faixa ao lado na cor do aviso, linhas projetadas, objetos seguidos com o TTC, estado do A\* em baixo) e a coluna **Avisos** (os três avisos de cada lado e o planeador); nas câmaras, os objetos com aviso de colisão ficam destacados. O RViz (4.13) mostra a grelha, o TF e o caminho do A\*. Nos trechos ficam gravados no bag a grelha, os três avisos, as saídas do planeador e o `/tf_static` (4.9). O resumo mostra a percentagem do tempo em cada estado de cada aviso (por lado) e do planeador.
+* **Offline** (3.4): o `processar_bag.py` calcula a mesma grelha e os mesmos avisos (`decisao.py`) a partir das deteções de cada imagem e mostra-os com o mesmo desenho do visualizador do online (sem o planeador); **G** mostra/esconde, `--sem-grelha` desliga. Não são gravados no registo (calculam-se de novo sempre que for preciso). Como o offline processa todas as imagens, o seguimento e o TTC funcionam melhor do que no online em CPU.
+* **Figuras para o relatório e a apresentação** (`tools/figura_bag.py`, 4.13): o estado de cada aviso ao longo do tempo, o ecrã nos instantes mais graves e um GIF, a partir de um bag do online.
+* **Vista de cima:** frente do carro para cima, esquerda à esquerda; cinzento = desconhecido, claro = livre, vermelho escuro = ocupado; o carro a verde, as câmaras a laranja, as linhas da faixa a amarelo, as zonas da faixa ao lado com a cor do aviso de mudança de faixa (verde LIVRE, vermelho OCUPADA, laranja SEM FAIXA, cinzento SEM INFORMAÇÃO), os objetos seguidos como pontos (com o TTC), e a distância em x (m) à esquerda.
 
-#### 5.4.6 Afinar a montagem com a vista de cima
+#### 5.4.8 Afinar a montagem com a vista de cima
 Numa estrada reta, as **linhas da faixa projetadas** (amarelo) devem sair **paralelas ao carro** e a cerca de **3,5 m** umas das outras:
 * linhas que **abrem ou fecham** com a distância: a inclinação (`inclinacao_baixo_graus`) ou a altura (`z`) estão erradas;
 * linhas **paralelas entre si, mas tortas** em relação ao carro: a rotação para fora (`rotacao_para_fora_graus`) está errada;
 * linhas com a **distância entre elas errada**: a altura (`z`) está errada (a escala é proporcional à altura).
 
-Corrija o `config/montagem_camaras.yaml` e volte a correr o `processar_bag.py` no mesmo bag (não é preciso mais nada).
+Corrija o `config/montagem_camaras.yaml` e volte a correr o `processar_bag.py` no mesmo bag (não é preciso mais nada). Com a montagem certa, a coluna **Avisos** diz `pelas linhas` e a saída de faixa dá, numa reta ao centro da faixa, cerca de 1 m de cada lado (faixa de 3,5 m, carro de 1,5 m).
 
-#### 5.4.7 Limitações
-* **Chão plano:** em subidas, descidas ou lombas, as distâncias ficam erradas (mais ao longe).
-* **Modelos treinados com câmaras viradas para a frente** (CULane, BDD100K, COCO): com as câmaras viradas para trás e para o lado, o YOLOP e o CLRNet são menos fiáveis; o YOLO (objetos) é o que menos sofre. A grelha herda esses erros.
-* A pegada de um veículo usa um comprimento típico: o modelo não sabe o comprimento real nem a orientação do veículo.
-* A precisão da posição piora com a distância (por isso o limite de 25 m) e depende de a montagem estar bem medida (5.4.6).
-* **Aviso de faixa:** supõe o carro no centro da sua faixa e faixas de 3,5 m (ainda não usa as linhas detetadas para saber onde está a faixa ao lado); não mede a velocidade dos veículos (um carro rápido a 20 m pode ser mais perigoso do que um lento a 8 m); e herda os erros da deteção (pontos acima). Um veículo muito perto, abaixo da `distancia_minima` (2,5 m da câmara), pode não ser visto.
-
----
+#### 5.4.9 Limitações (e o que outros sensores melhoram)
+* **Chão plano:** em subidas, descidas ou lombas, as posições no chão ficam erradas (mais ao longe), e com elas as faixas e as distâncias às linhas.
+* **Modelos treinados com câmaras viradas para a frente** (CULane, BDD100K, COCO): com as câmaras viradas para trás e para o lado, o YOLOP e o CLRNet são menos fiáveis; o YOLO (objetos) é o que menos sofre. As linhas laterais vistas para trás podem não ser detetadas: aí, a saída de faixa dá `SEM LINHA` e o modo `auto` passa para o centro.
+* A pegada de um veículo usa a largura e o comprimento típicos e supõe-no alinhado com a estrada (numa curva ou num cruzamento, fica pior).
+* A precisão das posições piora com a distância (por isso o limite de 25 m) e depende de a montagem estar bem medida (5.4.8).
+* **Mudança de faixa:** não vê a segunda faixa ao lado (quem vem de lá para a mesma faixa) nem veículos a mais de 30 m que se aproximam muito depressa.
+* **Saída de faixa:** sem o pisca, não distingue uma mudança voluntária; em CPU, o TLC reage tarde.
+* **Colisão:** ver os limites do TTC (5.4.5); o mesmo veículo nas duas câmaras conta duas vezes.
+* **O que outros sensores dão** (parte 2): **LiDAR / radar** — distância e velocidade medidas de cada veículo (o TTC passa a ser distância / velocidade, sem depender do tamanho da caixa) e objetos mais longe; **GNSS + odometria / CAN** — a velocidade do próprio carro (separa objetos parados de objetos em movimento) e o **pisca** (a saída de faixa intencional deixa de dar aviso); **câmaras da frente** — o planeador A\* passa a ter informação à frente do carro, e com ela pode decidir o caminho da mudança de faixa.
 
 ## 6. Referência rápida: comandos, opções, teclas e pastas
 
@@ -1281,6 +1365,7 @@ Antes: a imagem construída (4.6, passo 1: `docker compose -f compose_realtime_i
 | | `--bag <ficheiro.mcap>` (4.11) | reprodução de um bag, sem câmaras (em vez das câmaras) |
 | | `-i` / `--sem-interface` | sem janelas (nem visualizador nem resumo); deteção, trechos e gravação na mesma |
 | | `--rviz` (4.13) | abre também o RViz (`config/g05.rviz`) |
+| | `--foxglove` (4.13) | lança também o `foxglove_bridge` (`ws://localhost:8765`) |
 | | `--sem-correcao` | não corrige a distorção |
 | | `--registar-tudo` | ao vivo: começa um trecho logo no arranque (grava desde o início) |
 | | `--sem-processamento` | ao vivo: só as câmaras e a gravação dos trechos, sem os modelos |
@@ -1294,6 +1379,7 @@ Antes: a imagem construída (4.6, passo 1: `docker compose -f compose_realtime_i
 | `bash trecho.sh` (4.7) | — | noutro terminal: começa/termina um trecho (sem janela) |
 | `bash alternar_camara.sh` (4.7) | — | noutro terminal: desliga/liga a câmara da direita (sem janela) |
 | `python3 resumo_online.py <pasta da sessão>` (4.8) | — | abre o resumo de uma sessão (no Docker ou no `venv`) |
+| `python tools/figura_bag.py <sessão ou .mcap>` (4.13, `venv` + `matplotlib`) | `--gif <ficheiro>`, `--instantes N`, `--saida <pasta>`, `--largura-gif`, `--fps-gif` | figuras, GIF e métricas dos avisos, para o relatório |
 
 ### 6.2 Teclas
 
@@ -1342,6 +1428,7 @@ Antes: a imagem construída (4.6, passo 1: `docker compose -f compose_realtime_i
 | `data_offline/<viagem ou sessão online>/<ensaio>/` | registo das deteções (`deteccoes.mcap`, `ensaio.json`, vídeos `.mp4`, trajetos e referências do percurso) | `processar_bag.py`, `juntar_registos.py`, `reproduzir_registo.py`, `gui_resultados.py` | não |
 | `data_realtime_inter/realtime_<data_hora>/` | bag do vídeo original (JPEG) + deteções, só nos trechos, e `resumo_online.json` (online) | `processar_inter.sh` | não |
 | `data_realtime_inter/reproducao_<bag>_<data_hora>/` | `resumo_online.json` de uma reprodução no Docker (4.11) | `processar_inter.sh --bag` | não |
+| `docs/img/` | figuras e GIF para o README, o relatório e a apresentação | `tools/figura_bag.py` | sim (as que forem usadas) |
 
 ---
 
