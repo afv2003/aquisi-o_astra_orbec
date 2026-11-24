@@ -75,7 +75,11 @@ Os bags não vão para o GitHub (`data/` está no `.gitignore`).
 
 ### Resultados
 
-Figuras, GIF e métricas (percentagem do tempo em cada estado de cada aviso, mensagens por segundo de cada tópico) geram-se a partir de um bag real com `python tools/figura_bag.py data/<sessão>` (4.13), para `docs/img/`. Os três avisos foram validados com cenas sintéticas (testes em `src/va_g05/test`, 1.7, e 5.4.3 a 5.4.5).
+**Desempenho da deteção** (precisão, recall, F1, IoU), medido contra uma referência marcada à mão em imagens escolhidas ao acaso dos bags reais (3.11): as tabelas saem em `docs/referencia/<nome>/metricas.md` (`python offline/metricas_referencia.py <nome>`) e copiam-se para aqui, com exemplos (original | referência | processamento) em `docs/img/`.
+
+*(por preencher: a marcação ainda não foi feita)*
+
+**Funcionamento ao longo do tempo:** figuras, GIF e métricas do online (percentagem do tempo em cada estado de cada aviso, mensagens por segundo de cada tópico, deteções por segundo) a partir de um bag real, com `python tools/figura_bag.py data/<sessão>` (4.13).
 
 ### Limitações
 
@@ -100,7 +104,7 @@ Há **dois modos de trabalho**, com o mesmo código de deteção e o mesmo desen
 |---|---|---|
 | [1](#1-visão-geral) | Visão geral: os dois modos, quando usar cada um, relevância para a parte 2, ficheiros e estrutura do repositório, pré-requisitos, preparação do PC Linux (Docker, projeto, disco externo), testes automáticos (CI) e organização do repositório (branches, fluxo de trabalho, tag) | — |
 | [2](#2-preparação-calibração-das-câmaras) | Preparação: calibração das câmaras (correção da distorção da lente) | Windows (ou Linux), com Python |
-| [3](#3-modo-offline-processar-os-bags-gravados-em-qualquer-sistema) | **Modo offline**: bag gravado → processar → registar → reproduzir → janela de resultados | Windows, Linux ou macOS, com `venv` (sem Docker nem câmaras) |
+| [3](#3-modo-offline-processar-os-bags-gravados-em-qualquer-sistema) | **Modo offline**: bag gravado → processar → registar → reproduzir → janela de resultados; métricas de desempenho contra uma referência marcada à mão | Windows, Linux ou macOS, com `venv` (sem Docker nem câmaras) |
 | [4](#4-modo-online-aquisição-e-processamento-no-veículo-docker) | **Modo online**: câmaras → processamento ao vivo → gravação dos trechos (JPEG) → resumo; visualizador e RViz; reprodução de um bag sem câmaras; hora certa (NTP) | Linux com Docker (CPU ou GPU NVIDIA) |
 | [5](#5-modelos-de-deteção-comuns-aos-dois-modos) | Modelos de deteção (comuns aos dois modos): linhas (CLRNet), objetos (YOLO) e estrada (YOLOP); decisão local: posição das câmaras, grelha local, avisos de mudança de faixa, saída de faixa e colisão, planeador A\*, e como outros sensores completam cada aviso | dentro do processamento |
 | [6](#6-referência-rápida-comandos-opções-teclas-e-pastas) | Referência rápida: todos os comandos, opções, teclas, variáveis e pastas | — |
@@ -203,7 +207,7 @@ src/va_g05/                   pacote ROS 2 do G5 (package.xml, setup.py)
 scripts/                      online.sh (arranque do online), trecho.sh, alternar_camara.sh
 offline/                      processar_bag.py, reproduzir_registo.py, juntar_registos.py, gui_resultados.py, ...
 tools/                        calibrar_astra.py, figura_bag.py, exportar_linhas.py
-docs/                         layout.json (Foxglove), img/ (figuras e GIF)
+docs/                         layout.json (Foxglove), img/ (figuras e GIF), referencia/ (marcação e métricas, 3.11)
 data/                         bags e gravações (não vão para o git)
 ```
 
@@ -237,6 +241,7 @@ data/                         bags e gravações (não vão para o git)
 | `offline/juntar_registos.py` | juntar registos das câmaras 5 e 8 feitos em sessões diferentes (3.9) | offline |
 | `offline/gui_resultados.py` | janela de resultados: Resumo e Percurso (3.10) | offline |
 | `offline/teclado.py` | teclas lidas no terminal, sem janela (`--sem-interface`) | offline |
+| `offline/anotar_referencia.py`, `offline/metricas_referencia.py`, `offline/referencia.py` | marcação à mão de uma referência e métricas de desempenho da deteção (3.11) | offline |
 | `tools/calibrar_astra.py` | calibração de cada câmara (secção 2) | preparação |
 | `tools/figura_bag.py` | figuras, GIF e métricas para o relatório, a partir de um bag do online (4.13) | relatório |
 | `tools/exportar_linhas.py` | só para gerar de novo o modelo das linhas (5.1.4) | — |
@@ -287,6 +292,8 @@ O mesmo comando corre no PC, depois do `docker compose build`. Os testes não pr
 
 No `venv` do offline também correm (com `pip install pytest`): `python -m pytest -q src/va_g05/test`.
 
+Estes testes **não são os resultados do projeto** nem é preciso mexer neles: correm sozinhos no CI, a cada push, e só confirmam que uma alteração ao código não estragou a grelha, os avisos ou os modelos. As cenas sintéticas existem porque no CI não há câmaras nem bags. Os resultados medem-se com dados reais (3.11 e 4.13).
+
 Na imagem, o `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` (no `Dockerfile`) impede o `pytest` de carregar os plugins de testes do ROS (`launch_testing`), que precisam de bibliotecas do Python do sistema que o `venv` não vê; os testes do projeto não os usam.
 
 ### 1.8 Organização do repositório e fluxo de trabalho
@@ -324,6 +331,7 @@ git switch Extra-Line-Comparison && git merge main && git push && git switch mai
 | processamento offline, registos, janela de resultados | `offline/` | — |
 | calibração, figuras para o relatório, exportação de modelos | `tools/` | — |
 | testes | `src/va_g05/test/` | correm no CI |
+| referência marcada à mão e métricas (3.11) | `docs/referencia/<nome>/` (imagens em `data/referencia/`, fora do git) | copiar as tabelas para a secção Resultados |
 | dependências Python | `requirements.txt` (sistema: `Dockerfile`) | `docker compose build` e `pip install` no `venv` |
 | bags, gravações, registos | `data/` (ou o disco do `DADOS`) | não vão para o git |
 
@@ -703,6 +711,57 @@ As gamas estão em `GAMAS_VEICULOS`, no `registo.py`, e as cores em `CORES_GAMAS
 * **Internet:** o mapa (OpenStreetMap) é descarregado da internet. Sem ligação, aparece um aviso em vez do mapa, com um botão para tentar de novo.
 * **Sair da tab:** pode-se ir para o Resumo a qualquer momento; ao voltar, tudo recomeça (os ficheiros guardados servem para não repetir os cliques).
 * **Com GPS** (por exemplo, gravado no bag do modo online na parte 2, 1.3), os passos 1 e 2 deixariam de ser precisos.
+
+### 3.11 Métricas de desempenho com uma referência marcada à mão
+> **Antes:** o `venv` ativado (3.3) e um ou mais bags (3.2). As métricas são só do offline.
+
+As métricas de deteção (precisão, recall, F1, IoU) precisam de uma **referência**: o que de facto está em cada imagem, marcado à mão. O fluxo tem dois passos: escolher e marcar imagens (`anotar_referencia.py`), e comparar o processamento com essa referência (`metricas_referencia.py`).
+
+```
+ bag(s) ──▶ anotar_referencia.py: escolhe N imagens ao acaso ──▶ marcação à mão ──▶ docs/referencia/<nome>/anotacoes/*.json
+                                   (metade de cada câmara)       (objetos, linhas,
+                                                                  estrada, faixa ao lado)
+ metricas_referencia.py: corre o processamento nessas imagens e compara ──▶ docs/referencia/<nome>/metricas.md (tabelas)
+                                                                       ──▶ data/referencia/<nome>/*_comparacao.png
+```
+
+**1. Escolher e marcar as imagens:**
+```bash
+python offline/anotar_referencia.py ref1 --bag data/<sessão>/<bag>.mcap --n 60     # cria o conjunto "ref1" e abre a janela
+python offline/anotar_referencia.py ref1                                           # continuar mais tarde (abre na 1.ª por marcar)
+```
+* **A escolha das imagens** é feita ao acaso, para não serem só as "bonitas": metade de cada câmara, com pelo menos 2 s entre imagens da mesma câmara (`--intervalo-min`). Com a mesma semente (`--semente`, 1), sai sempre a mesma escolha. Pode juntar vários bags (`--bag` repetido) ou só uma câmara (`--camara 5`). Umas **50 a 100 imagens** chegam; com 1 a 2 minutos por imagem, são 2 a 3 horas.
+* **Imagem marcada:** a imagem aparece **corrigida da distorção** (a mesma que os modelos recebem) e **sem as deteções do processamento**, para a marcação não ser influenciada por elas. O desenho usa as **cores do processamento** (`visual.py`): objetos na cor da classe, linhas a amarelo e estrada a verde.
+* **Em cada imagem marca-se tudo o que se vê dos três:** o que não for marcado conta como "não existe". Uma imagem que não sirva (desfocada, tapada) marca-se com **I**.
+
+| Modo | Tecla | Rato |
+|---|---|---|
+| **Objetos** | **O**; classe com **1**–**8** (peão, bicicleta, carro, mota, autocarro, camião, semáforo, STOP: as classes do processamento) | arrastar: caixa; botão direito: apagar a caixa |
+| **Linhas** | **L**; **Enter** termina a linha | clique: ponto; botão direito: termina a linha (ou apaga a linha debaixo do rato) |
+| **Estrada** (área circulável) | **E**; **Enter** fecha o polígono; **B** troca para "buraco" (tira área: por baixo de um veículo, um passeio dentro) | clique: vértice; botão direito: fecha (ou apaga o polígono debaixo do rato) |
+| **Faixa ao lado** | **F** muda o estado: por marcar → LIVRE → OCUPADA (veículo na faixa ao lado, do ângulo morto até ~20 m atrás) → SEM_FAIXA | — |
+| Geral | **N** / **Espaço** guardar e seguinte, **P** anterior, **G** a seguinte por marcar, **Z** desfazer, **V** ver/esconder a marcação, **I** ignorar a imagem, **Q** sair | — |
+
+Cada imagem fica em `docs/referencia/<nome>/anotacoes/<câmara>_<stamp_ns>.json`, no **mesmo formato das deteções** (`objetos`, `linhas`, `estrada_contornos`), com as coordenadas da imagem corrigida. A `docs/referencia/<nome>/amostra.json` guarda os bags, a calibração usada e as imagens escolhidas. As imagens em si ficam em `data/referencia/<nome>/` (fora do git) e voltam a ser lidas dos bags se faltarem.
+
+**2. Calcular as métricas:**
+```bash
+python offline/metricas_referencia.py ref1                 # tabelas + imagens de comparação
+python offline/metricas_referencia.py ref1 --figuras 3     # e copia 3 comparações para docs/img (para o README e o relatório)
+```
+Em cada imagem marcada, corre o **mesmo processamento do `processar_bag.py`**, com as opções por omissão: correção da distorção, YOLO (classes de estrada, confiança 0,25), CLRNet e YOLOP; para a faixa ao lado, a mesma decisão local (`decisao.py`), só com essa imagem. Depois compara com a referência:
+
+| Deteção | Correspondência | Métricas |
+|---|---|---|
+| Objetos | caixa com **IoU ≥ 0,5** com uma caixa marcada da mesma classe (cada caixa marcada só conta uma vez) | precisão, recall e F1 por classe e no total; por categoria (veículo, peão, bicicleta, sinalização); **classificação**: das caixas encontradas, a % com a classe certa, e as trocas mais comuns |
+| Linhas | como no **CULane**: cada linha desenhada com 30 px de largura (numa imagem de 1640 px; ~12 px a 640 px), a mesma linha se o IoU for **≥ 0,5** | precisão, recall e F1 (total e por câmara) |
+| Estrada | píxel a píxel | IoU, precisão e recall (soma de todas as imagens) e IoU médio por imagem |
+| Faixa ao lado | estado do aviso de mudança de faixa do lado da câmara | matriz de confusão, acerto, e precisão / recall de OCUPADA |
+
+O resultado vai para `docs/referencia/<nome>/metricas.md`, com tabelas prontas a copiar para a secção Resultados (no topo do README) e para o relatório, e para `metricas.json`. As imagens vão para `data/referencia/<nome>/`: `<id>_original.png`, `<id>_referencia.png` e `<id>_processamento.png`, e as três lado a lado em `<id>_comparacao.png`. Com `--figuras N`, copia para `docs/img/` as N imagens com mais desacordo nos objetos.
+
+* **No git:** a `docs/referencia/<nome>/` (a amostra, as marcações e as métricas, poucos KB) e as figuras que forem usadas em `docs/img/`. Assim qualquer pessoa pode recalcular os números. As imagens de `data/referencia/` e os bags não vão para o git.
+* **Interpretação:** os modelos foram treinados com câmaras viradas para a frente (secção 5): espera-se pior nas câmaras laterais viradas para trás, sobretudo nas linhas e na estrada. A faixa ao lado é avaliada só com uma imagem, sem o seguimento entre imagens (o "aproxima-se" precisa de várias); uma marcação OCUPADA para um veículo a mais de 20 m conta como erro do processamento, por isso marque OCUPADA só dentro dessa zona.
 
 ---
 
@@ -1551,6 +1610,11 @@ Antes: o `venv` ativado (3.3); o `processar_bag.py` precisa do bag (3.2); os out
 | `python offline/gui_resultados.py` (3.10) | `[<pasta do ensaio>]` | registo a abrir primeiro no Resumo (o mais recente) |
 | | `--pasta-registo <pasta>` | pasta dos registos (`data/offline`) |
 | `python offline/resumo_online.py <pasta da sessão>` (4.8) | — | resumo de uma sessão do online, fora do Docker |
+| `python offline/anotar_referencia.py <nome>` (3.11) | `--bag <.mcap>` (repetível) | cria o conjunto com imagens desses bags (sem `--bag`: continua a marcar) |
+| | `--n N`, `--camara 5\|8`, `--semente S`, `--intervalo-min s` | número de imagens (60), só uma câmara, semente da escolha (1), segundos entre imagens (2) |
+| | `--imagem N` | abrir na imagem N |
+| `python offline/metricas_referencia.py <nome>` (3.11) | `--figuras N` | copia N comparações para `docs/img` |
+| | `--sem-imagens` | só as métricas, sem gravar as imagens |
 
 **Modo online (Linux, Docker)**
 
@@ -1613,6 +1677,13 @@ Antes: a imagem construída (4.6, passo 1: `docker compose build`, com o `ONNX_P
 | | **1**, **2**, **3** | tempo real, 2x mais lento, 3x mais lento |
 | | **-** / **+** | mais lento / mais rápido (passos de 0.5x, entre 1x e 3x) |
 | | **Q** / **Esc** | sai |
+| **Marcação da referência** (`anotar_referencia.py`) | **O**, **L**, **E** | modo: objetos, linhas, estrada |
+| | **1**–**8** | classe do objeto |
+| | **Enter** / botão direito | termina a linha / fecha o polígono (botão direito sem nada em curso: apaga) |
+| | **B** | estrada: polígono que tira área (buraco) |
+| | **F** | estado da faixa ao lado |
+| | **N** / **Espaço**, **P**, **G** | guardar e seguinte, anterior, seguinte por marcar |
+| | **Z**, **V**, **I**, **Q** | desfazer, ver/esconder a marcação, ignorar a imagem, sair |
 | **Janela de resultados** (`gui_resultados.py`, Percurso) | **Enter** (nas coordenadas) | o mesmo que **Ir** |
 | | rato: clique / arrastar / roda / botão direito | ponto (ou referência) / mover / aproximar / ponto de curva |
 | **Online: visualizador** (`visualizador.py`) | **R** | começa / termina um trecho (gravação do vídeo e das deteções; não faz nada em reprodução) |
@@ -1632,7 +1703,9 @@ Antes: a imagem construída (4.6, passo 1: `docker compose build`, com o `ONNX_P
 | `data/g05_reproducao_<bag>_<data_hora>/` | `resumo_online.json` de uma reprodução no Docker (4.11) | `scripts/online.sh --bag` | não |
 | `data/g05_resultados_<data_hora>/` | `ros2 bag record` dos resultados (4.13) | `scripts/online.sh --gravar` (perfil `gravar`) | não |
 | `data/offline/<viagem ou sessão online>/<ensaio>/` | registo das deteções (`deteccoes.mcap`, `ensaio.json`, vídeos `.mp4`, trajetos e referências do percurso) | `offline/processar_bag.py`, `juntar_registos.py`, `reproduzir_registo.py`, `gui_resultados.py` | não |
-| `docs/img/` | figuras e GIF para o README, o relatório e a apresentação | `tools/figura_bag.py` | sim (as que forem usadas) |
+| `docs/img/` | figuras e GIF para o README, o relatório e a apresentação | `tools/figura_bag.py`, `offline/metricas_referencia.py --figuras` | sim (as que forem usadas) |
+| `docs/referencia/<nome>/` | amostra, marcações (`anotacoes/*.json`) e métricas (`metricas.md`, `metricas.json`) | `offline/anotar_referencia.py`, `offline/metricas_referencia.py` | sim |
+| `data/referencia/<nome>/` | imagens da referência: original, referência, processamento e comparação | os mesmos | não |
 
 A pasta `data/` pode ser outra (o disco externo): `DADOS` no `.env` (1.6). As pastas antigas `data_offline/` e `data_realtime_inter/` (antes desta organização) podem ser movidas para `data/offline/` e `data/`.
 
