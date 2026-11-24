@@ -49,7 +49,7 @@ valor_env() {
     local nome="$1" omissao="$2" v
     v="${!nome:-}"
     if [ -z "$v" ] && [ -f "$RAIZ/.env" ]; then
-        v=$(sed -n "s/^${nome}=//p" "$RAIZ/.env" | tail -n1 | tr -d '\r')
+        v=$(sed -n "s/^${nome}=//p" "$RAIZ/.env" | tail -n1 | tr -d '\r' | sed 's/[[:space:]]\+#.*$//; s/[[:space:]]*$//')
     fi
     echo "${v:-$omissao}"
 }
