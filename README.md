@@ -245,7 +245,6 @@ data/                         bags e gravações (não vão para o git)
 | `tools/calibrar_astra.py` | calibração de cada câmara (secção 2) | preparação |
 | `tools/figura_bag.py` | figuras, GIF e métricas para o relatório, a partir de um bag do online (4.13) | relatório |
 | `tools/exportar_linhas.py` | só para gerar de novo o modelo das linhas (5.1.4) | — |
-| `tools/converter_bag_antigo.py` | converte, uma vez, um bag antigo para o formato e o nome atuais (3.1) | preparação |
 | `requirements.txt` | bibliotecas Python (`venv` do offline e imagem do online) | ambos |
 
 **Onde estão os ficheiros, em cada modo** (`caminhos.py`): os scripts encontram a configuração e os modelos sozinhos, a partir da pasta onde estão, por isso podem correr-se de qualquer pasta do terminal. No Docker, o pacote está instalado em `/ws/install` e a configuração e os modelos são lidos de `/ws/src/va_g05`; a pasta dos dados é `/data` (a pasta `data/` do repositório, ou a do `DADOS` no `.env`). Fora do Docker (offline e ferramentas), lê-se `src/va_g05/config` e `src/va_g05/modelos`, e os dados ficam em `data/` (registos do offline em `data/offline/`).
@@ -417,22 +416,7 @@ Os scripts só aceitam bags no **formato atual**, o que o online grava (secção
 * **Conteúdo:** o vídeo original de cada câmara **comprimido em JPEG** (`/camara<N>/image_raw/compressed`, `sensor_msgs/CompressedImage`, como pede o enunciado), só nos **trechos** marcados durante a viagem, e os trechos em `/processamento/trechos` (são os trechos do registo, 3.6). Para guardar a viagem toda, grave no online com `--registar-tudo`; num PC fraco, sem processar, com `--sem-processamento` (4.6).
 * Um bag cortado (gravação interrompida, sem índice) ou com blocos estragados também se lê (3.4).
 
-Um bag noutro formato é recusado, com a mensagem `o bag não está no formato atual (...)`.
-
-**Bags antigos (converter uma vez).** Os bags gravados antes desta organização convertem-se uma vez com o `tools/converter_bag_antigo.py`, no `venv`:
-* os do Docker de aquisição antigo (`data/viagem_<data_hora>/`: imagens sem compressão, a viagem inteira);
-* as sessões antigas do online (`data_realtime_inter/realtime_<data_hora>/`).
-
-```bash
-python tools/converter_bag_antigo.py data/viagem_20261110_160407/viagem_20261110_160407_0.mcap               # duas câmaras
-python tools/converter_bag_antigo.py data/viagem_20261103_144234/viagem_20261103_144234_0.mcap --camara 5    # uma câmara (/image_raw)
-python tools/converter_bag_antigo.py <bag antigo> --percurso ua_ria                                          # com o nome do percurso
-```
-* **O que faz:** cria `data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap` com a data e a hora do nome antigo. As imagens passam a JPEG (qualidade 95, a do online), com os mesmos instantes, cerca de 6 vezes mais pequeno. Um bag sem trechos fica com **um trecho com a viagem inteira**, como se tivesse sido gravado com `--registar-tudo`. Os outros tópicos copiam-se como estão.
-* **Bags de uma só câmara** (tópico `/image_raw`): o nome não diz qual é, por isso indica-se com `--camara 5` ou `--camara 8`.
-* **O original não é alterado:** depois de confirmar o convertido (por exemplo, processá-lo no offline), a pasta antiga pode ser apagada. Um bag vazio (0 mensagens) não tem nada para converter: apaga-se.
-* **Registos antigos** (`data_offline/`, feitos a partir dos bags antigos): já não se leem. Processe de novo o bag convertido (3.4) e apague-os.
-* O `tools/converter_bag_antigo.py` só serve para esta conversão: quando já não houver bags antigos no grupo, pode ser apagado.
+Um bag noutro formato é recusado, com a mensagem `o bag não está no formato atual (...)`. Os bags gravados antes desta organização já foram convertidos para este formato.
 
 O mesmo bag pode também ser **reproduzido no Docker do online**, sem câmaras, com o processamento do online (4.11). A diferença: o online processa como ao vivo (as imagens que houver tempo de processar, resultados em tópicos ROS); o offline processa **todas** as imagens e faz o registo, a reprodução, os vídeos e a janela de resultados.
 
@@ -1044,7 +1028,7 @@ O bag só existe se houver pelo menos um trecho com imagens. Começa no arranque
   * `corrigida` diz se as coordenadas (caixas, linhas e contornos) são as da imagem corrigida da distorção ou as da original.
   * `estrada_contornos` e `estrada_buracos` são a área circulável (o que o visualizador desenha a verde); não se guarda `modelos_ativos` (correm sempre os três); o trecho de cada deteção sabe-se pelo tópico `/processamento/trechos`.
 * **`resumo_online.json`:** modo, câmaras (imagens processadas, deteções por segundo, correção, períodos desligada), modelos (dispositivo, limiares, tempos médios), a gravação (ficheiro, tamanho, formato das imagens), o **relógio do PC**, os **trechos** (início, fim e duração em segundos desde o arranque, imagens gravadas e com deteções, e períodos desligada de cada câmara), a grelha, o aviso e o planeador, e as estatísticas para **Ambas**, **5** e **8** (as mesmas do resumo do offline) na sessão inteira (`resumos`) e por filtro (`resumos_por_filtro`: `sessao`, `trechos`, `1`, `2`, ...).
-* A pasta `data/` não vai para o git (está no `.gitignore`). As sessões antigas (`data_realtime_inter/realtime_*`) convertem-se para o nome atual com o `tools/converter_bag_antigo.py` (3.1).
+* A pasta `data/` não vai para o git (está no `.gitignore`).
 
 ### 4.10 Do online para o offline: usar a mesma gravação
 O bag do online é o ponto de partida do offline (secção 3): os trechos podem ser analisados depois com todo o detalhe.
@@ -1061,7 +1045,7 @@ O bag do online é o ponto de partida do offline (secção 3): os trechos podem 
 * **Comparar os dois modos** nos mesmos trechos: o offline processa todas as imagens; o online, só as que houve tempo de processar. A diferença mostra o que se perde em tempo real com aquele PC.
 
 ### 4.11 Reproduzir um bag no Docker, sem câmaras
-> **Antes:** a imagem construída (4.6, passo 1), o ecrã autorizado (4.5; não é preciso com `-i`) e um bag gravado pelo online (4.9; um bag antigo converte-se antes, 3.1). O caminho do bag é relativo à pasta do terminal (ou absoluto).
+> **Antes:** a imagem construída (4.6, passo 1), o ecrã autorizado (4.5; não é preciso com `-i`) e um bag gravado pelo online (4.9). O caminho do bag é relativo à pasta do terminal (ou absoluto).
 
 O mesmo Docker corre **sem câmaras**, com as imagens de um bag gravado: em vez dos drivers, o serviço `reprodutor` publica as imagens do bag **nos mesmos tópicos** (`/camara<N>/image_raw`), e o processamento, o planeador, o visualizador e o RViz correm **sem alterações**, como no veículo. É o que o enunciado pede para a parte 2 ("o mesmo nó de perceção corre sem alterações com dados do bag real, com o sistema ao vivo ou com o Gazebo") e o que permite a outros grupos (e aos docentes) correrem o vosso nó sem as câmaras.
 ```bash
@@ -1589,8 +1573,6 @@ As câmaras dizem **o quê** e **em que faixa**; não medem distâncias nem velo
 | | `--erro-max` | erro (px) a partir do qual uma foto é destacada na revisão (1.0) |
 | | `--preview-largura` | largura máxima da janela (960) |
 | | `--saida` | pasta dos resultados (`calibracoes`) |
-| `python tools/converter_bag_antigo.py <bag antigo>` (3.1) | `--camara 5\|8` | câmara de um bag antigo de uma só câmara (`/image_raw`) |
-| | `--percurso <nome>`, `--destino <pasta>` | nome do percurso na sessão; pasta onde a criar (`data`) |
 | `python tools/exportar_linhas.py` (5.1.4, só no `.venv-exportar`) | `--unlanedet <pasta>` | pasta do UnLanedet (obrigatório) |
 | | `--modelo` | `clrnet_r34` (omissão), `clrnet_r50` ou `clrernet_r34` |
 | | `--pesos <ficheiro.pth>` | pesos (por omissão, descarregados do UnLanedet) |
@@ -1726,7 +1708,7 @@ Antes: a imagem construída (4.6, passo 1: `docker compose build`, com o `ONNX_P
 | `docs/referencia/<nome>/` | amostra, marcações (`anotacoes/*.json`) e métricas (`metricas.md`, `metricas.json`) | `offline/anotar_referencia.py`, `offline/metricas_referencia.py` | sim |
 | `data/referencia/<nome>/` | imagens da referência: original, referência, processamento e comparação | os mesmos | não |
 
-A pasta `data/` pode ser outra (o disco externo): `DADOS` no `.env` (1.6). Os bags antigos convertem-se com o `tools/converter_bag_antigo.py` (3.1).
+A pasta `data/` pode ser outra (o disco externo): `DADOS` no `.env` (1.6).
 
 ---
 
