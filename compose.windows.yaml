@@ -1,0 +1,72 @@
+# Versão para Windows / macOS (Docker Desktop) do compose.yaml: só a REPRODUÇÃO de um bag, com o
+# Foxglove para ver os resultados. Não há câmaras USB nem janelas X11 no Docker Desktop (ao vivo, a
+# janela e o RViz: Linux, compose.yaml). Não existe rede "host" real: os contentores ficam na rede
+# bridge do Docker e a porta do Foxglove é publicada para o Windows.
+#   $env:COMPOSE_FILE = "compose.windows.yaml"          (uma vez por terminal, PowerShell)
+#   $env:BAG = "g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap"     (dentro de ./data)
+#   docker compose build
+#   docker compose --profile reproduzir --profile foxglove up
+# Quem alterar um serviço no compose.yaml altera-o também aqui.
+
+x-ros: &ros
+  build:
+    context: .
+    args:
+      ONNX_PKG: ${ONNX_PKG:-onnxruntime}
+  image: va/${GRUPO:-g05}:latest
+  network_mode: bridge
+  ipc: host
+  stop_signal: SIGINT
+  environment: &ros-env
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+    RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+  volumes:
+    - ${DADOS:-./data}:/data
+
+services:
+  reprodutor:
+    <<: *ros
+    profiles: [reproduzir]
+    environment:
+      <<: *ros-env
+      CAMARAS_ATIVAS: ${CAMARAS_ATIVAS:-}
+      TAXA: ${TAXA:-1}
+    command: reprodutor /data/${BAG:-indicar_BAG}
+
+  percecao:                   # em reprodução: processa as imagens do bag, não grava nada
+    <<: *ros
+    environment:
+      <<: *ros-env
+      CAMARAS_ATIVAS: ${CAMARAS_ATIVAS:-${CAMARAS:-5 8}}
+      SEM_INTERFACE: "1"
+      SEM_CORRECAO: ${SEM_CORRECAO:-0}
+      REPRODUCAO: ${BAG:-indicar_BAG}
+      PASTA_REGISTO: /data
+    stop_grace_period: 30s
+    command: percecao
+
+  planeador:
+    <<: *ros
+    command: >
+      local_astar --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  gravador:
+    <<: *ros
+    profiles: [gravar]
+    command: >
+      bash -c 'exec ros2 bag record -s mcap
+      -o /data/${GRUPO:-g05}_resultados_$$(date +%Y%m%d_%H%M%S)
+      /tf_static
+      /${GRUPO:-g05}/grelha_local /${GRUPO:-g05}/zona_proibida
+      /${GRUPO:-g05}/caminho_local /${GRUPO:-g05}/estado
+      /${GRUPO:-g05}/aviso_faixa /${GRUPO:-g05}/aviso_saida_faixa /${GRUPO:-g05}/aviso_colisao
+      /camara5/processamento/dados_deteccoes /camara8/processamento/dados_deteccoes
+      /processamento/painel /processamento/estado_camaras'
+
+  foxglove:
+    <<: *ros
+    profiles: [foxglove]
+    ports:
+      - "8765:8765"
+    command: ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765

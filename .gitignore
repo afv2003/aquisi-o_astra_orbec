@@ -1,31 +1,39 @@
-# Ambientes virtuais e cache do Python
-venv/
-meu_ambiente/
-__pycache__/
-*.pyc
+# Gerado pelo colcon
+build/
+install/
+log/
 
-# Dados recolhidos (ROS bags), registos das deteções, vídeos gerados e vídeos de teste
-data/
-data_offline/
-data_realtime_inter/
+# Dados: bags, gravações do online, registos do offline e resultados (ficam no disco/SSD, não no GitHub)
+data/*
+!data/.gitkeep
 *.mcap
 *.mp4
+# pastas antigas (antes de data/): podem ser movidas para data/ (README, 1.5)
+data_offline/
+data_realtime_inter/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+meu_ambiente/
+.pytest_cache/
 
 # Ficheiros do Astra SDK (caso ainda estejam na pasta)
 bin/
 lib/
 include/
 samples/
-install/
 SimpleColorViewer-SFML
 
 # Deteção de linhas: ambiente de exportação e pesos originais do UnLanedet (não vão para o git)
 .venv-exportar/
 pesos/
 *.pth
-modelos/teste_linhas.png
+src/va_g05/modelos/teste_linhas.png
 
-# Código local do CLRNet original (já não é usado: o modelo está em modelos/linhas.onnx)
+# Código local do CLRNet original (já não é usado: o modelo está em src/va_g05/modelos/linhas.onnx)
 CLRNet/
 
 # Scripts pessoais e de teste (ficam só no PC de quem os usa)

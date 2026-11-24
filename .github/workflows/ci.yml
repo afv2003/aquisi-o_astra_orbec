@@ -1,0 +1,18 @@
+# Verificação automática a cada push: a imagem constrói-se e os testes passam.
+# Os testes não precisam de câmaras: a decisão local (grelha e avisos) é testada com cenas sintéticas e
+# os três modelos ONNX com uma imagem sintética (src/va_g05/test; README, secção 1.7).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir a imagem
+        run: docker compose build
+      - name: Testes (pytest dentro do contentor)
+        run: docker compose run --rm --no-deps planeador python3 -m pytest -q /ws/src

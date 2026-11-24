@@ -1,0 +1,152 @@
+{
+  "configById": {
+    "Image!g05cam5": {
+      "imageMode": {
+        "imageTopic": "/camara5/image_raw/compressed"
+      },
+      "cameraTopic": "/camara5/image_raw/compressed",
+      "transforms": {},
+      "topics": {},
+      "layers": {}
+    },
+    "Image!g05cam8": {
+      "imageMode": {
+        "imageTopic": "/camara8/image_raw/compressed"
+      },
+      "cameraTopic": "/camara8/image_raw/compressed",
+      "transforms": {},
+      "topics": {},
+      "layers": {}
+    },
+    "3D!g05vista": {
+      "followTf": "base_link",
+      "followMode": "follow-pose",
+      "cameraState": {
+        "perspective": false,
+        "distance": 45,
+        "phi": 0,
+        "thetaOffset": 90,
+        "targetOffset": [
+          -10,
+          0,
+          0
+        ],
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "scene": {},
+      "transforms": {},
+      "topics": {
+        "/g05/grelha_local": {
+          "visible": true
+        },
+        "/g05/caminho_local": {
+          "visible": true
+        },
+        "/g05/zona_proibida": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "g05-grelha-5m": {
+          "layerId": "foxglove.Grid",
+          "visible": true,
+          "frameId": "base_link",
+          "size": 40,
+          "divisions": 8,
+          "position": [
+            -10,
+            0,
+            0
+          ]
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose"
+      },
+      "imageMode": {}
+    },
+    "RawMessages!g05faixa": {
+      "topicPath": "/g05/aviso_faixa.data",
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "expansion": "all"
+    },
+    "RawMessages!g05saida": {
+      "topicPath": "/g05/aviso_saida_faixa.data",
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "expansion": "all"
+    },
+    "RawMessages!g05colisao": {
+      "topicPath": "/g05/aviso_colisao.data",
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "expansion": "all"
+    },
+    "RawMessages!g05estado": {
+      "topicPath": "/g05/estado.data",
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false,
+      "expansion": "all"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "splitPercentage": 38,
+    "first": {
+      "direction": "column",
+      "first": "Image!g05cam5",
+      "second": "Image!g05cam8"
+    },
+    "second": {
+      "direction": "row",
+      "splitPercentage": 55,
+      "first": "3D!g05vista",
+      "second": {
+        "direction": "column",
+        "splitPercentage": 30,
+        "first": "RawMessages!g05faixa",
+        "second": {
+          "direction": "column",
+          "splitPercentage": 40,
+          "first": "RawMessages!g05saida",
+          "second": {
+            "direction": "column",
+            "splitPercentage": 75,
+            "first": "RawMessages!g05colisao",
+            "second": "RawMessages!g05estado"
+          }
+        }
+      }
+    }
+  }
+}

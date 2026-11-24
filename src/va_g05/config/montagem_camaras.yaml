@@ -1,0 +1,109 @@
+# Montagem das câmaras no carro e grelha local (G5, projeto 3: câmaras laterais).
+#
+# Referencial do carro (base_link, convenção ROS REP-103/105): x para a frente, y para a esquerda,
+# z para cima; origem no chão, ao centro do eixo traseiro. Distâncias em metros, ângulos em graus.
+# Todos os valores podem (e devem) ser medidos no carro e corrigidos aqui; são lidos pelo online
+# (processar_tempo_real.py: TF e grelha) e pelo offline (processar_bag.py: vista de cima).
+#
+# Orientação de cada câmara, a partir de "olhar para trás" (como um retrovisor):
+#   rotacao_para_fora_graus  quanto roda para fora do carro (para a esquerda na câmara esquerda,
+#                            para a direita na câmara direita); 0 = exatamente para trás
+#   inclinacao_baixo_graus   quanto aponta para baixo (0 = horizontal)
+#   rotacao_eixo_graus       rotação em torno do eixo ótico (0 = horizonte nivelado)
+# sentido: "tras" ou "frente" (para câmaras viradas para a frente, rotacao_para_fora roda a partir
+# de "olhar para a frente").
+
+grupo: g05                # namespace dos tópicos (/g05/grelha_local)
+frame_carro: base_link
+
+camaras:
+  "5":                    # câmara esquerda
+    lado: esquerda
+    sentido: tras
+    x: 1.55               # ~10 cm atrás dos retrovisores (medir: distância ao eixo traseiro)
+    y: 0.60               # metade da distância entre as duas câmaras (positivo à esquerda)
+    z: 1.75               # altura ao chão (tejadilho + suporte)
+    rotacao_para_fora_graus: 12
+    inclinacao_baixo_graus: 15
+    rotacao_eixo_graus: 0
+  "8":                    # câmara direita
+    lado: direita
+    sentido: tras
+    x: 1.55
+    y: -0.60
+    z: 1.75
+    rotacao_para_fora_graus: 12
+    inclinacao_baixo_graus: 15
+    rotacao_eixo_graus: 0
+
+# Contorno do próprio carro no base_link (fica livre na grelha: é onde o carro está).
+carro:
+  frente: 3.0             # m à frente do eixo traseiro
+  tras: -0.6              # m atrás do eixo traseiro (negativo)
+  largura: 1.5
+
+# Grelha local (contrato da aula 10: nav_msgs/OccupancyGrid no base_link; -1 desconhecido, 0 livre,
+# 100 ocupado). Com câmaras viradas para trás, a grelha estende-se para trás (x negativo).
+grelha:
+  resolucao: 0.2          # m por célula
+  x_min: -30.0
+  x_max: 10.0
+  y_min: -10.0
+  y_max: 10.0
+  distancia_maxima: 25.0  # além disto (medido a partir da câmara) a projeção no chão é pouco fiável
+  distancia_minima: 2.5   # mais perto do que isto a câmara vê sobretudo o próprio carro: fica desconhecido
+  comprimento_veiculo: 4.5   # profundidade marcada atrás da base de cada veículo detetado (m)
+  validade_s: 1.0         # a camada de uma câmara sem imagem nova há mais do que isto passa a desconhecida
+
+# Os três avisos (decisao.py: os mesmos no online e no offline). Distâncias aproximadas (chão plano),
+# tempos em segundos. README, secção 5.4.
+
+# Aviso de mudança de faixa (aviso_faixa.py): para cada lado, a faixa ao lado do carro, do ângulo morto
+# até x_tras metros para trás, e os veículos dessa faixa que se aproximam (até x_tras_aproximacao).
+aviso_faixa:
+  modo_faixa: auto        # onde está a faixa ao lado: auto (pelas linhas detetadas quando há, senão pelo
+                          # centro), linhas (só pelas linhas; sem linhas: SEM_INFORMACAO) ou centro
+                          # (supõe o carro no centro da sua faixa)
+  largura_faixa: 3.5      # m; no modo centro, a faixa ao lado vai de largura/2 a 1,5 x largura para o lado
+  x_tras: -20.0           # m (atrás do eixo traseiro) até onde se procura um veículo na faixa ao lado
+  x_frente: 2.0           # m (à frente do eixo traseiro)
+  x_angulo_morto: -6.0    # um veículo mais perto do que isto (x >= -6 m) está no ângulo morto
+  min_vista: 0.5          # fração mínima da zona vista pelas câmaras (senão: SEM_INFORMACAO)
+  min_vista_angulo_morto: 0.2   # fração mínima do ângulo morto vista (senão: SEM_INFORMACAO)
+  max_nao_circulavel: 0.6 # acima desta fração "não circulável" (passeio, berma): SEM_FAIXA
+  min_celulas_veiculo: 4  # células de um veículo na zona para contar como OCUPADA (0,2 m x 0,2 m cada)
+  x_tras_aproximacao: -30.0   # m; um veículo da faixa ao lado que se aproxima conta até aqui atrás
+  ttc_mudanca_s: 4.0      # s; um veículo da faixa ao lado que chega junto do carro antes disto: OCUPADA
+  # linhas (modos auto e linhas)
+  x_referencia_linhas: -3.0     # m; onde se compara a posição das linhas (perto do carro)
+  min_comprimento_linha: 3.0    # m; linhas projetadas mais curtas não contam
+  max_inclinacao_linha: 0.25    # inclinação máxima de uma linha em relação ao carro (0,25 = 14 graus)
+  validade_linhas_s: 1.5        # uma linha deixa de contar se não for vista há mais do que isto
+  suavizacao_linhas: 0.5        # peso da linha nova na média com a anterior (1 = sem suavização)
+
+# Aviso de saída de faixa (aviso_saida_faixa.py): a linha da própria faixa de cada lado, vista pelas câmaras.
+aviso_saida_faixa:
+  limiar_perto_m: 0.3     # m entre o lado do carro e a linha: abaixo disto, PERTO
+  tlc_aviso_s: 1.0        # s até chegar à linha (a aproximar-se): abaixo disto, A_APROXIMAR
+  janela_s: 1.0           # s de amostras para o ritmo de aproximação à linha
+  min_amostras: 3
+  min_ritmo_m_s: 0.05     # aproximações mais lentas do que isto não contam
+  distancia_max_m: 2.5    # uma "linha interior" mais longe do que isto não é a da própria faixa
+
+# Aviso de colisão (aviso_colisao.py): pelo tempo até contacto (crescimento das caixas na imagem).
+aviso_colisao:
+  ttc_aviso_s: 3.0        # s; um objeto numa zona de interesse (atrás ou nas faixas ao lado) que chega antes: AVISO
+  ttc_perigo_s: 1.5       # s; antes disto: PERIGO
+  x_perto_atras: -8.0     # m; um veículo na própria faixa, atrás, mais perto do que isto: ATENCAO (segue colado)
+  x_tras_max: -30.0       # m; objetos mais atrás não contam
+  fracao_grande: 0.45     # sem posição no chão: com TTC de perigo e altura >= esta fração da imagem: PERIGO
+
+# Seguimento dos objetos entre imagens (seguimento.py) e tempo até contacto.
+seguimento:
+  iou_minimo: 0.25        # sobreposição mínima entre a caixa nova e a anterior para ser o mesmo objeto
+  max_ausencia_s: 0.8     # um objeto não visto há mais do que isto é esquecido
+  janela_s: 1.5           # s de amostras para o tempo até contacto
+  min_amostras: 3
+  min_intervalo_s: 0.25   # s mínimos entre a primeira e a última amostra
+  ttc_maximo_s: 8.0       # tempos até contacto maiores do que isto contam como "não se aproxima"
+  margem_borda_px: 3      # caixas a menos disto da borda da imagem estão cortadas (não servem para o TTC)
