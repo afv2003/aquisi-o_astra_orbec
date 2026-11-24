@@ -84,5 +84,5 @@ def confirmar(sessao, nome):
     depois = dispositivo(sessao)
     if depois != antes:
         print(f"Aviso: a {antes} falhou ao correr o modelo de {nome}; a usar o CPU (mais lento). "
-              "Ver README, secção 3.10.")
+              "Ver README, secção 3.5 (offline) ou 4.3 (Docker).")
     return depois

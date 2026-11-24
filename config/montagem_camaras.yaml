@@ -1,0 +1,68 @@
+# Montagem das câmaras no carro e grelha local (G5, projeto 3: câmaras laterais).
+#
+# Referencial do carro (base_link, convenção ROS REP-103/105): x para a frente, y para a esquerda,
+# z para cima; origem no chão, ao centro do eixo traseiro. Distâncias em metros, ângulos em graus.
+# Todos os valores podem (e devem) ser medidos no carro e corrigidos aqui; são lidos pelo online
+# (processar_tempo_real.py: TF e grelha) e pelo offline (processar_bag.py: vista de cima).
+#
+# Orientação de cada câmara, a partir de "olhar para trás" (como um retrovisor):
+#   rotacao_para_fora_graus  quanto roda para fora do carro (para a esquerda na câmara esquerda,
+#                            para a direita na câmara direita); 0 = exatamente para trás
+#   inclinacao_baixo_graus   quanto aponta para baixo (0 = horizontal)
+#   rotacao_eixo_graus       rotação em torno do eixo ótico (0 = horizonte nivelado)
+# sentido: "tras" ou "frente" (para câmaras viradas para a frente, rotacao_para_fora roda a partir
+# de "olhar para a frente").
+
+grupo: g05                # namespace dos tópicos (/g05/grelha_local)
+frame_carro: base_link
+
+camaras:
+  "5":                    # câmara esquerda
+    lado: esquerda
+    sentido: tras
+    x: 1.55               # ~10 cm atrás dos retrovisores (medir: distância ao eixo traseiro)
+    y: 0.60               # metade da distância entre as duas câmaras (positivo à esquerda)
+    z: 1.75               # altura ao chão (tejadilho + suporte)
+    rotacao_para_fora_graus: 12
+    inclinacao_baixo_graus: 15
+    rotacao_eixo_graus: 0
+  "8":                    # câmara direita
+    lado: direita
+    sentido: tras
+    x: 1.55
+    y: -0.60
+    z: 1.75
+    rotacao_para_fora_graus: 12
+    inclinacao_baixo_graus: 15
+    rotacao_eixo_graus: 0
+
+# Contorno do próprio carro no base_link (fica livre na grelha: é onde o carro está).
+carro:
+  frente: 3.0             # m à frente do eixo traseiro
+  tras: -0.6              # m atrás do eixo traseiro (negativo)
+  largura: 1.5
+
+# Grelha local (contrato da aula 10: nav_msgs/OccupancyGrid no base_link; -1 desconhecido, 0 livre,
+# 100 ocupado). Com câmaras viradas para trás, a grelha estende-se para trás (x negativo).
+grelha:
+  resolucao: 0.2          # m por célula
+  x_min: -30.0
+  x_max: 10.0
+  y_min: -10.0
+  y_max: 10.0
+  distancia_maxima: 25.0  # além disto (medido a partir da câmara) a projeção no chão é pouco fiável
+  distancia_minima: 2.5   # mais perto do que isto a câmara vê sobretudo o próprio carro: fica desconhecido
+  comprimento_veiculo: 4.5   # profundidade marcada atrás da base de cada veículo detetado (m)
+  validade_s: 1.0         # a camada de uma câmara sem imagem nova há mais do que isto passa a desconhecida
+
+# Aviso de mudança de faixa (aviso_faixa.py): para cada lado, a faixa ao lado do carro, do ângulo morto
+# até x_tras metros para trás. Supõe o carro no centro da sua faixa.
+aviso_faixa:
+  largura_faixa: 3.5      # m; a faixa ao lado vai de largura/2 a 1,5 x largura para o lado
+  x_tras: -20.0           # m (atrás do eixo traseiro) até onde se procura um veículo a aproximar-se
+  x_frente: 2.0           # m (à frente do eixo traseiro)
+  x_angulo_morto: -6.0    # um veículo mais perto do que isto (x >= -6 m) está no ângulo morto
+  min_vista: 0.5          # fração mínima da zona vista pelas câmaras (senão: SEM_INFORMACAO)
+  min_vista_angulo_morto: 0.2   # fração mínima do ângulo morto vista (senão: SEM_INFORMACAO)
+  max_nao_circulavel: 0.6 # acima desta fração "não circulável" (passeio, berma): SEM_FAIXA
+  min_celulas_veiculo: 4  # células de um veículo na zona para contar como OCUPADA (0,2 m x 0,2 m cada)

@@ -4,7 +4,8 @@ reproducao.py - Junta as imagens do bag original com as deteções de um registo
 
 Usado pelo reproduzir_registo.py (vídeo no ecrã ou em .mp4) e pelo gui_resultados.py (vídeo na
 GUI), para os dois mostrarem exatamente o mesmo: as imagens lidas e corrigidas como no
-processar_bag.py (leitura_bag.py) e as deteções registadas desenhadas com o visual.py.
+processar_bag.py (leitura_bag.py) e as deteções registadas desenhadas com o painel.py (o mesmo desenho
+do processar_bag.py e do visualizador do online).
 Os modelos não voltam a correr.
 
 Com um registo de duas câmaras, as imagens são juntadas lado a lado (5 à esquerda, 8 à direita),
@@ -17,9 +18,8 @@ de um trecho, o vídeo dela só existe nos intervalos em que esteve ligada.
 """
 from pathlib import Path
 
-import numpy as np
-
 import leitura_bag
+import painel
 import registo
 import visual
 
@@ -221,23 +221,12 @@ class Reproducao:
             frame = self.corretor[cam](frame)
         h, w = frame.shape[:2]
 
-        caixas, linhas_pts, mascara = [], [], None
         ativos = dict(self.carregado)
         if dados:
             ativos = {k: bool(v) for k, v in (dados.get("modelos_ativos") or self.carregado).items()}
-            caixas = [(*o["caixa"], o["classe"], o["confianca"]) for o in dados.get("objetos", [])]
-            linhas_pts = [np.array(l, dtype=np.float32) for l in dados.get("linhas", []) if len(l) > 1]
-            if ativos.get("estrada") and dados.get("estrada_contornos") is not None:
-                mascara = registo.mascara_dos_contornos(dados["estrada_contornos"], dados.get("estrada_buracos", []), w, h)
-        visual.desenhar_estrada(frame, mascara)
-        visual.desenhar_linhas(frame, linhas_pts)
-        visual.desenhar_caixas(frame, caixas)
-
-        n_obj, n_lin = len(caixas), len(linhas_pts)
-        pct = dados.get("estrada_percentagem", 0.0) if dados else 0.0
-        valores = {"objetos": f"{n_obj} objeto" + ("" if n_obj == 1 else "s"),
-                   "linhas": f"{n_lin} linha" + ("" if n_lin == 1 else "s"),
-                   "estrada": f"{pct:.0%} da imagem"}
+        # deteções do registo -> caixas, linhas e estrada; desenho igual ao do processamento (painel.py)
+        caixas, linhas_pts, mascara = painel.deteccoes_de_json(dados, w, h, ativos)
+        valores = painel.valores(caixas, linhas_pts, dados.get("estrada_percentagem", 0.0) if dados else 0.0)
         texto_cam = f"câmara {cam}" if cam is not None else "câmara não indicada"
         info = {"tempo": (t_ns - self.inicio_bag_ns) / 1e9, "total": self.duracao_bag,
                 "subtitulo": (f"Registo  ·  {texto_cam}  ·  trecho {trecho['n']}"
@@ -246,4 +235,4 @@ class Reproducao:
                 "modelos": [(k, self.nome_modelo[k], valores[k], None, ativos.get(k, False), self.carregado[k])
                             for k in MODELOS],
                 "rodape": f"{self.pasta.name}  ·  " + ("corrigida" if corrigida else "original")}
-        return visual.compor(frame, caixas, info)
+        return painel.camara(frame, caixas, linhas_pts, mascara, info)

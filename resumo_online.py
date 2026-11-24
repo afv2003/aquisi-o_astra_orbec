@@ -33,7 +33,10 @@ class ResumoOnline(ctk.CTk):
         caminho = Path(caminho)
         self.ficheiro = caminho / "resumo_online.json" if caminho.is_dir() else caminho
         self.resumo = json.loads(self.ficheiro.read_text(encoding="utf-8"))
-        self.title("Resumo do processamento em tempo real")
+        modo = self.resumo.get("modo", "tempo real")
+        titulo = {"reprodução": "Resumo da reprodução no online", "sem processamento":
+                  "Resumo da gravação (sem processamento)"}.get(modo, "Resumo do processamento em tempo real")
+        self.title(titulo)
         self.geometry("1320x760")
         self.minsize(1000, 600)
         self.configure(fg_color=FUNDO)
@@ -41,7 +44,7 @@ class ResumoOnline(ctk.CTk):
 
         cab = ctk.CTkFrame(self, fg_color="transparent")
         cab.pack(fill="x", padx=18, pady=(14, 0))
-        ctk.CTkLabel(cab, text="Resumo do processamento em tempo real", font=ctk.CTkFont(size=20, weight="bold"),
+        ctk.CTkLabel(cab, text=titulo, font=ctk.CTkFont(size=20, weight="bold"),
                      text_color=TEXTO).pack(side="left")
         ctk.CTkLabel(cab, text=f"   {self.ficheiro.parent}", font=ctk.CTkFont(size=12),
                      text_color=TEXTO_3).pack(side="left", pady=(4, 0))
@@ -111,6 +114,9 @@ class ResumoOnline(ctk.CTk):
                 "  (5 à esquerda, 8 à direita)" if duas else
                 (f"  (da sessão com as câmaras {registo.texto_camaras(self.cams)})" if len(self.cams) > 1 else ""))),
             ("Início", r.get("inicio", "—").replace("T", " ")),
+            *([("Modo", r["modo"])] if r.get("modo") else []),
+            *([("Bag reproduzido", (r.get("origem") or {}).get("bag", "—"))]
+              if (r.get("origem") or {}).get("tipo") == "reproducao" else []),
             ("Duração", tempo_txt(r.get("duracao_s"))),
             ("Correção", por_cam(lambda x: "sim" if x.get("correcao") and "desligada" not in x["correcao"]
                                  else ("não (--sem-correcao)" if x.get("correcao") else "não (sem calibração)"))),
@@ -119,6 +125,8 @@ class ResumoOnline(ctk.CTk):
             ("Deteções por segundo", por_cam(lambda x: "—" if x.get("deteccoes_por_segundo") is None
                                              else f"{x['deteccoes_por_segundo']:.1f}")),
         ]
+        if r.get("modo") == "sem processamento":         # só gravação: sem correção nem deteções
+            pares = [p_ for p_ in pares if p_[0] not in ("Correção", "Imagens processadas", "Deteções por segundo")]
         desligadas = [(c_, info[c_]["desligada_s"]) for c_ in cams if info[c_].get("desligada_s")]
         for c_, ints in desligadas:
             pares.append((f"Câmara {c_} desligada", intervalos_txt(ints)))
@@ -129,8 +137,20 @@ class ResumoOnline(ctk.CTk):
             pares.append(("Gravação", f"{grav['ficheiro']}  ({grav['tamanho_bytes'] / 1e9:.2f} GB)"))
             pares.append(("Trechos gravados", f"{len(self.trechos)}  ("
                           f"{tempo_txt(sum(t['duracao_s'] for t in self.trechos))} de vídeo)"))
+        elif (r.get("origem") or {}).get("tipo") == "reproducao":
+            pares.append(("Gravação", "nenhuma (reprodução de um bag)"))
         else:
             pares.append(("Gravação", "nenhum trecho (só deteção)"))
+        if grav and grav.get("ficheiro") and grav.get("imagens"):
+            aqui = sum((grav.get("comprimidas_pelo_processamento") or {}).values())
+            pares.append(("Imagens gravadas", grav["imagens"] + (f"  ({aqui} comprimidas pelo processamento: "
+                                                                  "o driver não publicou a versão comprimida)"
+                                                                  if aqui else "")))
+        rel = r.get("relogio") or ((r.get("origem") or {}).get("relogio"))
+        if rel:
+            import relogio
+            pares.append(("Relógio do PC", relogio.resumo_curto(rel)
+                          + ("" if r.get("relogio") else "  (da gravação)")))
         if filtro != "sessao":
             dur = sum(t["duracao_s"] for t in trechos_sel)
             n_sel = sum(resumo["imagens"].get(c_, 0) for c_ in cams)
@@ -142,8 +162,8 @@ class ResumoOnline(ctk.CTk):
         c = cartao(self.corpo, "Modelos")
         c.grid(row=0, column=1, sticky="nsew", padx=6, pady=6)
         mod, tempos = r.get("modelos", {}), r.get("tempo_medio_ms", {})
-        pares = []
-        for k in ("objetos", "linhas", "estrada"):
+        pares = [] if mod else [("Modelos", "nenhum (só gravação: --sem-processamento)")]
+        for k in (("objetos", "linhas", "estrada") if mod else ()):
             m = mod.get(k, {})
             lim = m.get("confianca_minima")
             txt = f"limiar {lim:g}" if isinstance(lim, (int, float)) else "classe mais provável"
@@ -154,8 +174,24 @@ class ResumoOnline(ctk.CTk):
         classes = mod.get("objetos", {}).get("classes")
         if isinstance(classes, list):
             pares.append(("Classes", ", ".join(classes)))
+        g = r.get("grelha_local")
+        if g:
+            pares.append(("Grelha local", f"{g['topico']}  ·  {g['resolucao']:g} m"
+                          + (f"  ·  {tempos['grelha']:.0f} ms/imagem" if tempos.get("grelha") else "")))
+        dl = r.get("decisao_local") or {}
+
+        def percentagens(cont):
+            tot = sum(cont.values())
+            return "  ·  ".join(f"{k.replace('_', ' ')} {v / tot:.0%}" for k, v in
+                                sorted(cont.items(), key=lambda kv: -kv[1])) if tot else "—"
+        avisos = dl.get("trechos" if filtro != "sessao" and dl.get("trechos") else "sessao") or {}
+        for lado in ("esquerda", "direita"):
+            if avisos.get(lado):
+                pares.append((f"Aviso ({lado[:3]}.)", percentagens(avisos[lado])))
+        if dl.get("planeador"):
+            pares.append(("A* (sessão)", percentagens(dl["planeador"])))
         if tempos.get("total"):
-            pares.append(("Por imagem", f"{tempos['total']:.0f} ms (correção, três modelos e desenho)"))
+            pares.append(("Por imagem", f"{tempos['total']:.0f} ms (correção, modelos, grelha e desenho)"))
         linhas_chave_valor(c, pares)
 
         # --- Linhas e área circulável, deteções por categoria e veículos (iguais ao offline) ---

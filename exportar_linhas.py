@@ -3,7 +3,7 @@
 """
 exportar_linhas.py - Exporta o CLRNet / CLRerNet do UnLanedet para ONNX e VERIFICA a exportação.
 
-Corre UMA vez, no "ambiente de exportação" (venv próprio, ver README secção 4).
+Corre UMA vez, no "ambiente de exportação" (venv próprio, ver README, secção 5.1.4).
 Gera modelos/linhas.onnx e modelos/linhas.json, que vão para o repositório; a
 partir daí o processar_bag.py usa-os em qualquer PC, só com o onnxruntime.
 

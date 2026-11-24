@@ -7,7 +7,16 @@ x-ros-realtime: &ros-realtime
   network_mode: host
   ipc: host
 
+# Online (Docker). Lançar sempre com o processar_inter.sh:
+#   bash processar_inter.sh 5 8                ao vivo (câmara 5 em /dev/video2, câmara 8 em /dev/video4)
+#   bash processar_inter.sh --bag <bag.mcap>   reprodução de um bag, sem câmaras (perfil "reproduzir")
+#   ... --rviz                                 também o RViz (perfil "rviz")
+# Serviços: driver de cada câmara (ou o reprodutor), processamento (só processa e publica),
+# planeador A* comum, visualizador (a janela: subscreve os tópicos e desenha) e RViz.
+
 services:
+  # Drivers das câmaras: /camara<N>/image_raw (sensor_msgs/Image) e, com o compressed_image_transport
+  # do Dockerfile, /camara<N>/image_raw/compressed (JPEG), que é o que se grava
   driver_camara5:
     <<: *ros-realtime
     privileged: true
@@ -28,27 +37,91 @@ services:
       -p frame_id:=camara8
       -p camera_name:=astra_rgb_8
 
+  # Reprodução de um bag (em vez das câmaras): publica as imagens nos mesmos tópicos dos drivers.
+  # O bag está em ${PASTA_BAG} (pode ser o disco externo), montada em /bag só para leitura.
+  reprodutor:
+    <<: *ros-realtime
+    profiles: [reproduzir]
+    environment:
+      - CAMARAS_ATIVAS=${CAMARAS_ATIVAS:-}
+      - TAXA=${TAXA:-1}
+    volumes:
+      - .:/workspace
+      - ${PASTA_BAG:-.}:/bag:ro
+    working_dir: /workspace
+    stop_signal: SIGINT
+    command: python3 reprodutor.py /bag/${BAG:-sem_bag.mcap}
+
+  # Processamento: só processa e publica (deteções, grelha local, aviso, TF); ao vivo, grava os trechos
+  # (gravacao_online.py) em data_realtime_inter/<sessão>/ (a pasta do projeto está em /workspace).
+  # Ctrl+C (ou o fim de outro contentor) termina como a tecla Q: fecha o bag e grava o resumo
   processador:
     <<: *ros-realtime
     depends_on:
       - driver_camara5
       - driver_camara8
     environment:
-      - DISPLAY=${DISPLAY:-:0}
-      - QT_X11_NO_MITSHM=1
       - CAMARAS_ATIVAS=${CAMARAS_ATIVAS}
       - SEM_INTERFACE=${SEM_INTERFACE:-0}
       - SEM_CORRECAO=${SEM_CORRECAO:-0}
       - SESSAO=${SESSAO:-}
       - REGISTAR_TUDO=${REGISTAR_TUDO:-0}
+      - SEM_PROCESSAMENTO=${SEM_PROCESSAMENTO:-0}
+      - REPRODUCAO=${REPRODUCAO:-}
+      - RELOGIO_NTP=${RELOGIO_NTP:-}
+      - SERVIDOR_NTP=${SERVIDOR_NTP:-pool.ntp.org}
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    stop_signal: SIGINT
+    stop_grace_period: 30s
+    command: python3 processar_tempo_real.py
+
+  # Planeador A* comum da aula 10 (src/va_planeamento, sem alterações): lê /g05/grelha_local e publica
+  # /g05/caminho_local, /g05/estado e /g05/zona_proibida. Corre o nó diretamente a partir de src/
+  # (sem colcon): o código é o mesmo que "ros2 run va_planeamento local_astar".
+  planeador:
+    <<: *ros-realtime
+    depends_on:
+      - processador
+    environment:
+      - PYTHONPATH=/workspace/src/va_planeamento
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    stop_signal: SIGINT
+    command: >
+      python3 -c "from va_planeamento.local_astar import main; main()"
+      --ros-args -r __ns:=/${GRUPO:-g05} --params-file /workspace/config/planeador.yaml
+
+  # Visualizador: a janela (câmaras com as deteções, vista de cima com o aviso). Não processa nada:
+  # subscreve os tópicos do processamento. Teclas: R trecho, D câmara da direita, Espaço pausa
+  # (reprodução), Q / Esc terminar. Também abre o resumo no fim (resumo_online.py).
+  visualizador:
+    <<: *ros-realtime
+    depends_on:
+      - processador
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+      - CAMARAS_ATIVAS=${CAMARAS_ATIVAS}
+      - SEM_CORRECAO=${SEM_CORRECAO:-0}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
       - .:/workspace
     working_dir: /workspace
-    # O processamento também grava o bag (vídeo original e deteções), só nos trechos
-    # (gravacao_online.py), em data_realtime_inter/<sessão>/ (a pasta do projeto está em /workspace).
-    # Ctrl+C (ou o fim de outro contentor) termina o processamento como a tecla Q: fecha o bag e grava
-    # o resumo
     stop_signal: SIGINT
-    stop_grace_period: 30s
-    command: python3 processar_tempo_real.py
+    command: python3 visualizador.py
+
+  # RViz (opcional, processar_inter.sh --rviz): imagens das câmaras (taxa e frame_id), TF das câmaras,
+  # grelha local e caminho do A*, no base_link (config/g05.rviz)
+  rviz:
+    <<: *ros-realtime
+    profiles: [rviz]
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./config:/config:ro
+    command: rviz2 -d /config/g05.rviz

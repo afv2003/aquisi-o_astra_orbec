@@ -4,7 +4,6 @@ import argparse
 import datetime
 from pathlib import Path
 import cv2
-import numpy as np
 
 # Módulos locais (na mesma pasta deste script): os três modelos correm em ONNX via onnxruntime
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -12,8 +11,12 @@ import objetos
 import linhas
 import estrada
 import visual        # desenho dos resultados e do painel (cores fixas por modelo e por classe)
+import painel        # o mesmo desenho do ecrã no offline e no visualizador do online
 import leitura_bag   # leitura dos bags e correção da distorção (também usado pelo reproduzir_registo.py)
 import registo       # registo das deteções (mesmo formato do processamento em tempo real)
+import geometria     # posição das câmaras no carro (config/montagem_camaras.yaml) e imagem <-> chão
+import grelha_local  # grelha de ocupação local (a mesma do online), vista de cima ao lado do vídeo
+import aviso_faixa   # aviso de mudança de faixa (o mesmo do online), sobre a vista de cima
 from teclado import TecladoTerminal
 
 # Classes do YOLO mostradas por omissão: só elementos de estrada (as mesmas do tempo real).
@@ -65,6 +68,8 @@ parser.add_argument("--registar-tudo", action="store_true",
                     help="Registar o vídeo todo (o mesmo que --trechos 0-)")
 parser.add_argument("--pasta-registo", type=str, default="data_offline",
                     help="Pasta onde os registos são guardados (por omissão: data_offline)")
+parser.add_argument("--sem-grelha", action="store_true",
+                    help="Não mostrar a grelha local (vista de cima) ao lado do vídeo (tecla G)")
 args = parser.parse_args()
 if args.registar_tudo:
     args.trechos = "0-"
@@ -95,7 +100,8 @@ if not indice_ok:
           "A ler as imagens sequencialmente, desde o início.")
 
 # --- CÂMARA(S) E TÓPICO(S) A PROCESSAR (rastreabilidade) ---
-# Bags novos (duas câmaras): cada câmara tem o seu tópico, /camara5/image_raw e /camara8/image_raw;
+# Bags novos (duas câmaras): cada câmara tem o seu tópico, /camara5/image_raw e /camara8/image_raw
+# (nos bags do online, comprimidas: /camara5/image_raw/compressed e /camara8/image_raw/compressed);
 # por omissão processam-se todas as câmaras do bag, lado a lado (5 à esquerda, 8 à direita).
 # Bags antigos (uma câmara): tópico /image_raw; a câmara lê-se do nome da pasta (viagem_camara5_...)
 # ou de --camara.
@@ -227,7 +233,7 @@ else:
               "Corre: pip install -r requirements.txt")
     except FileNotFoundError as e:
         print(f"Aviso: modelo de linhas não encontrado ({e}); a deteção de linhas fica DESLIGADA. "
-              "Ver README, secção 4.")
+              "Ver README, secção 5.1.")
 
 # Estrada / área circulável (YOLOP, modelos/estrada.onnx com o onnxruntime)
 detetor_estrada = None
@@ -243,7 +249,7 @@ else:
         print("Aviso: a biblioteca 'onnxruntime' não está instalada; a deteção da estrada fica DESLIGADA.")
     except FileNotFoundError as e:
         print(f"Aviso: modelo da estrada não encontrado ({e}); a deteção da estrada fica DESLIGADA. "
-              "Ver README, secção 6.")
+              "Ver README, secção 5.3.")
 
 # Nome de cada modelo, como aparece no painel do vídeo
 NOMES_LINHAS = {"clrnet_r34": "CLRNet", "clrnet_r50": "CLRNet", "clrernet_r34": "CLRerNet"}
@@ -345,6 +351,24 @@ if com_interface:
         print("[V]      : Desligar todas as deteções (só vídeo) / voltar a ligá-las")
 print("[Q]      : Terminar" + (" e fechar o visualizador" if com_interface else ""))
 corrigir = com_calibracao
+
+# --- GRELHA LOCAL (vista de cima): a mesma do online, a partir das deteções de cada imagem ---
+# Usa a posição das câmaras no carro (config/montagem_camaras.yaml) e a calibração de cada câmara.
+# Serve para ver o que o planeador recebe e para afinar a montagem (as linhas da faixa projetadas
+# no chão devem sair paralelas ao carro).
+grelha, mostrar_grelha, linhas_chao, geos_cam = None, False, {}, {}
+if com_interface and not args.sem_grelha:
+    montagem = geometria.carregar_montagem()
+    cams_grelha = [c for c in camaras if montagem and c in montagem["camaras"] and calibracao.get(c) is not None]
+    if montagem is None:
+        print(f"Grelha local: desligada (falta {geometria.CONFIG})")
+    elif not cams_grelha:
+        print("Grelha local: desligada (nenhuma câmara com posição no montagem_camaras.yaml e calibração)")
+    else:
+        grelha, mostrar_grelha = grelha_local.GrelhaLocal(montagem), True
+        p_aviso = aviso_faixa.parametros(montagem)
+        print(f"Grelha local (vista de cima, à direita): câmara{'s' if len(cams_grelha) > 1 else ''} "
+              f"{registo.texto_camaras(cams_grelha)}, config/montagem_camaras.yaml  ·  [G] mostra / esconde")
 
 janela_nome = "Visualizador OpenCV - Leitura em Tempo Real"
 if com_interface:
@@ -464,6 +488,13 @@ def tratar_evento_online(msg):
                     intervalos_online[c][-1][1] = msg.log_time_ns
         ativas_online = novas
         return
+    if ev.get("evento") == "sessao_inicio" and ev.get("relogio") is not None:
+        # estado do relógio do PC no online (NTP): fica no registo, para se saber se os instantes são de confiança
+        registador.metadados.setdefault("origem", {})["relogio"] = ev["relogio"]
+        if not ev["relogio"].get("ok"):
+            import relogio
+            print(f"\nAviso: no online, {relogio.resumo_curto(ev['relogio'])}: os instantes deste bag podem "
+                  "não coincidir com os de outros PCs.")
     if ev.get("evento") == "sessao_inicio" and start_time_sec == 0:
         # bag sem índice: os tempos contam-se desde o início da sessão online (como com índice)
         start_time_sec = ev["stamp_ns"] / 1e9
@@ -559,10 +590,9 @@ for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
         texto_registo = f"REGISTO  ·  trecho {registador.trecho['n']}  ·  {tempo_txt(dur)}"
 
     if com_interface:
-        # Desenho (cores fixas, ver visual.py): estrada por baixo, linhas por cima, objetos por cima de tudo
-        visual.desenhar_estrada(frame, mascara_estrada)
-        visual.desenhar_linhas(frame, linhas_frame)
-        visual.desenhar_caixas(frame, caixas)
+        # Desenho (painel.py, o mesmo do visualizador do online e da reprodução dos registos):
+        # estrada por baixo, linhas por cima, objetos por cima de tudo
+        painel.desenhar_deteccoes(frame, caixas, linhas_frame, mascara_estrada)
         limpa_cam[cam] = frame.copy()
 
         # Painel no canto superior esquerdo (tempo, câmara, um marcador por modelo, desempenho)
@@ -573,10 +603,8 @@ for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
             subtitulo, cor_sub = f"{texto_cam}  ·  corrigida", "#9CA3AF"
         else:
             subtitulo, cor_sub = f"{texto_cam}  ·  original (sem correção)", "#F59E0B"
-        n_obj, n_lin = len(caixas), len(linhas_frame)
-        valores = {"objetos": f"{n_obj} objeto" + ("" if n_obj == 1 else "s"),
-                   "linhas": f"{n_lin} linha" + ("" if n_lin == 1 else "s"),
-                   "estrada": f"{mascara_estrada.mean():.0%} da imagem" if mascara_estrada is not None else ""}
+        valores = painel.valores(caixas, linhas_frame,
+                                 float(mascara_estrada.mean()) if mascara_estrada is not None else None)
         info = {"tempo": t_rel, "total": total_duration_sec,
                 "subtitulo": subtitulo, "cor_subtitulo": cor_sub,
                 "modelos": [(k, nome_modelo[k], valores[k], tempos[k], ativo[k], carregado[k])
@@ -594,6 +622,26 @@ for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
                         w_, h_, f"Câmara {c}: desligada no online",
                         "tecla D no online: sem vídeo nem deteções desta câmara aqui")
         ecra = juntar(ecra_cam)
+        if grelha is not None:
+            # a camada desta câmara (a partir das mesmas deteções) e a grelha com as duas câmaras
+            k = (geometria.matriz_intrinseca(calibracao[cam], width, height, bool(corrigida))
+                 if cam in grelha.montagem["camaras"] and calibracao.get(cam) is not None else None)
+            if k is not None:
+                grelha.atualizar(cam, k, width, height, msg.log_time_ns, mascara_estrada if ativo["estrada"] else None,
+                                 caixas)
+                linhas_chao[cam] = grelha.linhas_no_chao(cam, k, linhas_frame)
+                geos_cam[cam] = grelha.geometria(cam, k)[0]
+            for c in camaras:
+                if bag_online and c not in ativas_online:      # desligada no online: sem camada
+                    grelha.remover(c)
+                    linhas_chao.pop(c, None)
+            if mostrar_grelha:
+                g_atual = grelha.combinada(msg.log_time_ns)
+                vista = painel.vista_de_cima(
+                    grelha, g_atual, ecra.shape[0], linhas_chao, geos_cam,
+                    aviso_faixa.avaliar(grelha, g_atual, grelha.veiculos(msg.log_time_ns), p_aviso), p_aviso,
+                    titulo="grelha local (vista de cima)")
+                ecra = visual.lado_a_lado([ecra, vista])
         if duas and not janela_ajustada:
             cv2.resizeWindow(janela_nome, ecra.shape[1], ecra.shape[0])
             janela_ajustada = True
@@ -627,6 +675,9 @@ for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
         chave = {ord('o'): "objetos", ord('l'): "linhas", ord('e'): "estrada"}[key]
         if carregado[chave]:
             ativo[chave] = not ativo[chave]
+    elif key == ord('g') and grelha is not None:
+        mostrar_grelha = not mostrar_grelha
+        janela_ajustada = False
     elif key == ord('v') and any(carregado.values()) and com_interface:
         ligar = not any(ativo.values())   # se alguma estiver ligada, desliga todas; senão, liga todas
         ativo = {k: ligar and carregado[k] for k in ativo}

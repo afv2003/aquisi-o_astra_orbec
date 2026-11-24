@@ -1,0 +1,19 @@
+# Parâmetros do planeador A* comum (src/va_planeamento, copiado sem alterações do modelo da aula 10).
+# "/**/local_astar" aplica-se ao nó com esse nome em qualquer namespace (aqui, /g05).
+#
+# Com as câmaras do G5 (laterais, viradas para trás) o planeador recebe a grelha local, mas a zona à
+# frente do carro, onde ele procura o caminho, não é vista pelas câmaras (fica desconhecida). Por isso
+# o estado dele (LIVRE / DESVIO / BLOQUEADO) não muda com os veículos atrás; a decisão de mudança de
+# faixa é a do aviso de faixa (/g05/aviso_faixa, aviso_faixa.py). O planeador fica a correr para
+# cumprir o contrato comum (mesmas entradas e saídas de todos os grupos) e para a parte 2.
+/**/local_astar:
+  ros__parameters:
+    frequencia: 5.0
+    objetivo_x: 25.0           # objetivo local (m, base_link): 25 m à frente ...
+    objetivo_y: 0.0            # ... no centro da faixa; ±3.5 = a faixa da esquerda / da direita
+    raio_inflacao: 1.0         # meia largura do ATLASCAR2 (~0,75 m) + margem
+    peso_heuristica: 1.0
+    desconhecido_livre: true
+    corredor_y_min: 0.0        # limites laterais da estrada (m), se conhecidos; iguais = desligado
+    corredor_y_max: 0.0
+    limiar_desvio: 0.3

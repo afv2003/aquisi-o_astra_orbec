@@ -41,6 +41,7 @@ from PIL import Image, ImageTk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import registo
+import relogio
 from reproducao import ErroRegisto, Reproducao
 
 try:
@@ -310,6 +311,8 @@ class TabResumo(ctk.CTkFrame):
             ("Bag", bag.get("nome", "—")),
             *([("Origem", "online  ·  " + ("trechos do online" if e["origem"].get("trechos") == "os do online"
                                             else "trechos pedidos"))] if online else []),
+            *([("Relógio do PC", relogio.resumo_curto(e["origem"]["relogio"]))]
+              if online and e["origem"].get("relogio") else []),
             ("Câmaras" if duas else "Câmara", txt_cam),
             ("Duração da sessão" if online else "Duração do bag", tempo_txt(bag.get("duracao_s"))),
             ("Correção", correcao),

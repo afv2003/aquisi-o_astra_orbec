@@ -130,7 +130,16 @@ def ler_mensagens(caminho, topicos, indice_ok, inicio_ns=None, fim_ns=None):
 
 
 def imagem_bgr(ros_msg):
-    """sensor_msgs/Image -> imagem BGR (numpy), ou None se a codificação não for suportada."""
+    """sensor_msgs/Image ou sensor_msgs/CompressedImage (JPEG/PNG) -> imagem BGR (numpy), ou None se a
+    codificação não for suportada."""
+    if not hasattr(ros_msg, "encoding"):               # CompressedImage (bags do online, desde a compressão)
+        img = cv2.imdecode(np.frombuffer(ros_msg.data, dtype=np.uint8), cv2.IMREAD_COLOR)
+        # formato do compressed_image_transport: "<original>; jpeg compressed <codificação comprimida>";
+        # o JPEG vem quase sempre em bgr8 (o imdecode devolve BGR); só em rgb8 é preciso trocar as cores
+        formato = (getattr(ros_msg, "format", "") or "").strip()
+        if img is not None and formato.endswith("compressed rgb8"):
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        return img
     w, h = ros_msg.width, ros_msg.height
     if ros_msg.encoding == 'yuv422_yuy2':
         yuv = np.frombuffer(ros_msg.data, dtype=np.uint8).reshape((h, w, 2))
@@ -145,11 +154,13 @@ def imagem_bgr(ros_msg):
 # Câmara e tópico
 # --------------------------------------------------------------------------- #
 def camaras_no_bag(topicos):
-    """{'5': '/camara5/image_raw', ...} a partir dos tópicos do bag."""
+    """{'5': '/camara5/image_raw', ...} a partir dos tópicos do bag. As imagens podem estar sem
+    compressão (/camara<N>/image_raw, bags antigos) ou comprimidas (/camara<N>/image_raw/compressed,
+    bags do online); se o bag tiver as duas, usa-se a sem compressão."""
     cams = {}
-    for t in topicos:
-        m = re.fullmatch(r"/camara([0-9A-Za-z]+)/image_raw", t)
-        if m:
+    for t in sorted(topicos, key=lambda t: t.endswith("/compressed")):
+        m = re.fullmatch(r"/camara([0-9A-Za-z]+)/image_raw(/compressed)?", t)
+        if m and m.group(1) not in cams:
             cams[m.group(1)] = t
     return cams
 
