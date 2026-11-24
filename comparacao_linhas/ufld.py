@@ -8,8 +8,8 @@ de pontos (x, y) em píxeis da imagem recebida.
 
 Modelo: UFLDv2 ResNet34 treinado no CULane (F1 76.0), o mesmo conjunto de treino e o mesmo backbone
 do CLRNet usado no projeto. O ONNX é o convertido pelo PINTO0309 (indicado no README oficial do
-UFLDv2): ufldv2_culane_res34_320x1600.onnx, guardado como modelos/ufld.onnx pelo preparar_ufld.py
-(é demasiado grande para o git). A configuração está em modelos/ufld.json.
+UFLDv2): ufldv2_culane_res34_320x1600.onnx, guardado como comparacao_linhas/modelos/ufld.onnx pelo preparar_ufld.py
+(é demasiado grande para o git). A configuração está em comparacao_linhas/modelos/ufld.json.
 
 Pré e pós-processamento iguais aos do demo oficial (cfzd/Ultra-Fast-Lane-Detection-v2, demo.py e
 configs/culane_res34.py): imagem RGB normalizada com a média e o desvio do ImageNet; a imagem é
@@ -24,7 +24,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-import gpu
+from va_g05 import gpu
 
 PASTA_MODELOS = Path(__file__).resolve().parent / "modelos"
 MEDIA_IMAGENET = np.array([0.485, 0.456, 0.406], dtype=np.float32)

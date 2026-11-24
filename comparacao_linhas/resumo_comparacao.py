@@ -8,8 +8,8 @@ linhas e o tempo por imagem; a concordância entre os dois (mesmo número de lin
 encontradas pelos dois e a distância entre elas); e os instantes guardados nas pausas.
 Filtro por trecho, como no offline. Aberta no fim do comparar_linhas.py (com janela).
 
-  python resumo_comparacao.py                                  # a sessão mais recente (data_comparacao)
-  python resumo_comparacao.py data_comparacao/<origem>/<sessão>
+  python comparacao_linhas/resumo_comparacao.py                                  # a sessão mais recente (data/comparacao)
+  python comparacao_linhas/resumo_comparacao.py data/comparacao/<origem>/<sessão>
 """
 import argparse
 import os
@@ -17,12 +17,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import comparacao
-import gui_comum
-import registo
-from comparacao import MODELOS, NOMES
-from gui_comum import (ACENTO, CARTAO, CARTAO_2, FUNDO, TEXTO, TEXTO_2, TEXTO_3, cartao, ctk,
+sys.path[:0] = [str(Path(__file__).resolve().parent),                                   # comparação
+                str(Path(__file__).resolve().parents[1] / "src" / "va_g05"),            # biblioteca comum (pacote va_g05)
+                str(Path(__file__).resolve().parents[1] / "offline")]                   # teclado.py
+import comparacao  # noqa: E402
+from va_g05 import gui_comum, registo  # noqa: E402
+from comparacao import MODELOS, NOMES  # noqa: E402
+from va_g05.gui_comum import (ACENTO, CARTAO, CARTAO_2, FUNDO, TEXTO, TEXTO_2, TEXTO_3, cartao, ctk,
                        linhas_chave_valor, pct, tempo_txt)
 
 COR_MODELO = {"clrnet": "#FACC15", "ufld": "#38BDF8"}       # só para as barras desta janela
@@ -205,15 +206,16 @@ def abrir(pasta):
 def main():
     ap = argparse.ArgumentParser(description="Resumo de uma sessão de comparação de modelos de linhas.")
     ap.add_argument("sessao", nargs="?", default=None,
-                    help="Pasta da sessão (data_comparacao/<origem>/<sessão>). Sem nada: a mais recente")
-    ap.add_argument("--pasta-registo", default="data_comparacao", help="Pasta das sessões (por omissão: data_comparacao)")
+                    help="Pasta da sessão (data/comparacao/<origem>/<sessão>). Sem nada: a mais recente")
+    ap.add_argument("--pasta-registo", default=None, help="Pasta das sessões (por omissão: data/comparacao)")
     args = ap.parse_args()
     if args.sessao:
         pasta = comparacao.pasta_da_sessao(args.sessao)
     else:
+        args.pasta_registo = args.pasta_registo or str(comparacao.PASTA_SESSOES)
         sessoes = comparacao.listar_sessoes(args.pasta_registo)
         if not sessoes:
-            print(f"Não há sessões em '{args.pasta_registo}'. Faça uma com: python comparar_linhas.py <bag ou vídeo>")
+            print(f"Não há sessões em '{args.pasta_registo}'. Faça uma com: python comparacao_linhas/comparar_linhas.py <bag ou vídeo>")
             sys.exit(1)
         pasta = sessoes[-1]
     if not (pasta / "ensaio.json").exists() and not (pasta / "instantes").exists():

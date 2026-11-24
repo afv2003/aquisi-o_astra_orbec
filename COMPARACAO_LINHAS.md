@@ -1,8 +1,8 @@
 # Comparação de modelos de deteção de linhas: CLRNet vs UFLDv2
 
-> Ramo `Extra-Line-Comparison`: fica **à parte do `main`** e não é para juntar ao `main`. Tudo o resto do projeto (README.md) é igual ao do `main`; este ramo só acrescenta os ficheiros da comparação (secção 11).
+> Ramo `Extra-Line-Comparison`: fica **à parte do `main`** e não é para juntar ao `main`. Tudo o resto do projeto (README.md) é igual ao do `main`; este ramo só acrescenta a pasta `comparacao_linhas/` e este documento (secção 11). Corre no `venv` do offline, sem Docker.
 
-Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de linhas do projeto (**CLRNet ResNet34**, README 5.1) com o **UFLDv2 ResNet34** (Ultra-Fast-Lane-Detection-v2). Os dois foram treinados no mesmo conjunto de dados (CULane) e têm o mesmo backbone. Segue o processamento offline (`processar_bag.py`, README 3.9): lê o vídeo de uma câmara, corrige a distorção e mostra-o **duas vezes, lado a lado**: à esquerda com as linhas do CLRNet, à direita com as do UFLDv2. É uma ferramenta **demonstrativa**: em vez de gravar o vídeo inteiro com as deteções, guarda em `.png` os instantes em que se pausa o vídeo.
+Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de linhas do projeto (**CLRNet ResNet34**, README 5.1) com o **UFLDv2 ResNet34** (Ultra-Fast-Lane-Detection-v2). Os dois foram treinados no mesmo conjunto de dados (CULane) e têm o mesmo backbone. Segue o processamento offline (`offline/processar_bag.py`, README 3.4): lê o vídeo de uma câmara, corrige a distorção e mostra-o **duas vezes, lado a lado**: à esquerda com as linhas do CLRNet, à direita com as do UFLDv2. É uma ferramenta **demonstrativa**: em vez de gravar o vídeo inteiro com as deteções, guarda em `.png` os instantes em que se pausa o vídeo.
 
 ```
  bag .mcap (câmara 5 ou 8)              ┌──▶ CLRNet (linhas.py) ──▶ esquerda ─┐
@@ -33,12 +33,12 @@ Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de lin
 ## 0. Onde encaixa no projeto e quando usar
 **Ponto comum com o resto do projeto: o vídeo original em `.mcap`.** Tal como o modo offline e o modo online (README 1.1), a comparação parte do vídeo original das câmaras gravado num bag:
 ```
- aquisição (offline, README 3.1-3.7) ──▶ data/viagem_<data>/*.mcap ──────────┐
- online (README 4) ──▶ data_realtime_inter/realtime_<data>/*.mcap (vídeo original) ─┼──▶ comparar_linhas.py
- vídeos / imagens externos (ex. nuScenes, Argoverse) ──────────────────────────────┘
+ online (aquisição, README 4) ──▶ data/g05_camaras_<data_hora>/*.mcap (vídeo, só os trechos) ───┐
+ bags antigos (README 3.1) ─────▶ data/viagem_<data>/*.mcap (vídeo da viagem inteira) ──────────┼──▶ comparacao_linhas/comparar_linhas.py
+ vídeos / imagens externos (ex. nuScenes, Argoverse) ───────────────────────────────────────────┘
 ```
 * Lê os bags **da mesma forma que o `processar_bag.py`** (`leitura_bag.py`): mesma câmara, mesma calibração, mesma correção da distorção e mesmo `stamp_ns` de cada imagem. Por isso, o que se vê aqui é o que o CLRNet do offline e do online vê.
-* As deteções ficam no **mesmo formato do registo do offline** (README 3.11-3.12), com cada modelo no lugar de uma câmara (secção 5).
+* As deteções ficam no **mesmo formato do registo do offline** (README 3.6-3.7), com cada modelo no lugar de uma câmara (secção 5).
 * Vídeos e pastas de imagens externos são lidos **como no `processar_video_teste.py`** (o script de testes do offline com vídeos externos, por exemplo do Argoverse 2 ou do nuScenes).
 
 **Diferenças em relação ao `processar_bag.py`:**
@@ -61,7 +61,7 @@ Para processar uma viagem com todas as deteções, use o `processar_bag.py` (off
 **Relevância para a parte 2 (online, README 1.3):** o online usa o CLRNet e precisa de imagens por segundo. O UFLD é conhecido por ser rápido; esta comparação mostra, nas mesmas imagens e na mesma GPU, quanto custa cada modelo em tempo (secção 8) e onde diferem as deteções (secções 4, 6 e 7.2), antes de pensar em mudar o modelo do online.
 
 ## 1. Preparar o ambiente e o modelo UFLDv2 (uma vez por PC)
-1. **Ambiente Python:** o mesmo `venv` do offline (README 3.8; GPU: README 3.10). Ative-o **em cada terminal novo**:
+1. **Ambiente Python:** o mesmo `venv` do offline (README 3.3; GPU: README 3.5). Ative-o **em cada terminal novo**:
    ```bash
    venv\Scripts\activate          # Windows
    source venv/bin/activate       # Linux / macOS
@@ -71,20 +71,20 @@ Para processar uma viagem com todas as deteções, use o `processar_bag.py` (off
    ```bash
    git switch Extra-Line-Comparison
    ```
-3. **Modelo UFLDv2.** O ONNX do UFLDv2 ResNet34 CULane tem **866 MB** (a última camada é muito grande), por isso **não vai para o git** (o GitHub não aceita ficheiros com mais de 100 MB; `modelos/ufld.onnx` está no `.gitignore`). Prepara-se uma vez:
+3. **Modelo UFLDv2.** O ONNX do UFLDv2 ResNet34 CULane tem **866 MB** (a última camada é muito grande), por isso **não vai para o git** (o GitHub não aceita ficheiros com mais de 100 MB; `comparacao_linhas/modelos/ufld.onnx` está no `.gitignore`). Prepara-se uma vez:
    ```bash
-   python preparar_ufld.py
+   python comparacao_linhas/preparar_ufld.py
    ```
-   * Descarrega o arquivo do **PINTO_model_zoo** (`324_Ultra-Fast-Lane-Detection-v2`, o ONNX indicado no README oficial do UFLDv2; cerca de 2,9 GB), lê-o à medida que chega e guarda só o `ufldv2_culane_res34_320x1600.onnx`, como `modelos/ufld.onnx`. Pára de descarregar logo que o encontra (cerca de 1,2 GB lidos).
+   * Descarrega o arquivo do **PINTO_model_zoo** (`324_Ultra-Fast-Lane-Detection-v2`, o ONNX indicado no README oficial do UFLDv2; cerca de 2,9 GB), lê-o à medida que chega e guarda só o `ufldv2_culane_res34_320x1600.onnx`, como `comparacao_linhas/modelos/ufld.onnx`. Pára de descarregar logo que o encontra (cerca de 1,2 GB lidos).
    * Depois **verifica** o modelo: entrada `[1, 3, 320, 1600]` e as quatro saídas do UFLDv2 (`loc_row [1, 200, 72, 4]`, `loc_col [1, 100, 81, 4]`, `exist_row [1, 2, 72, 4]`, `exist_col [1, 2, 81, 4]`), corre-o numa imagem e mostra o dispositivo (CPU/GPU), o tempo por imagem e o `sha256`. No fim deve aparecer **`MODELO UFLD PRONTO`**.
    * Se a descarga falhar (rede, firewall), descarregue o arquivo noutro programa e use-o:
      ```bash
      curl -L -o resources.tar.gz https://s3.ap-northeast-2.wasabisys.com/pinto-model-zoo/324_Ultra-Fast-Lane-Detection-v2/resources.tar.gz
-     python preparar_ufld.py --de resources.tar.gz
+     python comparacao_linhas/preparar_ufld.py --de resources.tar.gz
      ```
      (`--de` também aceita o `.onnx` já extraído.)
-   * Se a verificação falhar a meio (por exemplo, sem o `venv` ativo), o modelo já descarregado fica guardado: basta `python preparar_ufld.py --verificar`. Se o ficheiro ficou incompleto (erro "não é um modelo ONNX válido"), apague o `modelos/ufld.onnx` e corra de novo.
-   * A configuração do modelo (âncoras, corte, critérios) está em `modelos/ufld.json` (esse vai para o git).
+   * Se a verificação falhar a meio (por exemplo, sem o `venv` ativo), o modelo já descarregado fica guardado: basta `python comparacao_linhas/preparar_ufld.py --verificar`. Se o ficheiro ficou incompleto (erro "não é um modelo ONNX válido"), apague o `comparacao_linhas/modelos/ufld.onnx` e corra de novo.
+   * A configuração do modelo (âncoras, corte, critérios) está em `comparacao_linhas/modelos/ufld.json` (esse vai para o git).
 
 ## 2. Escolher a entrada: bag, vídeo ou pasta de imagens
 O primeiro argumento do `comparar_linhas.py` é a entrada; o tipo é reconhecido sozinho.
@@ -92,7 +92,7 @@ O primeiro argumento do `comparar_linhas.py` é a entrada; o tipo é reconhecido
 **Bags `.mcap`** (como no `processar_bag.py`):
 * Da aquisição (`data/viagem_<data>/viagem_<data>_0.mcap`) ou do online (`data_realtime_inter/realtime_<data>/...`). Funciona também com bags sem índice ou com blocos estragados (lê sequencialmente, como no offline).
 * **Uma câmara de cada vez**: por omissão a primeira do bag (a 5 num bag com as duas); `--camara 8` para a outra.
-* A imagem é **corrigida da distorção antes dos dois modelos** com `config/camera_astra_<N>.yaml` (ou o `/camera_info` do bag); `--calib <yaml>` para outra calibração, `--sem-correcao` para não corrigir.
+* A imagem é **corrigida da distorção antes dos dois modelos** com `src/va_g05/config/camera_astra_<N>.yaml` (ou o `/camera_info` do bag); `--calib <yaml>` para outra calibração, `--sem-correcao` para não corrigir.
 
 **Vídeos** (`.mp4`, `.avi`, `.mov`, `.mkv`, `.m4v`, `.webm`) e **pastas de imagens** (`.jpg`, `.jpeg`, `.png`, `.bmp`), como no `processar_video_teste.py`:
 * Reduzidos a **640 px de largura** (`--largura`, como as Astra; `--largura 0` não reduz). Sem correção da distorção (a calibração é a das Astra).
@@ -101,20 +101,20 @@ O primeiro argumento do `comparar_linhas.py` é a entrada; o tipo é reconhecido
   * senão, de `--fps` (por omissão 30 imagens/s). **Indique sempre o `--fps` certo**: os tempos no ecrã, nos trechos e nos nomes das pastas dos instantes vêm daí.
 * **nuScenes:** use uma pasta da câmara da frente e **uma cena de cada vez** (a pasta do nuScenes mistura todas as cenas; os ficheiros da mesma cena começam pelo mesmo prefixo, ex. `n008-2018-08-01-15-16-36-0400__CAM_FRONT__*.jpg`; copie-os para uma pasta à parte):
   ```bash
-  python comparar_linhas.py data/nuscenes/samples/CAM_FRONT --fps 2      # só keyframes (2 imagens/s)
-  python comparar_linhas.py data/nuscenes/sweeps/CAM_FRONT --fps 12      # todas as imagens (cerca de 12/s)
+  python comparacao_linhas/comparar_linhas.py data/nuscenes/samples/CAM_FRONT --fps 2      # só keyframes (2 imagens/s)
+  python comparacao_linhas/comparar_linhas.py data/nuscenes/sweeps/CAM_FRONT --fps 12      # todas as imagens (cerca de 12/s)
   ```
   A `CAM_FRONT` (1600x900) fica com 640x360. A câmara de trás (`CAM_BACK`) também funciona, mas a vista da frente é a que corresponde às Astra.
 
 ## 3. Comparar (`comparar_linhas.py`)
 Com o `venv` ativo, na pasta do projeto:
 ```bash
-python comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap                 # câmara 5 (a primeira do bag)
-python comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap --camara 8       # câmara 8
-python comparar_linhas.py <bag>.mcap --registar-tudo                               # registar o vídeo todo
-python comparar_linhas.py <bag>.mcap --sem-interface --trechos "10-20,60-"         # sem janela, trechos fixos
-python comparar_linhas.py video.mp4                                                # vídeo externo
-python comparar_linhas.py pasta_com_imagens --fps 10                               # pasta de imagens
+python comparacao_linhas/comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap                 # câmara 5 (a primeira do bag)
+python comparacao_linhas/comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap --camara 8       # câmara 8
+python comparacao_linhas/comparar_linhas.py <bag>.mcap --registar-tudo                               # registar o vídeo todo
+python comparacao_linhas/comparar_linhas.py <bag>.mcap --sem-interface --trechos "10-20,60-"         # sem janela, trechos fixos
+python comparacao_linhas/comparar_linhas.py video.mp4                                                # vídeo externo
+python comparacao_linhas/comparar_linhas.py pasta_com_imagens --fps 10                               # pasta de imagens
 ```
 
 **3.1 No arranque, o terminal mostra** a configuração de cada modelo, a entrada, a pasta da sessão e as teclas:
@@ -122,7 +122,7 @@ python comparar_linhas.py pasta_com_imagens --fps 10                            
 CLRNet: CLRNet ResNet34, CULane (F1 78.99 no UnLanedet)  ·  GPU (CUDA)  ·  corte do topo 46%  ·  confiança mínima 0.4
 UFLDv2: UFLDv2 ResNet34, CULane (F1 76.0)  ·  GPU (CUDA)  ·  corte do topo 40%
 Entrada: CAM_FRONT (pasta)  ·  sem correção da distorção  ·  reduzida a 640 px de largura
-Sessão: data_comparacao\CAM_FRONT\CAM_FRONT_20261121_033909
+Sessão: data\comparacao\CAM_FRONT\CAM_FRONT_20261121_033909
 ```
 Confirme o dispositivo (`GPU (CUDA)` ou `CPU`; secção 8).
 
@@ -143,19 +143,19 @@ Confirme o dispositivo (`GPU (CUDA)` ou `CPU`; secção 8).
 **3.4 No fim:** o terminal mostra o tempo médio de cada modelo, os trechos registados, os instantes guardados e o comando do resumo (exemplo de uma sessão em CPU):
 ```
 Tempo médio por imagem: CLRNet 184 ms | UFLDv2 296 ms  (117 imagens)
-Registo guardado em: data_comparacao\CAM_BACK\CAM_BACK_20261121_033909
+Registo guardado em: data\comparacao\CAM_BACK\CAM_BACK_20261121_033909
   trecho 1: 32.5 s a 49.0 s (34 imagens, os dois modelos)
-Instantes guardados: 2, em data_comparacao\CAM_BACK\CAM_BACK_20261121_033909\instantes
-Resumo: python resumo_comparacao.py "data_comparacao\CAM_BACK\CAM_BACK_20261121_033909"
+Instantes guardados: 2, em data\comparacao\CAM_BACK\CAM_BACK_20261121_033909\instantes
+Resumo: python comparacao_linhas/resumo_comparacao.py "data\comparacao\CAM_BACK\CAM_BACK_20261121_033909"
 ```
 Com janela, no fim do vídeo aparece "Fim do vídeo" (**Q** fecha) e abre o **resumo** (secção 6; `--sem-resumo` para não abrir), se houver trechos ou instantes.
 
-As sessões ficam em `data_comparacao/<viagem ou entrada>/<câmara ou entrada>_<data_hora>/` (`--pasta-registo` para outra pasta; `data_comparacao/` está no `.gitignore`).
+As sessões ficam em `data/comparacao/<viagem ou entrada>/<câmara ou entrada>_<data_hora>/` (`--pasta-registo` para outra pasta; `data/comparacao/` está no `.gitignore`).
 
 ## 4. Instantes guardados nas pausas
 Em vez de gravar o vídeo inteiro com as deteções, **cada pausa** (Espaço) guarda o instante em que o vídeo parou (os dois lados param ao mesmo tempo, na mesma imagem), numa pasta só desse instante:
 ```
-data_comparacao/<origem>/<sessão>/instantes/001_01m12.37s/
+data/comparacao/<origem>/<sessão>/instantes/001_01m12.37s/
     original.png      a imagem tal como está no bag (ou no vídeo, já reduzida a 640 px)
     corrigida.png     a imagem corrigida da distorção: a que os DOIS modelos receberam (só bags com correção)
     clrnet.png        a vista do CLRNet (linhas e painel), como no ecrã, à esquerda
@@ -168,9 +168,9 @@ data_comparacao/<origem>/<sessão>/instantes/001_01m12.37s/
 * Um instante é guardado mesmo fora de um trecho do registo.
 
 ## 5. Registo das deteções (trechos)
-Igual ao do `processar_bag.py` (README 3.11 e 3.12): por **trechos** (tecla **R**, `--trechos`, `--registar-tudo`), com as deteções **de cada modelo em separado, como se fossem duas câmaras**:
+Igual ao do `processar_bag.py` (README 3.6 e 3.7): por **trechos** (tecla **R**, `--trechos`, `--registar-tudo`), com as deteções **de cada modelo em separado, como se fossem duas câmaras**:
 ```
-data_comparacao/<origem>/<sessão>/
+data/comparacao/<origem>/<sessão>/
     deteccoes.mcap    um tópico por modelo: /clrnet/processamento/dados_deteccoes e /ufld/processamento/dados_deteccoes
     ensaio.json       fonte, câmara, calibração, os dois modelos (descrição, dispositivo, parâmetros), trechos e tempos
     instantes/        (secção 4)
@@ -184,9 +184,9 @@ data_comparacao/<origem>/<sessão>/
 ## 6. Resumo da comparação (`resumo_comparacao.py`)
 Abre no fim do `comparar_linhas.py` (com janela) ou depois:
 ```bash
-python resumo_comparacao.py                                   # a sessão mais recente (em data_comparacao)
-python resumo_comparacao.py data_comparacao/<origem>/<sessão>
-python resumo_comparacao.py --pasta-registo outra_pasta       # a mais recente noutra pasta
+python comparacao_linhas/resumo_comparacao.py                                   # a sessão mais recente (em data/comparacao)
+python comparacao_linhas/resumo_comparacao.py data/comparacao/<origem>/<sessão>
+python comparacao_linhas/resumo_comparacao.py --pasta-registo outra_pasta       # a mais recente noutra pasta
 ```
 Com o aspeto do Resumo do offline (mais simples) e um filtro por **trecho**:
 * **Vídeo e registo:** entrada, câmara, correção, trechos, imagens e duração do que está selecionado.
@@ -238,7 +238,7 @@ Fontes: CULane ([página do conjunto](https://xingangpan.github.io/projects/CULa
 * **Ideia do UFLD:** em vez de procurar a linha em cada píxel, escolhe, para cada uma de 72 linhas horizontais da imagem (âncoras), em que coluna (de 200) passa cada uma de 4 linhas da estrada; as duas linhas de fora usam 81 âncoras verticais. Por isso as linhas saem com pequenos "degraus" (mais onduladas do que as do CLRNet, que prevê cada linha inteira de uma vez).
 * **Pré-processamento** (igual ao demo oficial, `demo.py` e `configs/culane_res34.py`): RGB; corta-se o topo da imagem (40%: o modelo foi treinado a ver só os 60% de baixo, `crop_ratio = 0.6`); redimensiona-se para 1600 x 320; normaliza-se com a média e o desvio do ImageNet.
 * **Pós-processamento** (o `pred2coords` oficial, em numpy): uma linha do meio conta se existir em **mais de metade** das 72 âncoras; uma de fora, em **mais de um quarto** das 81; a posição em cada âncora é a média pesada (softmax) da célula mais provável e das vizinhas. As linhas saem da esquerda para a direita, em píxeis da imagem recebida (a conversão foi testada: nas linhas do meio, erro médio de 0,1 px e máximo de 0,5 px).
-* **Diferenças em relação ao CLRNet:** o UFLDv2 não dá uma confiança por linha (só "existe/não existe" em cada âncora), por isso não há limiar equivalente ao `--conf-linhas`. Ficheiros: `ufld.py` (detetor), `modelos/ufld.json` (configuração), `modelos/ufld.onnx` (secção 1).
+* **Diferenças em relação ao CLRNet:** o UFLDv2 não dá uma confiança por linha (só "existe/não existe" em cada âncora), por isso não há limiar equivalente ao `--conf-linhas`. Ficheiros: `comparacao_linhas/ufld.py` (detetor), `comparacao_linhas/modelos/ufld.json` (configuração), `comparacao_linhas/modelos/ufld.onnx` (secção 1).
 
 ### 7.4 Perspetiva do vídeo e cortes
 **Como deve ser o vídeo** (as condições do CULane; README 5.1.5 para o CLRNet, que valem também para o UFLDv2):
@@ -251,14 +251,14 @@ Fontes: CULane ([página do conjunto](https://xingangpan.github.io/projects/CULa
 1. pause num troço reto e plano; no `original.png` (ou `corrigida.png`) desse instante, veja a altura `y` (em píxeis) do ponto de fuga das linhas e divida pela altura da imagem: é a posição do horizonte, `h` (por exemplo, `y = 230` numa imagem de 480 px dá `h = 0,48`);
 2. mantenha a relação de cada modelo com o horizonte: `--corte-linhas` perto de `h` e `--corte-ufld` cerca de 0,06 acima (`h − 0,06`):
    ```bash
-   python comparar_linhas.py <entrada> --corte-linhas 0.48 --corte-ufld 0.42
+   python comparacao_linhas/comparar_linhas.py <entrada> --corte-linhas 0.48 --corte-ufld 0.42
    ```
 3. compare os `comparacao.png` do mesmo instante com os cortes por omissão e com os ajustados.
 
 **O que o corte do topo não corrige: a proporção da imagem.** O CULane tem 2,78:1 e a Astra 4:3. Ao passar para a entrada fixa de cada modelo (CLRNet 800x320, UFLDv2 1600x320), a imagem da Astra fica, em relação às do treino, cerca de **2 vezes mais esticada na horizontal**: as linhas aparecem mais "abertas" (menos inclinadas) do que o modelo viu no treino. Isto acontece **por igual aos dois modelos** (a diferença depende só da proporção da imagem: 2,78 ÷ 1,33 ≈ 2,1 nas Astra; ≈ 1,6 em vídeos 16:9, como o nuScenes), por isso a comparação continua justa, mas os dois ficam abaixo dos valores publicados. Cortar só o topo não muda a proporção da parte que os modelos veem; para a aproximar do CULane seria preciso cortar também em baixo (uma faixa horizontal da imagem com a proporção do CULane, à volta do horizonte), o que perde a estrada mais perto do carro.
 
 ## 8. Desempenho e GPU
-* A GPU é escolhida como no resto do projeto (README 3.10), pelo `gpu.py`: CUDA se o `onnxruntime-gpu` estiver instalado, senão CPU. No arranque, cada modelo corre uma vez numa imagem neutra, e o dispositivo indicado (terminal, registo e resumo) é o que fica **de facto** em uso; se a GPU falhar, aparece `Aviso: a GPU (CUDA) falhou ao correr o modelo de ...; a usar o CPU`.
+* A GPU é escolhida como no resto do projeto (README 3.5), pelo `gpu.py` do pacote `va_g05`: CUDA se o `onnxruntime-gpu` estiver instalado, senão CPU. No arranque, cada modelo corre uma vez numa imagem neutra, e o dispositivo indicado (terminal, registo e resumo) é o que fica **de facto** em uso; se a GPU falhar, aparece `Aviso: a GPU (CUDA) falhou ao correr o modelo de ...; a usar o CPU`.
 * No Windows, as bibliotecas do cuDNN instaladas pelo `pip` são encontradas sozinhas (o `gpu.py` junta as pastas `venv\Lib\site-packages\nvidia\*\bin` ao `PATH` do processo). Antes disso, aparecia `Could not locate cudnn_engines_tensor_ir64_9.dll` e os dois modelos corriam no CPU.
 * Tempos medidos no PC do projeto, nuScenes `CAM_BACK` reduzida a 640x360, tempo só do modelo:
 
@@ -286,12 +286,12 @@ Isto foi verificado nos testes: para cada instante, o `original.png` é igual, p
 
 | Comando | Opção | O que faz (valor por omissão) |
 |---|---|---|
-| `python preparar_ufld.py` | (nenhuma) | descarrega, extrai e verifica o `modelos/ufld.onnx` |
+| `python comparacao_linhas/preparar_ufld.py` | (nenhuma) | descarrega, extrai e verifica o `comparacao_linhas/modelos/ufld.onnx` |
 | | `--de <resources.tar.gz ou .onnx>` | usa um ficheiro já descarregado |
-| | `--verificar` | só verifica o `modelos/ufld.onnx` |
-| `python comparar_linhas.py <entrada>` | `<entrada>` | bag `.mcap`, vídeo ou pasta de imagens (secção 2) |
+| | `--verificar` | só verifica o `comparacao_linhas/modelos/ufld.onnx` |
+| `python comparacao_linhas/comparar_linhas.py <entrada>` | `<entrada>` | bag `.mcap`, vídeo ou pasta de imagens (secção 2) |
 | | `--camara 5` / `--camara 8` | câmara do bag (a primeira do bag) |
-| | `--calib <yaml>` | outra calibração (bags; `config/camera_astra_<N>.yaml` ou o `/camera_info` do bag) |
+| | `--calib <yaml>` | outra calibração (bags; `src/va_g05/config/camera_astra_<N>.yaml` ou o `/camera_info` do bag) |
 | | `--sem-correcao` | não corrigir a distorção (bags) |
 | | `--conf-linhas <0-1>` | CLRNet: confiança mínima de uma linha (0.4) |
 | | `--corte-linhas <0-1>` | CLRNet: fração cortada no topo (0.46) |
@@ -301,10 +301,10 @@ Isto foi verificado nos testes: para cada instante, o `original.png` é igual, p
 | | `--sem-interface` | sem janela; teclas no terminal |
 | | `--trechos "10-20,60-"` | trechos do registo em segundos (desliga a tecla R) |
 | | `--registar-tudo` | registar o vídeo todo (`--trechos 0-`) |
-| | `--pasta-registo <pasta>` | pasta das sessões (`data_comparacao`) |
+| | `--pasta-registo <pasta>` | pasta das sessões (`data/comparacao`) |
 | | `--sem-resumo` | não abrir o resumo no fim |
-| `python resumo_comparacao.py` | `[<sessão>]` | resumo de uma sessão (a mais recente) |
-| | `--pasta-registo <pasta>` | onde procurar a mais recente (`data_comparacao`) |
+| `python comparacao_linhas/resumo_comparacao.py` | `[<sessão>]` | resumo de uma sessão (a mais recente) |
+| | `--pasta-registo <pasta>` | onde procurar a mais recente (`data/comparacao`) |
 
 | Tecla | Janela | Terminal (`--sem-interface`) |
 |---|---|---|
@@ -314,7 +314,17 @@ Isto foi verificado nos testes: para cada instante, o `original.png` é igual, p
 | **Q** / **Esc** | termina; no ecrã "Fim do vídeo", fecha | **Q** termina |
 
 ## 11. Ficheiros e manutenção do ramo
-**Ficheiros deste ramo:** `comparar_linhas.py`, `ufld.py`, `comparacao.py`, `resumo_comparacao.py`, `preparar_ufld.py`, `modelos/ufld.json` e este documento (mais uma nota no README e duas linhas no `.gitignore`). Usam, sem alterações, os módulos do projeto: `linhas.py`, `gpu.py`, `leitura_bag.py`, `registo.py`, `visual.py`, `gui_comum.py` e `teclado.py`.
+**Ficheiros deste ramo**, todos na pasta `comparacao_linhas/` (mais este documento, uma nota no README e três linhas no `.gitignore`):
+```
+comparacao_linhas/
+    comparar_linhas.py      a comparação (secção 3)
+    resumo_comparacao.py    o resumo (secção 6)
+    comparacao.py           registo, leitura, concordância e instantes
+    ufld.py                 o detetor UFLDv2 (secção 7.3)
+    preparar_ufld.py        descarrega e verifica o modelo (secção 1)
+    modelos/ufld.json       configuração do UFLDv2 (no git); modelos/ufld.onnx (fora do git)
+```
+Usam, sem alterações, os módulos do projeto, a partir de `src/va_g05` (o pacote `va_g05`, como o offline): `linhas.py`, `gpu.py`, `leitura_bag.py`, `registo.py`, `visual.py`, `gui_comum.py` e `caminhos.py` (onde estão a calibração e a pasta `data/`), e o `offline/teclado.py`. As sessões ficam em `data/comparacao/` (a pasta `data/` do repositório). O UFLDv2 não entra na imagem Docker do online (o `.dockerignore` só deixa entrar o `src/`).
 
 **Manutenção:**
 * O ramo **não se junta ao `main`**. Para trazer para aqui correções feitas no `main` (por exemplo, nos módulos acima):
@@ -323,6 +333,6 @@ Isto foi verificado nos testes: para cada instante, o `original.png` é igual, p
   git merge main
   git push
   ```
-* Para voltar ao trabalho normal: `git switch main`. O `modelos/ufld.onnx` e o `data_comparacao/` não estão no git e ficam na pasta ao mudar de ramo.
+* Para voltar ao trabalho normal: `git switch main`. O `comparacao_linhas/modelos/ufld.onnx` e o `data/comparacao/` não estão no git e ficam na pasta ao mudar de ramo (as sessões antigas, em `data_comparacao/`, podem ser movidas para `data/comparacao/`).
 
 **Créditos:** [Ultra-Fast-Lane-Detection-v2](https://github.com/cfzd/Ultra-Fast-Lane-Detection-v2), Qin et al., *Ultra Fast Deep Lane Detection with Hybrid Anchor Driven Ordinal Classification*, TPAMI 2022 (licença MIT); conversão para ONNX: [PINTO_model_zoo](https://github.com/PINTO0309/PINTO_model_zoo/tree/main/324_Ultra-Fast-Lane-Detection-v2) (PINTO0309).

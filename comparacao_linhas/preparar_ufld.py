@@ -4,12 +4,12 @@ preparar_ufld.py - Descarrega e verifica o modelo UFLDv2 (ONNX) para o comparar_
 
 O ONNX do UFLDv2 ResNet34 CULane (convertido pelo PINTO0309, o indicado no README oficial do UFLDv2)
 tem várias centenas de MB: não cabe no git (limite de 100 MB por ficheiro do GitHub). Por isso, cada
-PC prepara-o uma vez com este script, que o guarda em modelos/ufld.onnx (no .gitignore).
+PC prepara-o uma vez com este script, que o guarda em comparacao_linhas/modelos/ufld.onnx (no .gitignore).
 
-  python preparar_ufld.py                              # descarrega e verifica
-  python preparar_ufld.py --de resources.tar.gz        # usa o arquivo já descarregado
-  python preparar_ufld.py --de ufldv2_culane_res34_320x1600.onnx   # ou o .onnx já extraído
-  python preparar_ufld.py --verificar                  # só verifica o modelos/ufld.onnx
+  python comparacao_linhas/preparar_ufld.py                              # descarrega e verifica
+  python comparacao_linhas/preparar_ufld.py --de resources.tar.gz        # usa o arquivo já descarregado
+  python comparacao_linhas/preparar_ufld.py --de ufldv2_culane_res34_320x1600.onnx   # ou o .onnx já extraído
+  python comparacao_linhas/preparar_ufld.py --verificar                  # só verifica o comparacao_linhas/modelos/ufld.onnx
 
 O arquivo do PINTO tem o modelo em vários formatos e tamanhos; o script lê-o à medida que o
 descarrega e guarda só o ficheiro ufldv2_culane_res34_320x1600.onnx (pára logo que o encontra).
@@ -25,8 +25,9 @@ import time
 import urllib.request
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import ufld
+sys.path[:0] = [str(Path(__file__).resolve().parent),                                   # ufld.py
+                str(Path(__file__).resolve().parents[1] / "src" / "va_g05")]            # pacote va_g05 (gpu.py)
+import ufld  # noqa: E402
 
 NOME_ONNX = "ufldv2_culane_res34_320x1600.onnx"
 DESTINO = ufld.PASTA_MODELOS / "ufld.onnx"
@@ -69,18 +70,18 @@ def extrair_do_tar(fonte, total=None):
 
 
 def verificar():
-    """Confirma que o modelos/ufld.onnx é o UFLDv2 do CULane e corre um teste."""
+    """Confirma que o comparacao_linhas/modelos/ufld.onnx é o UFLDv2 do CULane e corre um teste."""
     import numpy as np
     import onnxruntime as ort
     if not DESTINO.exists():
-        print(f"Erro: {DESTINO} não existe. Corra: python preparar_ufld.py")
+        print(f"Erro: {DESTINO} não existe. Corra: python comparacao_linhas/preparar_ufld.py")
         return False
     print(f"A verificar {DESTINO} ({DESTINO.stat().st_size / 1e6:.0f} MB)...")
     try:
         s = ort.InferenceSession(str(DESTINO), providers=["CPUExecutionProvider"])
     except Exception as e:
         print(f"  ERRO: o ficheiro não é um modelo ONNX válido ({type(e).__name__}). A descarga pode ter "
-              "ficado incompleta: apague o modelos/ufld.onnx e corra de novo o preparar_ufld.py.")
+              "ficado incompleta: apague o comparacao_linhas/modelos/ufld.onnx e corra de novo o preparar_ufld.py.")
         return False
     ok = True
     e = s.get_inputs()[0]
@@ -109,7 +110,7 @@ def verificar():
         for bloco in iter(lambda: f.read(1 << 20), b""):
             h.update(bloco)
     print(f"  sha256: {h.hexdigest()}")
-    print("MODELO UFLD PRONTO (modelos/ufld.onnx). Pode usar: python comparar_linhas.py <bag ou vídeo>")
+    print("MODELO UFLD PRONTO (comparacao_linhas/modelos/ufld.onnx). Pode usar: python comparacao_linhas/comparar_linhas.py <bag ou vídeo>")
     return True
 
 
@@ -117,13 +118,13 @@ def main():
     ap = argparse.ArgumentParser(description="Descarrega e verifica o UFLDv2 (ONNX) para o comparar_linhas.py.")
     ap.add_argument("--de", type=str, default=None,
                     help=f"Usar um ficheiro já descarregado: o resources.tar.gz do PINTO ou o {NOME_ONNX}")
-    ap.add_argument("--verificar", action="store_true", help="Só verificar o modelos/ufld.onnx")
+    ap.add_argument("--verificar", action="store_true", help="Só verificar o comparacao_linhas/modelos/ufld.onnx")
     args = ap.parse_args()
 
     try:                                           # antes de descarregar: sem o onnxruntime não se verifica
         import onnxruntime  # noqa: F401
     except ImportError:
-        print("Erro: falta o onnxruntime. Ative o venv do projeto (README, 3.8) e corra de novo:\n"
+        print("Erro: falta o onnxruntime. Ative o venv do projeto (README, 3.3) e corra de novo:\n"
               "  venv\\Scripts\\activate          (Windows)\n"
               "  source venv/bin/activate       (Linux / macOS)")
         sys.exit(1)
@@ -156,7 +157,7 @@ def main():
             except OSError as e:
                 print(f"\nErro a descarregar ({e}).")
                 print("Alternativa: descarregue o arquivo noutro programa (ou com: curl -L -o resources.tar.gz "
-                      f"{URL}) e corra: python preparar_ufld.py --de resources.tar.gz")
+                      f"{URL}) e corra: python comparacao_linhas/preparar_ufld.py --de resources.tar.gz")
                 sys.exit(1)
     sys.exit(0 if verificar() else 1)
 

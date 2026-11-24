@@ -17,12 +17,13 @@ from pathlib import Path
 
 import numpy as np
 
-import registo
+from va_g05 import caminhos, registo
 
 MODELOS = ("clrnet", "ufld")                     # ordem no ecrã: CLRNet à esquerda, UFLD à direita
 NOMES = {"clrnet": "CLRNet", "ufld": "UFLDv2"}
 LIMIAR_PX = 30                                   # distância média máxima (px) para duas linhas serem "a mesma"
 PASSO_Y_PX = 10                                  # de quantos em quantos píxeis (em y) se comparam duas linhas
+PASTA_SESSOES = caminhos.DADOS / "comparacao"    # data/comparacao/<origem>/<sessão>/ (no repositório)
 
 
 def topico(modelo):

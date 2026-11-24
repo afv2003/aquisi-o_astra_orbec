@@ -10,14 +10,14 @@ Também aceita vídeos (.mp4, .avi, ...) e pastas de imagens, como o processar_v
 correção da distorção, reduzidos a 640 px de largura).
 
 Registo (como no processar_bag.py: tecla R, --trechos, --registar-tudo): as deteções de cada modelo
-ficam em separado, como se fossem duas câmaras (comparacao.py), em data_comparacao/<origem>/<sessão>/.
+ficam em separado, como se fossem duas câmaras (comparacao.py), em data/comparacao/<origem>/<sessão>/.
 Instantes: cada pausa (Espaço) guarda, numa pasta só desse instante, as imagens (original, a que os
 modelos receberam, a de cada modelo e a comparação lado a lado, tal como no ecrã) e as deteções.
 No fim (com janela), abre o resumo da comparação (resumo_comparacao.py).
 
-  python comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap --camara 5
-  python comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap --registar-tudo --sem-interface
-  python comparar_linhas.py video.mp4
+  python comparacao_linhas/comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap --camara 5
+  python comparacao_linhas/comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap --registar-tudo --sem-interface
+  python comparacao_linhas/comparar_linhas.py video.mp4
 """
 import argparse
 import datetime
@@ -28,13 +28,12 @@ from pathlib import Path
 
 import cv2
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import comparacao
-import leitura_bag
-import linhas
-import registo
-import ufld
-import visual
+sys.path[:0] = [str(Path(__file__).resolve().parent),                                   # comparação
+                str(Path(__file__).resolve().parents[1] / "src" / "va_g05"),            # biblioteca comum (pacote va_g05)
+                str(Path(__file__).resolve().parents[1] / "offline")]                   # teclado.py
+import comparacao  # noqa: E402
+import ufld  # noqa: E402
+from va_g05 import caminhos, leitura_bag, linhas, registo, visual  # noqa: E402
 from comparacao import MODELOS, NOMES
 from teclado import TecladoTerminal
 
@@ -48,15 +47,15 @@ parser.add_argument("entrada", type=str,
 parser.add_argument("--camara", type=str, default=None,
                     help="Bag: câmara a usar (5 ou 8). Por omissão: a primeira do bag (a 5, num bag com as duas)")
 parser.add_argument("--calib", type=str, default=None,
-                    help="Bag: ficheiro de calibração (por omissão config/camera_astra_<N>.yaml)")
+                    help="Bag: ficheiro de calibração (por omissão src/va_g05/config/camera_astra_<N>.yaml)")
 parser.add_argument("--sem-correcao", action="store_true", help="Bag: não corrigir a distorção da lente")
 parser.add_argument("--conf-linhas", type=float, default=None,
-                    help="CLRNet: confiança mínima (0 a 1) de uma linha. Por omissão: 0.4 (modelos/linhas.json)")
+                    help="CLRNet: confiança mínima (0 a 1) de uma linha. Por omissão: 0.4 (src/va_g05/modelos/linhas.json)")
 parser.add_argument("--corte-linhas", type=float, default=None,
-                    help="CLRNet: fração da imagem ignorada em cima (0 a 1). Por omissão: 0.46 (modelos/linhas.json)")
+                    help="CLRNet: fração da imagem ignorada em cima (0 a 1). Por omissão: 0.46 (src/va_g05/modelos/linhas.json)")
 parser.add_argument("--corte-ufld", type=float, default=None,
                     help="UFLDv2: fração da imagem ignorada em cima (0 a 1). Por omissão: 0.4, como no treino "
-                         "(modelos/ufld.json)")
+                         "(comparacao_linhas/modelos/ufld.json)")
 parser.add_argument("--fps", type=float, default=None,
                     help="Vídeo/pasta: imagens por segundo. Por omissão: as do vídeo; numa pasta, o tempo no "
                          "nome dos ficheiros ou 30")
@@ -67,8 +66,8 @@ parser.add_argument("--sem-interface", action="store_true",
 parser.add_argument("--trechos", type=str, default=None,
                     help="Registar estes trechos, em segundos desde o início, ex.: \"10-20,35.5-50,60-\"")
 parser.add_argument("--registar-tudo", action="store_true", help="Registar o vídeo todo (o mesmo que --trechos 0-)")
-parser.add_argument("--pasta-registo", type=str, default="data_comparacao",
-                    help="Pasta das sessões (registo e instantes). Por omissão: data_comparacao")
+parser.add_argument("--pasta-registo", type=str, default=None,
+                    help="Pasta das sessões (registo e instantes). Por omissão: data/comparacao, no repositório")
 parser.add_argument("--sem-resumo", action="store_true", help="Não abrir a janela do resumo no fim")
 args = parser.parse_args()
 if args.registar_tudo:
@@ -192,9 +191,10 @@ else:
 # --- Correção da distorção (só nos bags; a calibração é das Astra) ---
 corretor, origem_calib, calibracao = None, None, None
 if e_bag and not args.sem_correcao:
-    ficheiro = args.calib or (f"config/camera_astra_{camara}.yaml" if camara else "config/camera_astra.yaml")
-    if Path(ficheiro).exists():
-        calibracao, origem_calib = leitura_bag.carregar_calibracao_yaml(ficheiro), ficheiro
+    ficheiro = Path(args.calib) if args.calib else caminhos.calibracao(camara)
+    if ficheiro.exists():
+        calibracao = leitura_bag.carregar_calibracao_yaml(ficheiro)
+        origem_calib = str(ficheiro) if args.calib else f"config/{ficheiro.name}"
     else:
         calibracao, origem_calib = leitura_bag.carregar_calibracao_bag(entrada, camara), "/camera_info do bag"
     if calibracao is None:
@@ -212,7 +212,8 @@ except FileNotFoundError as e:
 try:
     detetor["ufld"] = ufld.DetetorUFLD(corte_topo=args.corte_ufld)
 except FileNotFoundError:
-    print("Erro: falta o modelo do UFLDv2 (modelos/ufld.onnx). Prepare-o uma vez com: python preparar_ufld.py")
+    print("Erro: falta o modelo do UFLDv2 (comparacao_linhas/modelos/ufld.onnx). Prepare-o uma vez com: "
+          "python comparacao_linhas/preparar_ufld.py")
     sys.exit(1)
 cfg_clr, cfg_ufld = detetor["clrnet"].cfg, detetor["ufld"].cfg
 descricao_modelo = {"clrnet": cfg_clr.get("descricao", "CLRNet"), "ufld": cfg_ufld.get("descricao", "UFLDv2")}
@@ -222,12 +223,12 @@ print(f"UFLDv2: {descricao_modelo['ufld']}  ·  {detetor['ufld'].dispositivo}  �
 
 # --- Sessão (registo e instantes) ---
 if e_bag:
-    origem = entrada.resolve().parent.name if entrada.resolve().parent.name.startswith(("viagem", "realtime")) \
+    origem = entrada.resolve().parent.name if entrada.resolve().parent.name.startswith(("viagem", "g05_", "realtime")) \
         else entrada.stem
     nome_sessao = f"camara{camara or 'X'}_{datetime.datetime.now():%Y%m%d_%H%M%S}"
 else:
     origem, nome_sessao = entrada.stem, f"{entrada.stem}_{datetime.datetime.now():%Y%m%d_%H%M%S}"
-pasta_sessao = Path(args.pasta_registo) / origem / nome_sessao
+pasta_sessao = Path(args.pasta_registo or comparacao.PASTA_SESSOES) / origem / nome_sessao
 base, k = pasta_sessao, 2
 while pasta_sessao.exists():
     pasta_sessao = base.with_name(f"{base.name}_{k}")
@@ -484,7 +485,7 @@ if registador.trechos:
 if n_instantes:
     print(f"Instantes guardados: {n_instantes}, em {pasta_sessao / 'instantes'}")
 if registador.trechos or n_instantes:
-    print(f"Resumo: python resumo_comparacao.py \"{pasta_sessao}\"")
+    print(f"Resumo: python comparacao_linhas/resumo_comparacao.py \"{pasta_sessao}\"")
 
 if com_interface and not saiu_cedo and ultimo is not None:
     print("\nFim do vídeo alcançado!")

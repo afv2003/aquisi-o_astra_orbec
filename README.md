@@ -94,6 +94,8 @@ Há **dois modos de trabalho**, com o mesmo código de deteção e o mesmo desen
 * **Modo online** (secção 4, Docker em Linux): é a **aquisição**. No veículo, as câmaras, o processamento ao vivo e a gravação correm todos no Docker; a deteção corre sempre, e o vídeo (em JPEG) e as deteções são gravados nos **trechos** marcados durante a viagem. O processamento só processa e publica; o ecrã é outro nó (o visualizador), e há também o RViz. O mesmo Docker **reproduz um bag sem câmaras**, com o mesmo processamento.
 * **Modo offline** (secção 3, `venv` em qualquer sistema): começa nos **dados já gravados**. Processa todas as imagens do bag com todo o detalhe, regista as deteções, reproduz e exporta vídeos e mostra os resultados numa janela (resumo e percurso no mapa).
 
+> **Ramo `Extra-Line-Comparison`:** este ramo acrescenta a comparação de dois modelos de deteção de linhas (CLRNet e UFLDv2) no mesmo vídeo, lado a lado, com registo das deteções de cada um, instantes guardados em `.png` nas pausas e um resumo (pasta `comparacao_linhas/`, no `venv` do offline). Ver **[COMPARACAO_LINHAS.md](COMPARACAO_LINHAS.md)**. O resto deste README é igual ao do `main`.
+
 ## Índice
 
 | Secção | Conteúdo | Onde corre |
@@ -203,6 +205,7 @@ src/va_g05/                   pacote ROS 2 do G5 (package.xml, setup.py)
 scripts/                      online.sh (arranque do online), trecho.sh, alternar_camara.sh
 offline/                      processar_bag.py, reproduzir_registo.py, juntar_registos.py, gui_resultados.py, ...
 tools/                        calibrar_astra.py, figura_bag.py, exportar_linhas.py
+comparacao_linhas/            (só neste ramo) comparação CLRNet vs UFLDv2: COMPARACAO_LINHAS.md
 docs/                         layout.json (Foxglove), img/ (figuras e GIF)
 data/                         bags e gravações (não vão para o git)
 ```
