@@ -15,8 +15,8 @@ Instantes: cada pausa (Espaço) guarda, numa pasta só desse instante, as imagen
 modelos receberam, a de cada modelo e a comparação lado a lado, tal como no ecrã) e as deteções.
 No fim (com janela), abre o resumo da comparação (resumo_comparacao.py).
 
-  python comparacao_linhas/comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap --camara 5
-  python comparacao_linhas/comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap --registar-tudo --sem-interface
+  python comparacao_linhas/comparar_linhas.py data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap --camara 5
+  python comparacao_linhas/comparar_linhas.py data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap --registar-tudo --sem-interface
   python comparacao_linhas/comparar_linhas.py video.mp4
 """
 import argparse
@@ -102,21 +102,26 @@ def entrada_bag():
     indice_ok = leitura_bag.bag_tem_indice(entrada)
     if not indice_ok:
         print("Aviso: o bag não tem o índice no fim; a ler sequencialmente, desde o início.")
-    cams = leitura_bag.camaras_no_bag(leitura_bag.topicos_do_bag(entrada))
-    if cams:
-        ordem = visual.ordenar_camaras(cams)
-        if args.camara and args.camara not in cams:
-            print(f"Erro: indicou --camara {args.camara}, mas este bag só tem a(s) câmara(s) "
-                  f"{registo.texto_camaras(ordem)}.")
+    # só bags no formato atual (o do online); sem índice, supõe-se que tem as câmaras 5 e 8
+    if indice_ok:
+        topicos_bag = leitura_bag.topicos_do_bag(entrada)
+        erro = leitura_bag.formato_atual(topicos_bag)
+        if erro:
+            print(f"Erro: {erro}")
             sys.exit(1)
-        cam = args.camara or ordem[0]
-        topicos = [cams[cam]]
-        if not args.camara and len(cams) > 1:
-            print(f"O bag tem as câmaras {registo.texto_camaras(ordem)}: a usar a {cam} "
-                  f"(para a outra: --camara {ordem[1]}).")
+        cams = leitura_bag.camaras_no_bag(topicos_bag)
     else:
-        cam = args.camara or leitura_bag.camara_do_nome(entrada)
-        topicos = ["/image_raw"]
+        cams = {c: leitura_bag.topico_imagem(c) for c in ("5", "8")}
+    ordem = visual.ordenar_camaras(cams)
+    if args.camara and args.camara not in cams:
+        print(f"Erro: indicou --camara {args.camara}, mas este bag só tem a(s) câmara(s) "
+              f"{registo.texto_camaras(ordem)}.")
+        sys.exit(1)
+    cam = args.camara or ordem[0]
+    topicos = [cams[cam]]
+    if not args.camara and len(cams) > 1:
+        print(f"O bag tem as câmaras {registo.texto_camaras(ordem)}: a usar a {cam} "
+              f"(para a outra: --camara {ordem[1]}).")
     inicio_ns, fim_ns = leitura_bag.intervalo_do_bag(entrada) if indice_ok else (None, None)
     total = (fim_ns - inicio_ns) / 1e9 if inicio_ns else 0.0
 
@@ -223,7 +228,7 @@ print(f"UFLDv2: {descricao_modelo['ufld']}  ·  {detetor['ufld'].dispositivo}  �
 
 # --- Sessão (registo e instantes) ---
 if e_bag:
-    origem = entrada.resolve().parent.name if entrada.resolve().parent.name.startswith(("viagem", "g05_", "realtime")) \
+    origem = entrada.resolve().parent.name if entrada.resolve().parent.name.startswith("g05_") \
         else entrada.stem
     nome_sessao = f"camara{camara or 'X'}_{datetime.datetime.now():%Y%m%d_%H%M%S}"
 else:

@@ -34,7 +34,7 @@ Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de lin
 **Ponto comum com o resto do projeto: o vídeo original em `.mcap`.** Tal como o modo offline e o modo online (README 1.1), a comparação parte do vídeo original das câmaras gravado num bag:
 ```
  online (aquisição, README 4) ──▶ data/g05_camaras_<data_hora>/*.mcap (vídeo, só os trechos) ───┐
- bags antigos (README 3.1) ─────▶ data/viagem_<data>/*.mcap (vídeo da viagem inteira) ──────────┼──▶ comparacao_linhas/comparar_linhas.py
+                                                                                                ├──▶ comparacao_linhas/comparar_linhas.py
  vídeos / imagens externos (ex. nuScenes, Argoverse) ───────────────────────────────────────────┘
 ```
 * Lê os bags **da mesma forma que o `processar_bag.py`** (`leitura_bag.py`): mesma câmara, mesma calibração, mesma correção da distorção e mesmo `stamp_ns` de cada imagem. Por isso, o que se vê aqui é o que o CLRNet do offline e do online vê.
@@ -90,7 +90,7 @@ Para processar uma viagem com todas as deteções, use o `processar_bag.py` (off
 O primeiro argumento do `comparar_linhas.py` é a entrada; o tipo é reconhecido sozinho.
 
 **Bags `.mcap`** (como no `processar_bag.py`):
-* Da aquisição (`data/viagem_<data>/viagem_<data>_0.mcap`) ou do online (`data_realtime_inter/realtime_<data>/...`). Funciona também com bags sem índice ou com blocos estragados (lê sequencialmente, como no offline).
+* Os do online, no formato e com o nome atuais (`data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap`, README 3.1; um bag antigo converte-se antes com o `tools/converter_bag_antigo.py`). Funciona também com bags sem índice ou com blocos estragados (lê sequencialmente, como no offline).
 * **Uma câmara de cada vez**: por omissão a primeira do bag (a 5 num bag com as duas); `--camara 8` para a outra.
 * A imagem é **corrigida da distorção antes dos dois modelos** com `src/va_g05/config/camera_astra_<N>.yaml` (ou o `/camera_info` do bag); `--calib <yaml>` para outra calibração, `--sem-correcao` para não corrigir.
 
@@ -109,8 +109,8 @@ O primeiro argumento do `comparar_linhas.py` é a entrada; o tipo é reconhecido
 ## 3. Comparar (`comparar_linhas.py`)
 Com o `venv` ativo, na pasta do projeto:
 ```bash
-python comparacao_linhas/comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap                 # câmara 5 (a primeira do bag)
-python comparacao_linhas/comparar_linhas.py data/viagem_<data>/viagem_<data>_0.mcap --camara 8       # câmara 8
+python comparacao_linhas/comparar_linhas.py data/<sessão>/<sessão>_0.mcap                           # câmara 5 (a primeira do bag)
+python comparacao_linhas/comparar_linhas.py data/<sessão>/<sessão>_0.mcap --camara 8                # câmara 8
 python comparacao_linhas/comparar_linhas.py <bag>.mcap --registar-tudo                               # registar o vídeo todo
 python comparacao_linhas/comparar_linhas.py <bag>.mcap --sem-interface --trechos "10-20,60-"         # sem janela, trechos fixos
 python comparacao_linhas/comparar_linhas.py video.mp4                                                # vídeo externo
@@ -150,7 +150,7 @@ Resumo: python comparacao_linhas/resumo_comparacao.py "data\comparacao\CAM_BACK\
 ```
 Com janela, no fim do vídeo aparece "Fim do vídeo" (**Q** fecha) e abre o **resumo** (secção 6; `--sem-resumo` para não abrir), se houver trechos ou instantes.
 
-As sessões ficam em `data/comparacao/<viagem ou entrada>/<câmara ou entrada>_<data_hora>/` (`--pasta-registo` para outra pasta; `data/comparacao/` está no `.gitignore`).
+As sessões ficam em `data/comparacao/<sessão ou entrada>/<câmara ou entrada>_<data_hora>/` (`--pasta-registo` para outra pasta; `data/comparacao/` está no `.gitignore`).
 
 ## 4. Instantes guardados nas pausas
 Em vez de gravar o vídeo inteiro com as deteções, **cada pausa** (Espaço) guarda o instante em que o vídeo parou (os dois lados param ao mesmo tempo, na mesma imagem), numa pasta só desse instante:

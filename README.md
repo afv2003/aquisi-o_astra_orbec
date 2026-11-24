@@ -160,8 +160,8 @@ flowchart LR
 |---|---|---|
 | **Entrada** | um bag já gravado | as câmaras (ao vivo) ou um bag (reprodução) |
 | **Imagens processadas** | **todas** (30 por segundo por câmara), ao ritmo que o PC conseguir | as que houver tempo de processar, como num sistema real (cada câmara é processada quando o modelo fica livre; 4.7) |
-| **O que se grava** | o registo das deteções nos trechos escolhidos (`data/offline/`) | ao vivo: o vídeo em JPEG e as deteções, **só nos trechos** marcados (`data/`); em reprodução, nada (só o resumo) |
-| **Interação** | pausa, ligar/desligar cada modelo e a correção, marcar trechos, limiares e classes por opção | **R** trecho (gravação), **D** câmara da direita, **Espaço** pausa (reprodução), **Q** termina |
+| **O que se grava** | o registo das deteções nos trechos do online, ou nos pedidos com `--trechos` (`data/offline/`) | ao vivo: o vídeo em JPEG e as deteções, **só nos trechos** marcados (`data/`); em reprodução, nada (só o resumo) |
+| **Interação** | pausa, ligar/desligar cada modelo e a correção, limiares, classes e trechos por opção | **R** trecho (gravação), **D** câmara da direita, **Espaço** pausa (reprodução), **Q** termina |
 | **Ecrã** | a janela do `processar_bag.py` | o visualizador (outro nó ROS, a partir dos tópicos) e, opcionalmente, o RViz |
 | **Resultados** | reprodução e exportação em `.mp4`, janela de resultados com Resumo e **Percurso no mapa** | tópicos ROS (para outros grupos e para a parte 2) e um resumo no fim, com filtro por trecho |
 | **Onde corre** | Windows, Linux ou macOS (`venv`), sem câmaras nem Docker | Linux com Docker (CPU ou GPU NVIDIA, escolhida sozinha) |
@@ -248,6 +248,7 @@ data/                         bags e gravações (não vão para o git)
 | `tools/calibrar_astra.py` | calibração de cada câmara (secção 2) | preparação |
 | `tools/figura_bag.py` | figuras, GIF e métricas para o relatório, a partir de um bag do online (4.13) | relatório |
 | `tools/exportar_linhas.py` | só para gerar de novo o modelo das linhas (5.1.4) | — |
+| `tools/converter_bag_antigo.py` | converte, uma vez, um bag antigo para o formato e o nome atuais (3.1) | preparação |
 | `requirements.txt` | bibliotecas Python (`venv` do offline e imagem do online) | ambos |
 
 **Onde estão os ficheiros, em cada modo** (`caminhos.py`): os scripts encontram a configuração e os modelos sozinhos, a partir da pasta onde estão, por isso podem correr-se de qualquer pasta do terminal. No Docker, o pacote está instalado em `/ws/install` e a configuração e os modelos são lidos de `/ws/src/va_g05`; a pasta dos dados é `/data` (a pasta `data/` do repositório, ou a do `DADOS` no `.env`). Fora do Docker (offline e ferramentas), lê-se `src/va_g05/config` e `src/va_g05/modelos`, e os dados ficam em `data/` (registos do offline em `data/offline/`).
@@ -413,11 +414,28 @@ O offline **começa nos dados já gravados**: não adquire nada, não precisa da
                                                       3.10 offline/gui_resultados.py    ◀──┘  (Resumo + Percurso no mapa)
 ```
 
-### 3.1 De onde vêm os bags
-O `processar_bag.py` lê qualquer bag `.mcap` com as imagens das câmaras num tópico por câmara:
-* **Bags do online** (secção 4, `data/g05_camaras_<data_hora>/`): o caso normal. Têm o vídeo original de cada câmara **comprimido em JPEG** (`/camara<N>/image_raw/compressed`, `sensor_msgs/CompressedImage`, como pede o enunciado), só nos **trechos** marcados durante a viagem, e os trechos são usados sozinhos no registo (4.10). Para guardar a viagem toda, grave no online com `--registar-tudo`; num PC fraco, sem processar, com `--sem-processamento` (4.6).
-* **Bags antigos**, do Docker de aquisição que este projeto tinha antes (`data/viagem_<data_hora>/`, imagens sem compressão em `/camara<N>/image_raw`, a viagem inteira): continuam a ler-se da mesma forma.
+### 3.1 De onde vêm os bags (formato e nome)
+Os scripts só aceitam bags no **formato atual**, o que o online grava (secção 4):
+* **Nome:** `data/g05_camaras_<data_hora>[_<percurso>]/g05_camaras_<data_hora>[_<percurso>]_0.mcap` (o `_<percurso>` vem do `--percurso` do `scripts/online.sh`). O registo do offline fica numa pasta com o nome da sessão (`data/offline/g05_camaras_<data_hora>/...`).
+* **Conteúdo:** o vídeo original de cada câmara **comprimido em JPEG** (`/camara<N>/image_raw/compressed`, `sensor_msgs/CompressedImage`, como pede o enunciado), só nos **trechos** marcados durante a viagem, e os trechos em `/processamento/trechos` (são os trechos do registo, 3.6). Para guardar a viagem toda, grave no online com `--registar-tudo`; num PC fraco, sem processar, com `--sem-processamento` (4.6).
 * Um bag cortado (gravação interrompida, sem índice) ou com blocos estragados também se lê (3.4).
+
+Um bag noutro formato é recusado, com a mensagem `o bag não está no formato atual (...)`.
+
+**Bags antigos (converter uma vez).** Os bags gravados antes desta organização convertem-se uma vez com o `tools/converter_bag_antigo.py`, no `venv`:
+* os do Docker de aquisição antigo (`data/viagem_<data_hora>/`: imagens sem compressão, a viagem inteira);
+* as sessões antigas do online (`data_realtime_inter/realtime_<data_hora>/`).
+
+```bash
+python tools/converter_bag_antigo.py data/viagem_20261110_160407/viagem_20261110_160407_0.mcap               # duas câmaras
+python tools/converter_bag_antigo.py data/viagem_20261103_144234/viagem_20261103_144234_0.mcap --camara 5    # uma câmara (/image_raw)
+python tools/converter_bag_antigo.py <bag antigo> --percurso ua_ria                                          # com o nome do percurso
+```
+* **O que faz:** cria `data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap` com a data e a hora do nome antigo. As imagens passam a JPEG (qualidade 95, a do online), com os mesmos instantes, cerca de 6 vezes mais pequeno. Um bag sem trechos fica com **um trecho com a viagem inteira**, como se tivesse sido gravado com `--registar-tudo`. Os outros tópicos copiam-se como estão.
+* **Bags de uma só câmara** (tópico `/image_raw`): o nome não diz qual é, por isso indica-se com `--camara 5` ou `--camara 8`.
+* **O original não é alterado:** depois de confirmar o convertido (por exemplo, processá-lo no offline), a pasta antiga pode ser apagada. Um bag vazio (0 mensagens) não tem nada para converter: apaga-se.
+* **Registos antigos** (`data_offline/`, feitos a partir dos bags antigos): já não se leem. Processe de novo o bag convertido (3.4) e apague-os.
+* O `tools/converter_bag_antigo.py` só serve para esta conversão: quando já não houver bags antigos no grupo, pode ser apagado.
 
 O mesmo bag pode também ser **reproduzido no Docker do online**, sem câmaras, com o processamento do online (4.11). A diferença: o online processa como ao vivo (as imagens que houver tempo de processar, resultados em tópicos ROS); o offline processa **todas** as imagens e faz o registo, a reprodução, os vídeos e a janela de resultados.
 
@@ -436,7 +454,7 @@ Os bags são ficheiros grandes (com as imagens em JPEG, cerca de 0,3 a 0,6 GB po
    certutil -hashfile data\g05_camaras_<data_hora>\g05_camaras_<data_hora>_0.mcap SHA256   # Windows (comparar à mão)
    ```
    * O "Testar arquivo" do 7-Zip só confirma que o zip chegou igual ao que foi criado; não deteta um ficheiro que já estava estragado antes de entrar no zip. Por isso, a comparação com o `sha256.txt` do PC da gravação é a que conta.
-4. Coloque a pasta da sessão dentro de `data/` na pasta do projeto (`data/g05_camaras_<data_hora>/`; os bags antigos, `data/viagem_<data_hora>/`). É aí que o `reproduzir_registo.py` e a janela de resultados procuram o bag original, se ele tiver mudado de sítio.
+4. Coloque a pasta da sessão dentro de `data/` na pasta do projeto (`data/g05_camaras_<data_hora>/`). É aí que o `reproduzir_registo.py` e a janela de resultados procuram o bag original, se ele tiver mudado de sítio.
 
 ### 3.3 Preparar o ambiente Python (`venv`, apenas na 1.ª vez)
 O processamento é feito diretamente no computador, num ambiente virtual Python (`venv`), sem precisar das câmaras nem do Docker. Funciona em **Linux, Windows e macOS**; cada sistema precisa do seu próprio `venv` (um `venv` criado num sistema não funciona no outro).
@@ -479,7 +497,7 @@ pip install -r requirements.txt
    ```bash
    python -c "from mcap.reader import make_reader; s=make_reader(open('data/<pasta>/<ficheiro>.mcap','rb')).get_summary(); [print(c.topic, s.statistics.channel_message_counts.get(i,0), 'mensagens') for i,c in s.channels.items()]"
    ```
-   Deve aparecer `/camara5/image_raw/compressed` e `/camara8/image_raw/compressed` (bags do online; nos antigos, `/camara5/image_raw` e `/camara8/image_raw`) com números de mensagens parecidos (cerca de 1800 por minuto de trecho, a 30 imagens por segundo).
+   Deve aparecer `/camara5/image_raw/compressed` e `/camara8/image_raw/compressed` com números de mensagens parecidos, e `/processamento/trechos` (cerca de 1800 por minuto de trecho, a 30 imagens por segundo).
 3. **Processar:**
    ```bash
    python offline/processar_bag.py data/<pasta>/<ficheiro>.mcap
@@ -504,7 +522,6 @@ pip install -r requirements.txt
 * Cada câmara usa a sua calibração (`src/va_g05/config/camera_astra_5.yaml` e `src/va_g05/config/camera_astra_8.yaml`); `--calib` só se usa com uma câmara.
 * As imagens das duas câmaras vêm intercaladas no bag e são processadas pela ordem de gravação, cada uma com os mesmos modelos: **com as duas câmaras, o processamento demora o dobro** (passam o dobro das imagens). Para ir mais depressa, use `--sem-interface` (abaixo), desligue os modelos de que não precisa, ou processe uma câmara de cada vez e junte os registos depois (3.9).
 * A janela é larga (1284 px com as Astra) e pode ser redimensionada com o rato, mantendo a proporção. Antes de chegar a primeira imagem de uma câmara, o lado dela aparece escuro, com `à espera da primeira imagem`.
-* Os bags antigos, de uma só câmara (tópico `/image_raw`), continuam a funcionar: a câmara lê-se do nome da pasta (`viagem_camara5_...`) ou de `--camara`.
 * Os bags do **modo online** são processados com os trechos do online (4.10).
 
 **Ligar e desligar cada deteção** (as opções podem juntar-se, por exemplo `--sem-objetos --sem-estrada`):
@@ -520,9 +537,9 @@ pip install -r requirements.txt
 * Uma deteção desligada com a tecla deixa também de ser calculada, por isso o vídeo fica mais rápido; no painel, o marcador fica vazio e aparece `desligado`.
 * Uma deteção desligada na linha de comandos nem é carregada (arranque mais rápido), e a sua tecla não faz nada.
 
-**Teclas no vídeo:** **Espaço** pausa/retoma, **C** liga/desliga a correção da distorção (para comparar), **O**/**L**/**E**/**V** ligam/desligam as deteções, **R** começa/termina um trecho do registo (3.6), **G** mostra/esconde a grelha local (vista de cima, à direita do vídeo; 5.4), **Q** ou **Esc** termina. No fim do vídeo aparece `Fim do vídeo`; **Q** fecha a janela. Com as duas câmaras, as teclas atuam nas duas ao mesmo tempo.
+**Teclas no vídeo:** **Espaço** pausa/retoma, **C** liga/desliga a correção da distorção (para comparar), **O**/**L**/**E**/**V** ligam/desligam as deteções, **G** mostra/esconde a grelha local (vista de cima, à direita do vídeo; 5.4), **Q** ou **Esc** termina. No fim do vídeo aparece `Fim do vídeo`; **Q** fecha a janela. Com as duas câmaras, as teclas atuam nas duas ao mesmo tempo.
 
-**Sem janela (`--sem-interface`):** processa sem mostrar o vídeo, o mais depressa possível (não espera pelo ritmo da gravação e não desenha nada), e mostra o progresso no terminal (tempo, imagens por segundo, imagens de cada câmara e estado do registo). As teclas **R**, **Espaço** e **Q** são lidas no terminal. Serve sobretudo para registar (3.6).
+**Sem janela (`--sem-interface`):** processa sem mostrar o vídeo, o mais depressa possível (não espera pelo ritmo da gravação e não desenha nada), e mostra o progresso no terminal (tempo, imagens por segundo, imagens de cada câmara e estado do registo). As teclas **Espaço** e **Q** são lidas no terminal. Serve sobretudo para registar (3.6).
 
 **Informação no vídeo:**
 * **Painel** (canto superior esquerdo de cada câmara): tempo decorrido e total, com barra de progresso; câmara e estado da correção (a laranja quando a imagem não está corrigida); uma linha por modelo, identificado pelo nome (`YOLOv8n`, `CLRNet`, `YOLOP`) e por um marcador da sua cor, com o resultado (número de objetos, número de linhas, percentagem da imagem que é área circulável) e o tempo da etapa; no fim, as imagens processadas por segundo e o ritmo da gravação.
@@ -588,18 +605,17 @@ O `processar_bag.py` pode guardar as deteções de cada imagem num ficheiro, par
 
 O registo é feito por **trechos**: só se guardam as imagens entre o início e o fim de cada trecho. Pode haver vários trechos na mesma execução; ficam todos no mesmo registo (o mesmo "ensaio").
 ```bash
-python offline/processar_bag.py <bag>.mcap                                   # tecla R: começa/termina cada trecho (as duas câmaras)
-python offline/processar_bag.py <bag>.mcap --sem-interface                   # sem janela; tecla R no terminal
-python offline/processar_bag.py <bag>.mcap --sem-interface --registar-tudo   # o vídeo todo, sem teclas
-python offline/processar_bag.py <bag>.mcap --sem-interface --trechos "10-20,35.5-50,60-"
-python offline/processar_bag.py <bag>.mcap --camara 5 --registar-tudo        # só a câmara 5
-python offline/processar_bag.py <bag>.mcap --registar-tudo --pasta-registo outra_pasta   # registos noutra pasta
+python offline/processar_bag.py <bag>.mcap                                   # os trechos do online (com janela)
+python offline/processar_bag.py <bag>.mcap --sem-interface                   # o mesmo, sem janela (mais rápido)
+python offline/processar_bag.py <bag>.mcap --sem-interface --trechos "10-20,35.5-50,60-"   # só estes trechos
+python offline/processar_bag.py <bag>.mcap --sem-interface --registar-tudo   # todas as imagens do bag, num só trecho
+python offline/processar_bag.py <bag>.mcap --camara 5                        # só a câmara 5
+python offline/processar_bag.py <bag>.mcap --pasta-registo outra_pasta       # registos noutra pasta
 ```
-* **Tecla R** (com ou sem janela): a primeira vez começa um trecho, a seguinte termina-o, e assim sucessivamente. Com janela, aparece no canto superior direito o indicador vermelho `REGISTO · trecho N · tempo`; sem janela, o estado aparece na linha de progresso do terminal. Se o vídeo acabar (ou carregar em Q) com um trecho aberto, o trecho termina na última imagem processada.
-* **`--trechos`**: os trechos em segundos desde o início do bag (`60-` = do segundo 60 até ao fim). Dá sempre os mesmos trechos, ao contrário da tecla; com esta opção a tecla R não é usada. **`--registar-tudo`** é o mesmo que `--trechos 0-`.
-* **Bag do modo online** (já gravado só nos trechos, 4.9): sem `--trechos`, os trechos do registo são **os do online**, automaticamente (mesmos números e instantes; a tecla R não é usada). Com `--trechos`, registam-se os pedidos, em segundos desde o início da sessão online (4.10).
-* **`--sem-interface`** é a forma mais rápida de registar. Se a entrada não for um terminal (por exemplo, num contentor sem `-it`), as teclas não funcionam e o script avisa: use `--trechos` ou `--registar-tudo`.
-* **Duas câmaras:** um só ensaio para as duas; os trechos são **comuns** (a tecla R ou `--trechos` marcam o mesmo intervalo de tempo nas duas câmaras) e cada câmara tem o seu tópico no `deteccoes.mcap`, como no modo online.
+* **Sem opções, os trechos do registo são os do online**, automaticamente (os que foram gravados com a tecla **R** na viagem, 4.7): os mesmos números e instantes (`Registo: trecho 1 iniciado (trecho do online).`). Com janela, aparece no canto superior direito o indicador vermelho `REGISTO · trecho N · tempo`; sem janela, o estado aparece na linha de progresso do terminal.
+* **`--trechos`**: só os trechos pedidos, em segundos desde o início da sessão (`60-` = do segundo 60 até ao fim), por exemplo para registar só uma parte de um trecho longo. **`--registar-tudo`** é o mesmo que `--trechos 0-`: todas as imagens do bag num só trecho.
+* **`--sem-interface`** é a forma mais rápida de registar.
+* **Duas câmaras:** um só ensaio para as duas; os trechos são **comuns** (os do online, ou os de `--trechos`, valem para as duas câmaras) e cada câmara tem o seu tópico no `deteccoes.mcap`, como no modo online.
 * O que fica registado é o que foi calculado em cada imagem: se desligar um modelo com O/L/E, ou a correção com C, durante um trecho, o registo indica-o imagem a imagem.
 * No fim, o terminal mostra a pasta do registo, os trechos (com as imagens de cada câmara) e os comandos para os ver (3.8 e 3.10).
 
@@ -626,9 +642,9 @@ data/offline/<viagem>/camaras5e8_<data_hora>/     (duas câmaras; com uma: camar
   | `estrada_contornos`, `estrada_buracos` | contorno da área circulável, para a voltar a desenhar | sim (o visualizador desenha-a) |
 
   Quem só lê os três primeiros campos não é afetado pelos outros. No offline, o instante de cada mensagem no MCAP é também o da imagem original; no online, o instante da mensagem é o do processamento, e o da imagem é o `stamp_ns`.
-* **`ensaio.json`**: texto legível, com tudo o que é preciso para refazer os vídeos: caminho do bag; a lista `camaras`, com o tópico da imagem, o tópico das deteções, a calibração usada (K, D) e o tamanho da imagem de cada câmara; nomes e limiares dos modelos; o tempo médio de cada modelo; e para cada trecho o início e o fim (em ns e em segundos desde o início do bag) e o número de imagens (total e `imagens_por_camara`). É atualizado sempre que um trecho termina, por isso não se perde se o programa parar. Os registos antigos, de uma câmara (sem a lista `camaras`), continuam a ser lidos.
+* **`ensaio.json`**: texto legível, com tudo o que é preciso para refazer os vídeos: caminho do bag; a lista `camaras`, com o tópico da imagem, o tópico das deteções, a calibração usada (K, D) e o tamanho da imagem de cada câmara; nomes e limiares dos modelos; o tempo médio de cada modelo; e para cada trecho o início e o fim (em ns e em segundos desde o início do bag) e o número de imagens (total e `imagens_por_camara`). É atualizado sempre que um trecho termina, por isso não se perde se o programa parar.
 * **Tamanho:** cerca de 3 KB por imagem (cerca de 300 MB por hora de vídeo a 30 imagens por segundo, com os três modelos ligados; o dobro com as duas câmaras).
-* A pasta `data/offline/` fica dentro de `data/`, que não vai para o git (está no `.gitignore`). Os registos antigos, em `data_offline/`, podem ser movidos para `data/offline/` (ou abertos com `--pasta-registo data_offline`).
+* A pasta `data/offline/` fica dentro de `data/`, que não vai para o git (está no `.gitignore`).
 
 ### 3.8 Rever ou exportar um trecho (`reproduzir_registo.py`)
 > **Antes:** um registo feito com o `processar_bag.py` (3.6) e o bag original acessível (no sítio onde foi processado, em `data/`, ou indicado com `--bag`); o `venv` ativado.
@@ -664,7 +680,7 @@ python offline/juntar_registos.py <registo da 5> <registo da 8> --pasta-registo 
 * **Trechos: a união.** Os trechos das duas câmaras que se sobrepõem passam a ser um só trecho, do início mais cedo ao fim mais tarde; um trecho que só uma câmara registou fica como trecho dessa câmara. Cada trecho guarda em que intervalos cada câmara foi registada (`intervalos_por_camara`), e o script mostra-os no fim.
   * Nas partes em que só uma câmara foi registada, o lado da outra aparece **escuro, com a mensagem `Câmara N: sem registo neste intervalo`** (no `reproduzir_registo.py`, no vídeo exportado e na janela de resultados).
   * Nessas partes, os veículos por instante (resumo e cores do percurso) contam só a câmara registada.
-* Com `--registar-tudo`, ou o mesmo `--trechos` nas duas sessões, os trechos coincidem e o registo juntado fica igual ao de uma só execução com as duas câmaras. Com a tecla R, os trechos de cada câmara ficam ligeiramente diferentes, e as pontas aparecem só com uma câmara.
+* Com as mesmas opções nas duas sessões (os trechos do online, ou o mesmo `--trechos`), os trechos coincidem e o registo juntado fica igual ao de uma só execução com as duas câmaras.
 * Na listagem do `reproduzir_registo.py` (sem argumentos) e no Resumo da janela («Juntado de»), um registo juntado indica os registos de origem e onde cada câmara foi registada.
 
 ### 3.10 Janela de resultados (`gui_resultados.py`)
@@ -1031,7 +1047,7 @@ O bag só existe se houver pelo menos um trecho com imagens. Começa no arranque
   * `corrigida` diz se as coordenadas (caixas, linhas e contornos) são as da imagem corrigida da distorção ou as da original.
   * `estrada_contornos` e `estrada_buracos` são a área circulável (o que o visualizador desenha a verde); não se guarda `modelos_ativos` (correm sempre os três); o trecho de cada deteção sabe-se pelo tópico `/processamento/trechos`.
 * **`resumo_online.json`:** modo, câmaras (imagens processadas, deteções por segundo, correção, períodos desligada), modelos (dispositivo, limiares, tempos médios), a gravação (ficheiro, tamanho, formato das imagens), o **relógio do PC**, os **trechos** (início, fim e duração em segundos desde o arranque, imagens gravadas e com deteções, e períodos desligada de cada câmara), a grelha, o aviso e o planeador, e as estatísticas para **Ambas**, **5** e **8** (as mesmas do resumo do offline) na sessão inteira (`resumos`) e por filtro (`resumos_por_filtro`: `sessao`, `trechos`, `1`, `2`, ...).
-* A pasta `data/` não vai para o git (está no `.gitignore`). As gravações antigas, em `data_realtime_inter/`, podem ser movidas para `data/`.
+* A pasta `data/` não vai para o git (está no `.gitignore`). As sessões antigas (`data_realtime_inter/realtime_*`) convertem-se para o nome atual com o `tools/converter_bag_antigo.py` (3.1).
 
 ### 4.10 Do online para o offline: usar a mesma gravação
 O bag do online é o ponto de partida do offline (secção 3): os trechos podem ser analisados depois com todo o detalhe.
@@ -1039,7 +1055,7 @@ O bag do online é o ponto de partida do offline (secção 3): os trechos podem 
   ```bash
   python offline/processar_bag.py data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap
   ```
-  * **Os trechos são os do online, automaticamente:** o `processar_bag.py` reconhece o bag do online (`Bag do online: só tem os trechos gravados no online (os trechos do registo são esses).`) e cria um registo com os mesmos trechos, com os mesmos números e instantes (`Registo: trecho 1 iniciado (trecho do online).`); a tecla **R** não é usada. Com `--trechos`, registam-se os pedidos (em segundos desde o início da sessão online).
+  * **Os trechos são os do online, automaticamente:** o `processar_bag.py` diz `Trechos do registo: os gravados no online.` e cria um registo com os mesmos trechos, com os mesmos números e instantes (`Registo: trecho 1 iniciado (trecho do online).`). Com `--trechos`, registam-se os pedidos (em segundos desde o início da sessão online).
   * Os tempos (no painel, nos trechos e na janela de resultados) são os da sessão online; o vídeo salta de um trecho para o seguinte (entre eles não há imagens).
   * Se a câmara da direita esteve desligada no online durante parte de um trecho, não há vídeo dela nesse intervalo: o processamento, a reprodução (3.8) e a janela de resultados mostram esse lado escuro, com `Câmara 8: desligada no online`, e o trecho guarda os intervalos de cada câmara (`intervalos_por_camara`, como num registo juntado, 3.9).
   * O registo vai para `data/offline/g05_camaras_<data_hora>/<ensaio>/` e reproduz-se (3.8) e vê-se na janela de resultados (3.10) como qualquer outro; no Resumo aparece a **Origem** `online · trechos do online` e o **Relógio do PC** no momento da gravação (4.12).
@@ -1048,7 +1064,7 @@ O bag do online é o ponto de partida do offline (secção 3): os trechos podem 
 * **Comparar os dois modos** nos mesmos trechos: o offline processa todas as imagens; o online, só as que houve tempo de processar. A diferença mostra o que se perde em tempo real com aquele PC.
 
 ### 4.11 Reproduzir um bag no Docker, sem câmaras
-> **Antes:** a imagem construída (4.6, passo 1), o ecrã autorizado (4.5; não é preciso com `-i`) e um bag gravado pelo online (4.9) ou um bag antigo. O caminho do bag é relativo à pasta do terminal (ou absoluto).
+> **Antes:** a imagem construída (4.6, passo 1), o ecrã autorizado (4.5; não é preciso com `-i`) e um bag gravado pelo online (4.9; um bag antigo converte-se antes, 3.1). O caminho do bag é relativo à pasta do terminal (ou absoluto).
 
 O mesmo Docker corre **sem câmaras**, com as imagens de um bag gravado: em vez dos drivers, o serviço `reprodutor` publica as imagens do bag **nos mesmos tópicos** (`/camara<N>/image_raw`), e o processamento, o planeador, o visualizador e o RViz correm **sem alterações**, como no veículo. É o que o enunciado pede para a parte 2 ("o mesmo nó de perceção corre sem alterações com dados do bag real, com o sistema ao vivo ou com o Gazebo") e o que permite a outros grupos (e aos docentes) correrem o vosso nó sem as câmaras.
 ```bash
@@ -1058,7 +1074,7 @@ bash scripts/online.sh --bag <bag.mcap> --taxa 0.5                            # 
 bash scripts/online.sh --bag <bag.mcap> --camara 5                            # só uma das câmaras
 bash scripts/online.sh --bag <bag.mcap> -i                                    # sem janela
 ```
-* **Coerente com o offline:** o bag é lido com o `leitura_bag.py`, o mesmo do `processar_bag.py`: imagens em JPEG ou sem compressão (os bags antigos também servem), bags sem índice ou com blocos estragados. Num bag do online, reproduz **trecho a trecho**, os mesmos trechos do offline, sem esperar pelos intervalos entre eles (no bag não há nada lá); num bag sem trechos, reproduz o bag todo.
+* **Coerente com o offline:** o bag é lido com o `leitura_bag.py`, o mesmo do `processar_bag.py`: imagens em JPEG, bags sem índice ou com blocos estragados. Reproduz **trecho a trecho**, os mesmos trechos do offline, sem esperar pelos intervalos entre eles (no bag não há nada lá).
 * **Tempos do bag:** o instante de cada imagem é o do bag, por isso a grelha local e o aviso funcionam como ao vivo, e os tempos no terminal, no painel e no resumo são os mesmos do offline e da sessão original.
 * **Como ao vivo:** o processamento trata as imagens à medida que chegam, ao ritmo da gravação (ou de `--taxa`): processa as que houver tempo de processar, como no veículo. Para processar todas, use o offline.
 * **Nada é gravado** (os dados já estão no bag); a tecla **R** não faz nada. No fim do bag, a sessão termina sozinha e aparece o resumo (`Resumo da reprodução no online`), guardado em `data/g05_reproducao_<bag>_<data_hora>/resumo_online.json`.
@@ -1576,6 +1592,8 @@ As câmaras dizem **o quê** e **em que faixa**; não medem distâncias nem velo
 | | `--erro-max` | erro (px) a partir do qual uma foto é destacada na revisão (1.0) |
 | | `--preview-largura` | largura máxima da janela (960) |
 | | `--saida` | pasta dos resultados (`calibracoes`) |
+| `python tools/converter_bag_antigo.py <bag antigo>` (3.1) | `--camara 5\|8` | câmara de um bag antigo de uma só câmara (`/image_raw`) |
+| | `--percurso <nome>`, `--destino <pasta>` | nome do percurso na sessão; pasta onde a criar (`data`) |
 | `python tools/exportar_linhas.py` (5.1.4, só no `.venv-exportar`) | `--unlanedet <pasta>` | pasta do UnLanedet (obrigatório) |
 | | `--modelo` | `clrnet_r34` (omissão), `clrnet_r50` ou `clrernet_r34` |
 | | `--pesos <ficheiro.pth>` | pesos (por omissão, descarregados do UnLanedet) |
@@ -1599,8 +1617,8 @@ Antes: o `venv` ativado (3.3); o `processar_bag.py` precisa do bag (3.2); os out
 | | `--corte-linhas X` | fração da imagem ignorada em cima nas linhas (0.46, do `linhas.json`) |
 | | `--conf-estrada X` | confiança mínima da estrada, 0.5 a 1 (classe mais provável) |
 | | `--sem-interface` | sem janela, o mais depressa possível; teclas no terminal |
-| | `--trechos "10-20,35.5-50,60-"` | regista estes trechos (s desde o início do bag) |
-| | `--registar-tudo` | regista o vídeo todo (= `--trechos 0-`) |
+| | `--trechos "10-20,35.5-50,60-"` | regista só estes trechos (s desde o início da sessão; sem a opção: os do online) |
+| | `--registar-tudo` | regista todas as imagens do bag, num só trecho (= `--trechos 0-`) |
 | | `--sem-grelha` | sem a grelha local (vista de cima) ao lado do vídeo (5.4) |
 | | `--pasta-registo <pasta>` | onde guardar os registos (`data/offline`, no repositório) |
 | `python offline/reproduzir_registo.py` (3.8) | (sem argumentos) | lista os registos |
@@ -1670,13 +1688,12 @@ Antes: a imagem construída (4.6, passo 1: `docker compose build`, com o `ONNX_P
 | | **O** | rejeita os outliers |
 | | **Enter** / **Esc** | volta à câmara |
 | **Processamento offline** (`processar_bag.py`) | **Espaço** | pausa / retoma |
-| | **R** | começa / termina um trecho do registo (sem `--trechos`) |
 | | **C** | liga/desliga a correção da distorção |
 | | **O**, **L**, **E** | liga/desliga objetos, linhas, estrada |
 | | **V** | desliga todas as deteções / volta a ligá-las |
 | | **G** | mostra / esconde a grelha local (vista de cima) |
 | | **Q** / **Esc** | termina (no ecrã do fim, fecha a janela) |
-| **Processamento offline sem janela** (`--sem-interface`, no terminal) | **R**, **Espaço**, **Q** | trecho, pausa, terminar |
+| **Processamento offline sem janela** (`--sem-interface`, no terminal) | **Espaço**, **Q** | pausa, terminar |
 | **Reprodução** (`reproduzir_registo.py`) | **Espaço** | pausa / retoma |
 | | **N** | trecho seguinte |
 | | **1**, **2**, **3** | tempo real, 2x mais lento, 3x mais lento |
@@ -1704,7 +1721,7 @@ Antes: a imagem construída (4.6, passo 1: `docker compose build`, com o `ONNX_P
 | `src/va_g05/config/` | `camera_astra_5.yaml`, `camera_astra_8.yaml` (calibração), `montagem_camaras.yaml` (posição das câmaras no carro, grelha local e avisos, 5.4.2), `params.yaml` (planeador) e `g05.rviz` | cópia manual (2.2) e edição à mão | sim |
 | `src/va_g05/modelos/` | `objetos.onnx`, `linhas.onnx` + `linhas.json`, `estrada.onnx` | já incluídos (secção 5) | sim |
 | `calibracoes/camara<N>_<data_hora>/` | calibração, relatório e fotos | `tools/calibrar_astra.py` | — |
-| `data/g05_camaras_<data_hora>[_<percurso>]/` | bag do vídeo original (JPEG) + deteções, só nos trechos, e `resumo_online.json` (online); no PC do offline, a cópia (3.2). Os bags antigos: `data/viagem_<data_hora>/` | `scripts/online.sh` | não |
+| `data/g05_camaras_<data_hora>[_<percurso>]/` | bag do vídeo original (JPEG) + deteções, só nos trechos, e `resumo_online.json` (online); no PC do offline, a cópia (3.2) | `scripts/online.sh` | não |
 | `data/g05_reproducao_<bag>_<data_hora>/` | `resumo_online.json` de uma reprodução no Docker (4.11) | `scripts/online.sh --bag` | não |
 | `data/g05_resultados_<data_hora>/` | `ros2 bag record` dos resultados (4.13) | `scripts/online.sh --gravar` (perfil `gravar`) | não |
 | `data/offline/<viagem ou sessão online>/<ensaio>/` | registo das deteções (`deteccoes.mcap`, `ensaio.json`, vídeos `.mp4`, trajetos e referências do percurso) | `offline/processar_bag.py`, `juntar_registos.py`, `reproduzir_registo.py`, `gui_resultados.py` | não |
@@ -1712,7 +1729,7 @@ Antes: a imagem construída (4.6, passo 1: `docker compose build`, com o `ONNX_P
 | `docs/referencia/<nome>/` | amostra, marcações (`anotacoes/*.json`) e métricas (`metricas.md`, `metricas.json`) | `offline/anotar_referencia.py`, `offline/metricas_referencia.py` | sim |
 | `data/referencia/<nome>/` | imagens da referência: original, referência, processamento e comparação | os mesmos | não |
 
-A pasta `data/` pode ser outra (o disco externo): `DADOS` no `.env` (1.6). As pastas antigas `data_offline/` e `data_realtime_inter/` (antes desta organização) podem ser movidas para `data/offline/` e `data/`.
+A pasta `data/` pode ser outra (o disco externo): `DADOS` no `.env` (1.6). Os bags antigos convertem-se com o `tools/converter_bag_antigo.py` (3.1).
 
 ---
 

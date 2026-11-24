@@ -51,8 +51,6 @@ for caminho in args.ensaios:
     cams = registo.camaras_do_ensaio(e)
     if len(cams) != 1:
         erro(f"'{pasta}' já tem {len(cams)} câmaras; só se juntam registos de uma câmara.")
-    if cams[0]["camara"] is None:
-        erro(f"'{pasta}' não diz que câmara foi registada (registo de um bag antigo sem câmara).")
     if not e.get("trechos"):
         erro(f"'{pasta}' não tem trechos.")
     fontes.append({"pasta": pasta, "ensaio": e, "info": cams[0], "camara": cams[0]["camara"]})

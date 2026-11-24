@@ -153,22 +153,33 @@ def imagem_bgr(ros_msg):
 # --------------------------------------------------------------------------- #
 # Câmara e tópico
 # --------------------------------------------------------------------------- #
+TOPICO_TRECHOS = "/processamento/trechos"
+
+
+def topico_imagem(camara):
+    """Tópico das imagens de uma câmara num bag (formato atual, o do online: JPEG)."""
+    return f"/camara{camara}/image_raw/compressed"
+
+
 def camaras_no_bag(topicos):
-    """{'5': '/camara5/image_raw', ...} a partir dos tópicos do bag. As imagens podem estar sem
-    compressão (/camara<N>/image_raw, bags antigos) ou comprimidas (/camara<N>/image_raw/compressed,
-    bags do online); se o bag tiver as duas, usa-se a sem compressão."""
+    """{'5': '/camara5/image_raw/compressed', ...} a partir dos tópicos do bag (formato atual: imagens
+    em JPEG, um tópico por câmara)."""
     cams = {}
-    for t in sorted(topicos, key=lambda t: t.endswith("/compressed")):
-        m = re.fullmatch(r"/camara([0-9A-Za-z]+)/image_raw(/compressed)?", t)
-        if m and m.group(1) not in cams:
+    for t in sorted(topicos):
+        m = re.fullmatch(r"/camara([0-9A-Za-z]+)/image_raw/compressed", t)
+        if m:
             cams[m.group(1)] = t
     return cams
 
 
-def camara_do_nome(caminho):
-    """Câmara indicada no nome da pasta/ficheiro (viagem_camara5_...), ou None."""
-    encontradas = re.findall(r"camara([0-9A-Za-z]+?)(?=_|\.|$)", Path(caminho).resolve().as_posix())
-    return encontradas[-1] if encontradas else None
+def formato_atual(topicos):
+    """None se o bag está no formato atual (o do online: imagens em /camara<N>/image_raw/compressed e
+    os trechos em /processamento/trechos); senão, o texto do erro."""
+    if camaras_no_bag(topicos) and TOPICO_TRECHOS in topicos:
+        return None
+    return ("o bag não está no formato atual (imagens em /camara<N>/image_raw/compressed e trechos em "
+            "/processamento/trechos, como grava o online). Um bag antigo converte-se uma vez com: "
+            "python tools/converter_bag_antigo.py <bag> (README, secção 3.1)")
 
 
 # --------------------------------------------------------------------------- #

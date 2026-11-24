@@ -247,8 +247,6 @@ def desenhar(img, grelha, avisos, p):
         if lado not in LADOS or not isinstance(info, dict):
             continue
         cantos = info.get("zona")
-        if cantos is None and info.get("faixa") != "linhas":       # avisos antigos (sem a zona)
-            cantos = poligono(faixas_centro(p)[lado], p)
         if cantos:
             q = np.array([px(x, y) for x, y in cantos], np.int32).reshape(-1, 1, 2)
             cv2.polylines(img, [q], True, COR.get(info["estado"], (200, 200, 200)), 2, cv2.LINE_AA)

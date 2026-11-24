@@ -103,9 +103,7 @@ class Reproducao:
 
     def imagens_por_camara(self, trecho):
         """{câmara: número de imagens no trecho} das câmaras escolhidas."""
-        por_cam = trecho.get("imagens_por_camara")
-        if not por_cam:                                    # registos antigos: uma câmara
-            return {self.camaras[0]: trecho["imagens"]}
+        por_cam = trecho["imagens_por_camara"]
         return {c: por_cam.get(str(c), 0) for c in self.camaras}
 
     def camara_principal(self, trecho):

@@ -9,7 +9,7 @@ que o enunciado pede ("o mesmo nó de perceção corre sem alterações com dado
 sistema ao vivo ou com o Gazebo").
 
 Para ser coerente com o offline, o bag é lido com o leitura_bag.py, o mesmo do processar_bag.py:
-* imagens comprimidas (bags do online: /camara<N>/image_raw/compressed) ou não (bags antigos);
+* imagens em JPEG (/camara<N>/image_raw/compressed, o formato atual);
 * bag do online (só com os trechos): reproduz trecho a trecho, os mesmos do offline (eventos de
   /processamento/trechos), sem esperar pelos intervalos entre eles (no bag não há nada lá);
 * bag sem trechos: reproduz o bag todo;
@@ -189,17 +189,12 @@ def publicar_imagem(pub, ros_msg, tipo):
     msg.header.stamp.sec = int(ros_msg.header.stamp.sec)
     msg.header.stamp.nanosec = int(ros_msg.header.stamp.nanosec)
     msg.header.frame_id = ros_msg.header.frame_id
-    if hasattr(ros_msg, "encoding"):                   # já sem compressão (bags antigos): tal como está
-        msg.height, msg.width, msg.encoding = ros_msg.height, ros_msg.width, ros_msg.encoding
-        msg.is_bigendian, msg.step = ros_msg.is_bigendian, ros_msg.step
-        msg.data = array.array("B", bytes(ros_msg.data))
-    else:
-        frame = leitura_bag.imagem_bgr(ros_msg)
-        if frame is None:
-            return False
-        msg.height, msg.width = frame.shape[:2]
-        msg.encoding, msg.is_bigendian, msg.step = "bgr8", 0, frame.shape[1] * 3
-        msg.data = array.array("B", frame.tobytes())
+    frame = leitura_bag.imagem_bgr(ros_msg)
+    if frame is None:
+        return False
+    msg.height, msg.width = frame.shape[:2]
+    msg.encoding, msg.is_bigendian, msg.step = "bgr8", 0, frame.shape[1] * 3
+    msg.data = array.array("B", frame.tobytes())
     pub.publish(msg)
     return True
 
