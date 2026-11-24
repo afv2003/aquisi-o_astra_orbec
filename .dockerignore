@@ -1,0 +1,6 @@
+# Só entra na imagem o que ela usa: o workspace ROS (src/) e as dependências Python
+*
+!src/
+!requirements.txt
+**/__pycache__
+**/*.pyc

@@ -1,0 +1,12 @@
+{
+  "name": "VA - G5 (câmaras laterais)",
+  "build": { "dockerfile": "../Dockerfile", "context": ".." },
+  "runArgs": ["--network=host", "--ipc=host"],
+  "containerEnv": { "ROS_DOMAIN_ID": "42", "VA_G05_DIR": "/ws/src/va_g05" },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/ws,type=bind",
+  "workspaceFolder": "/ws",
+  "postCreateCommand": "bash -c 'source /opt/ros/jazzy/setup.bash && PATH=/usr/bin:$PATH colcon build'",
+  "customizations": {
+    "vscode": { "extensions": ["ms-python.python"] }
+  }
+}

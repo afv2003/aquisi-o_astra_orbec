@@ -1,0 +1,146 @@
+# G5 (projeto 3, câmaras laterais): câmaras -> perceção (deteções, grelha local, avisos) -> planeador.
+# O GRUPO, o ROS_DOMAIN_ID, as câmaras, a pasta dos dados e o motor ONNX vêm do ficheiro .env.
+# Normalmente lança-se com o scripts/online.sh (README, secção 4), que escolhe os perfis e as variáveis:
+#   bash scripts/online.sh 5 8                      ao vivo         (perfis sensor + visualizador)
+#   bash scripts/online.sh --bag <ficheiro.mcap>    reprodução      (perfis reproduzir + visualizador)
+# Os mesmos serviços, diretamente com o docker compose (modelo da aula 10):
+#   docker compose build
+#   docker compose --profile sensor up               -> câmaras + perceção + planeador (sem janela)
+#   ... --profile visualizador                       -> a janela do G5 (X11: xhost +local:root)
+#   ... --profile gravar                             -> grava os resultados (ros2 bag) em ./data
+#   ... --profile foxglove                           -> foxglove_bridge (porta 8765; layout docs/layout.json)
+#   ... --profile rviz                               -> rviz2 (Linux, X11)
+# Os executáveis são chamados diretamente (o mesmo que "ros2 run va_g05 percecao"): o ros2 run não passa
+# o Ctrl+C / docker stop (SIGINT) ao nó, e a perceção precisa dele para fechar a gravação e o resumo.
+
+x-ros: &ros
+  build:
+    context: .
+    args:
+      ONNX_PKG: ${ONNX_PKG:-onnxruntime}
+  image: va/${GRUPO:-g05}:latest
+  network_mode: host          # Linux: o contentor usa a rede do portátil (câmaras, DDS)
+  ipc: host                   # necessário para o Fast DDS entre contentores com rede host
+  stop_signal: SIGINT         # Ctrl+C "limpo" para os nós e para o ros2 bag
+  environment: &ros-env
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+    RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+  volumes:
+    - ${DADOS:-./data}:/data  # gravações e bags; na aquisição, o disco externo (DADOS no .env)
+
+x-x11: &x11                   # janelas (visualizador, RViz) no ecrã do portátil
+  DISPLAY: ${DISPLAY:-:0}
+  QT_X11_NO_MITSHM: "1"
+
+services:
+  # ----------------------------------------------------------------- fontes de dados
+  # Câmaras Astra (RGB por USB): /camara<N>/image_raw (sensor_msgs/Image) e, com o
+  # compressed_image_transport, /camara<N>/image_raw/compressed (JPEG), que é o que se grava
+  driver_camara5:             # câmara esquerda
+    <<: *ros
+    profiles: [sensor]
+    privileged: true
+    command: >
+      /opt/ros/jazzy/lib/usb_cam/usb_cam_node_exe --ros-args
+      -r __ns:=/camara5
+      -p video_device:=${DEV_CAMARA5:-/dev/video2}
+      -p frame_id:=camara5
+      -p camera_name:=astra_rgb_5
+
+  driver_camara8:             # câmara direita
+    <<: *ros
+    profiles: [sensor]
+    privileged: true
+    command: >
+      /opt/ros/jazzy/lib/usb_cam/usb_cam_node_exe --ros-args
+      -r __ns:=/camara8
+      -p video_device:=${DEV_CAMARA8:-/dev/video4}
+      -p frame_id:=camara8
+      -p camera_name:=astra_rgb_8
+
+  # Reprodução de um bag, em vez das câmaras: publica as imagens nos mesmos tópicos dos drivers,
+  # trecho a trecho. O bag é ${BAG}, dentro de ${PASTA_BAG} (por omissão ./data), montada só para leitura
+  reprodutor:
+    <<: *ros
+    profiles: [reproduzir]
+    environment:
+      <<: *ros-env
+      CAMARAS_ATIVAS: ${CAMARAS_ATIVAS:-}
+      TAXA: ${TAXA:-1}
+    volumes:
+      - ${PASTA_BAG:-./data}:/bag:ro
+    command: reprodutor /bag/${BAG:-indicar_BAG}
+
+  # ----------------------------------------------------------------- processamento
+  # Perceção (o nó do G5, processar_tempo_real.py): deteções, grelha local, avisos, TF; ao vivo grava
+  # os trechos em /data/<sessão>/. Ctrl+C (ou o fim de outro contentor) termina como a tecla Q
+  percecao:
+    <<: *ros
+    environment:
+      <<: *ros-env
+      CAMARAS_ATIVAS: ${CAMARAS_ATIVAS:-${CAMARAS:-5 8}}
+      SEM_INTERFACE: ${SEM_INTERFACE:-0}
+      SEM_CORRECAO: ${SEM_CORRECAO:-0}
+      SESSAO: ${SESSAO:-}
+      REGISTAR_TUDO: ${REGISTAR_TUDO:-0}
+      SEM_PROCESSAMENTO: ${SEM_PROCESSAMENTO:-0}
+      REPRODUCAO: ${REPRODUCAO:-}
+      RELOGIO_NTP: ${RELOGIO_NTP:-}
+      SERVIDOR_NTP: ${SERVIDOR_NTP:-pool.ntp.org}
+      PASTA_REGISTO: /data
+    stop_grace_period: 30s
+    command: percecao
+
+  # Planeador A* comum (src/va_planeamento, sem alterações): /g05/grelha_local -> /g05/caminho_local,
+  # /g05/estado, /g05/zona_proibida
+  planeador:
+    <<: *ros
+    command: >
+      local_astar --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  # ----------------------------------------------------------------- visualização e gravação
+  # A janela do G5 (visualizador.py): subscreve os tópicos da perceção e desenha (não processa).
+  # Teclas: R trecho, D câmara da direita, Espaço pausa (reprodução), Q / Esc terminar
+  visualizador:
+    <<: *ros
+    profiles: [visualizador]
+    environment:
+      <<: [*ros-env, *x11]
+      CAMARAS_ATIVAS: ${CAMARAS_ATIVAS:-${CAMARAS:-5 8}}
+      SEM_CORRECAO: ${SEM_CORRECAO:-0}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ${DADOS:-./data}:/data
+    command: visualizador
+
+  # Resultados (ros2 bag, MCAP) em ./data/g05_resultados_<data_hora>: grelha, caminho, avisos, TF e
+  # deteções (o vídeo original grava-o a perceção, só nos trechos)
+  gravador:
+    <<: *ros
+    profiles: [gravar]
+    command: >
+      bash -c 'exec ros2 bag record -s mcap
+      -o /data/${GRUPO:-g05}_resultados_$$(date +%Y%m%d_%H%M%S)
+      /tf_static
+      /${GRUPO:-g05}/grelha_local /${GRUPO:-g05}/zona_proibida
+      /${GRUPO:-g05}/caminho_local /${GRUPO:-g05}/estado
+      /${GRUPO:-g05}/aviso_faixa /${GRUPO:-g05}/aviso_saida_faixa /${GRUPO:-g05}/aviso_colisao
+      /camara5/processamento/dados_deteccoes /camara8/processamento/dados_deteccoes
+      /processamento/painel /processamento/estado_camaras'
+
+  # Foxglove Studio: abrir ligação Foxglove WebSocket em ws://localhost:8765; layout em docs/layout.json
+  foxglove:
+    <<: *ros
+    profiles: [foxglove]
+    command: ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765
+
+  # RViz: imagens das câmaras, TF das câmaras, grelha local e caminho do A*, no base_link
+  rviz:
+    <<: *ros
+    profiles: [rviz]
+    environment:
+      <<: [*ros-env, *x11]
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    command: rviz2 -d /ws/install/va_g05/share/va_g05/config/g05.rviz

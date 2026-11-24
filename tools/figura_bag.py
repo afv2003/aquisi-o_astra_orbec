@@ -5,9 +5,9 @@ figura_bag.py - Figuras, GIF e métricas para o relatório e a apresentação, a
 grelha de um LiDAR, os avisos das câmaras laterais.
 
     pip install matplotlib            (no venv do offline; o resto já está no requirements.txt)
-    python tools/figura_bag.py data/realtime_<data_hora>
-    python tools/figura_bag.py data/realtime_<data_hora> --gif docs/img/demo.gif
-    python tools/figura_bag.py data/realtime_<data_hora> --instantes 4 --saida docs/img
+    python tools/figura_bag.py data/g05_camaras_<data_hora>
+    python tools/figura_bag.py data/g05_camaras_<data_hora> --gif docs/img/demo.gif
+    python tools/figura_bag.py data/g05_camaras_<data_hora> --instantes 4 --saida docs/img
 
 Gera, em --saida (por omissão docs/img/), com o nome do bag:
   <bag>_avisos.png      estado de cada aviso ao longo do tempo (mudança de faixa e saída de faixa por
@@ -19,7 +19,7 @@ e escreve no terminal uma tabela (Markdown) de métricas para o README: imagens 
 frequência dos tópicos e percentagem do tempo em cada estado de cada aviso.
 
 O ecrã é refeito com o painel.py a partir do que ficou gravado (imagens em JPEG, deteções, grelha e
-avisos), exatamente como o visualizador do online o mostrou. Corre na pasta do projeto (usa o config/).
+avisos), exatamente como o visualizador do online o mostrou (com o src/va_g05/config/, encontrado sozinho).
 """
 import argparse
 import json
@@ -30,16 +30,17 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import aviso_colisao      # noqa: E402
-import aviso_faixa        # noqa: E402
-import aviso_saida_faixa  # noqa: E402
-import geometria          # noqa: E402
-import grelha_local       # noqa: E402
-import leitura_bag        # noqa: E402
-import painel             # noqa: E402
-import registo            # noqa: E402
-import visual             # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "va_g05"))   # biblioteca comum (pacote va_g05)
+from va_g05 import aviso_colisao      # noqa: E402
+from va_g05 import caminhos           # noqa: E402
+from va_g05 import aviso_faixa        # noqa: E402
+from va_g05 import aviso_saida_faixa  # noqa: E402
+from va_g05 import geometria          # noqa: E402
+from va_g05 import grelha_local       # noqa: E402
+from va_g05 import leitura_bag        # noqa: E402
+from va_g05 import painel             # noqa: E402
+from va_g05 import registo            # noqa: E402
+from va_g05 import visual             # noqa: E402
 
 ORDEM = {"colisao": ["LIVRE", "ATENCAO", "AVISO", "PERIGO"],
          "faixa": ["LIVRE", "SEM_FAIXA", "SEM_INFORMACAO", "OCUPADA"],
@@ -126,8 +127,8 @@ class Ecra:
         self.grelha = grelha_local.GrelhaLocal(self.montagem) if self.montagem else None
         self.p_faixa = aviso_faixa.parametros(self.montagem)
         self.camaras = camaras
-        self.calib = {c: leitura_bag.carregar_calibracao_yaml(f"config/camera_astra_{c}.yaml")
-                      for c in camaras if Path(f"config/camera_astra_{c}.yaml").exists()}
+        self.calib = {c: leitura_bag.carregar_calibracao_yaml(caminhos.calibracao(c))
+                      for c in camaras if caminhos.calibracao(c).exists()}
         self.corretor = {c: leitura_bag.CorretorDistorcao(v) for c, v in self.calib.items()}
         self.imagens = {c: {} for c in camaras}
         self.ecra = {c: None for c in camaras}
@@ -300,7 +301,7 @@ def metricas(bag, series, trechos):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("bag", help="pasta da sessão do online (data_realtime_inter/realtime_<data_hora>) ou o .mcap")
+    ap.add_argument("bag", help="pasta da sessão do online (data/g05_camaras_<data_hora>) ou o .mcap")
     ap.add_argument("--grupo", default="g05")
     ap.add_argument("--saida", default="docs/img", help="pasta das figuras (docs/img)")
     ap.add_argument("--instantes", type=int, default=3, help="número de instantes na figura dos ecrãs (3)")

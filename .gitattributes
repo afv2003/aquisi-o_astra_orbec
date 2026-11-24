@@ -1,2 +1,10 @@
-# Scripts de terminal com fins de linha de Linux, mesmo quando editados no Windows
-*.sh text eol=lf
+# Scripts, código e configuração sempre com fim de linha Linux (LF), mesmo quando o repositório é
+# clonado em Windows (os .sh e o que entra no Docker têm de ter LF)
+* text=auto eol=lf
+# Binários (modelos, imagens, bags)
+*.onnx binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.mcap binary
+*.pt binary
