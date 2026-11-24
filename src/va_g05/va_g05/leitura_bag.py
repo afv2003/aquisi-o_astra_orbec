@@ -178,8 +178,7 @@ def formato_atual(topicos):
     if camaras_no_bag(topicos) and TOPICO_TRECHOS in topicos:
         return None
     return ("o bag não está no formato atual (imagens em /camara<N>/image_raw/compressed e trechos em "
-            "/processamento/trechos, como grava o online). Um bag antigo converte-se uma vez com: "
-            "python tools/converter_bag_antigo.py <bag> (README, secção 3.1)")
+            "/processamento/trechos, como grava o online; README, secção 3.1)")
 
 
 # --------------------------------------------------------------------------- #

@@ -90,7 +90,7 @@ Para processar uma viagem com todas as deteções, use o `processar_bag.py` (off
 O primeiro argumento do `comparar_linhas.py` é a entrada; o tipo é reconhecido sozinho.
 
 **Bags `.mcap`** (como no `processar_bag.py`):
-* Os do online, no formato e com o nome atuais (`data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap`, README 3.1; um bag antigo converte-se antes com o `tools/converter_bag_antigo.py`). Funciona também com bags sem índice ou com blocos estragados (lê sequencialmente, como no offline).
+* Os do online, no formato e com o nome atuais (`data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap`, README 3.1). Funciona também com bags sem índice ou com blocos estragados (lê sequencialmente, como no offline).
 * **Uma câmara de cada vez**: por omissão a primeira do bag (a 5 num bag com as duas); `--camara 8` para a outra.
 * A imagem é **corrigida da distorção antes dos dois modelos** com `src/va_g05/config/camera_astra_<N>.yaml` (ou o `/camera_info` do bag); `--calib <yaml>` para outra calibração, `--sem-correcao` para não corrigir.
 
