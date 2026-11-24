@@ -40,9 +40,8 @@ CLRNet/
 corrigir_calibracao.py
 processar_video_teste.py
 
-# Comparação de modelos de linhas (ramo Extra-Line-Comparison): o modelo do UFLDv2 (o ONNX tem várias
-# centenas de MB; cada PC prepara-o com: python comparacao_linhas/preparar_ufld.py). As sessões ficam em
-# data/comparacao/ (já ignorada com data/); a pasta antiga data_comparacao/ também não vai para o git
-data_comparacao/
+# Modelo do UFLDv2 da branch Extra-Line-Comparison (866 MB): fica na pasta ao mudar para o main
 comparacao_linhas/modelos/ufld.onnx
 comparacao_linhas/modelos/ufld.parcial
+data_comparacao/
+# (ramo Extra-Line-Comparison) as sessões da comparação ficam em data/comparacao/, já fora do git com data/
