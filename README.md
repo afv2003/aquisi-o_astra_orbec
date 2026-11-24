@@ -299,6 +299,8 @@ pip install -r requirements.txt
 * Quando o `requirements.txt` ganhar uma biblioteca nova (depois de um `git pull`), num `venv` que já existe, instale só essa (`pip install <nome>`), sobretudo num `venv` de GPU.
 
 ### 3.4 Processar um bag (`processar_bag.py`)
+> **Antes:** o `venv` criado e ativado (3.3) e o bag copiado e verificado (3.2). Corra na pasta do projeto (os caminhos `config/` e `modelos/` são relativos a ela).
+
 1. **Encontrar o bag** (opcional):
    ```bash
    find data/ -name "*.mcap"      # Linux / macOS
@@ -460,6 +462,8 @@ data_offline/<viagem>/camaras5e8_<data_hora>/     (duas câmaras; com uma: camar
 * A pasta `data_offline/` não vai para o git (está no `.gitignore`), tal como `data/`.
 
 ### 3.8 Rever ou exportar um trecho (`reproduzir_registo.py`)
+> **Antes:** um registo feito com o `processar_bag.py` (3.6) e o bag original acessível (no sítio onde foi processado, em `data/`, ou indicado com `--bag`); o `venv` ativado.
+
 Refaz o vídeo de um registo **sem voltar a correr os modelos**: lê do bag original só as imagens de cada trecho e junta a cada uma as deteções com o mesmo instante (`stamp_ns`), com a mesma correção da distorção (a calibração guardada no `ensaio.json`) e o mesmo aspeto do `processar_bag.py`.
 ```bash
 python reproduzir_registo.py                                     # lista os registos e os seus trechos
@@ -479,6 +483,8 @@ python reproduzir_registo.py data_offline/<viagem>/<ensaio> --bag <caminho do .m
 * **Gravações do modo online:** primeiro processam-se no offline (4.10), que cria o registo com os mesmos trechos do online; depois reproduzem-se como qualquer registo. Se a câmara da direita esteve desligada no online (tecla **D**) durante parte de um trecho, o lado dela aparece escuro nesse intervalo, com `Câmara 8: desligada no online` (não há vídeo dela aí).
 
 ### 3.9 Juntar dois registos de uma câmara (`juntar_registos.py`)
+> **Antes:** os dois registos feitos (3.6), um de cada câmara, do mesmo bag; o `venv` ativado.
+
 Se as duas câmaras de um bag forem processadas em sessões diferentes (`--camara 5` numa, `--camara 8` noutra), ficam dois registos separados. O `juntar_registos.py` junta-os num registo de duas câmaras, igual ao que sairia de as processar juntas, para se verem lado a lado no `reproduzir_registo.py` e na janela de resultados:
 ```bash
 python juntar_registos.py data_offline/<viagem>/camara5_<data_hora> data_offline/<viagem>/camara8_<data_hora>
@@ -493,6 +499,8 @@ python juntar_registos.py <registo da 5> <registo da 8> --pasta-registo outra_pa
 * Na listagem do `reproduzir_registo.py` (sem argumentos) e no Resumo da janela («Juntado de»), um registo juntado indica os registos de origem e onde cada câmara foi registada.
 
 ### 3.10 Janela de resultados (`gui_resultados.py`)
+> **Antes:** pelo menos um registo (3.6); o `venv` ativado. Para o vídeo, o bag original acessível (como em 3.8).
+
 Uma janela, à parte do processamento, para ver os registos (3.6 a 3.9):
 ```bash
 python gui_resultados.py                                      # registos em data_offline (abre o mais recente)
@@ -587,7 +595,7 @@ As gamas estão em `GAMAS_VEICULOS`, no `registo.py`, e as cores em `CORES_GAMAS
   | `rviz` | o RViz com o `config/g05.rviz` (perfil `rviz`) | com `--rviz` |
 
 * `compose_realtime_gpu.yaml`: ficheiro complementar que dá acesso da placa gráfica NVIDIA ao contentor `processador`. **Não precisa de o editar**: é carregado automaticamente pelo `processar_inter.sh` quando o PC tem GPU NVIDIA pronta para Docker.
-* `processar_inter.sh`: o script que deve usar sempre para arrancar. Ao vivo, associa as câmaras (5 e/ou 8) aos `/dev/video` e verifica a hora do PC (4.12); em reprodução, lê as câmaras e os trechos do bag. **Deteta sozinho se deve usar GPU NVIDIA ou CPU**, constrói a imagem se houver alterações, lança os serviços e, no fim, abre a janela do resumo.
+* `processar_inter.sh`: o script que deve usar sempre para arrancar. Ao vivo, associa as câmaras (5 e/ou 8) aos `/dev/video` e verifica a hora do PC (4.12); em reprodução, lê as câmaras e os trechos do bag. **Deteta sozinho se deve usar GPU NVIDIA ou CPU** (ficheiros do Docker a usar), lança os serviços e, no fim, abre a janela do resumo. **Não constrói a imagem**: isso faz-se antes, uma vez (4.6, passo 1). Corre na pasta do terminal: lance-o sempre a partir da pasta do projeto.
 * `processar_tempo_real.py` (serviço `processador`): nó ROS 2 que recebe todas as imagens das câmaras, corrige a distorção, corre os três modelos (na imagem mais recente de cada câmara) e publica:
   * `/camara<N>/processamento/dados_deteccoes` (`std_msgs/String`, o JSON das deteções, com os contornos da estrada);
   * `/processamento/painel` (o que o painel da janela mostra: tempos dos modelos, deteções por segundo, correção, indicador de gravação) e `/processamento/estado_camaras` (que câmaras estão a ser processadas; muda com a tecla **D**);
@@ -652,7 +660,17 @@ xhost +local:root
 ```
 
 ### 4.6 Iniciar (ao vivo, com as câmaras)
-Abra o terminal na pasta do projeto e lance o `processar_inter.sh` indicando as câmaras **pela ordem dos dispositivos** `/dev/video`:
+> **Antes:** o Docker instalado (1.6), a imagem construída (passo 1, abaixo), as câmaras ligadas (4.4) e o ecrã autorizado (4.5; não é preciso com `-i`). Todos os comandos correm **na pasta do projeto** (o terminal tem de estar nela: `cd <pasta do projeto>`).
+
+**1. Construir a imagem Docker** (na 1.ª vez, e de novo sempre que mudar o `Dockerfile_realtime_inter` ou o `requirements.txt`, ou trocar entre CPU e GPU). O `processar_inter.sh` não a constrói: usa a que existir. Escolha a linha do seu PC (o `processar_inter.sh` mostra qual é, em `Hardware detetado: ...`):
+```bash
+docker compose -f compose_realtime_inter.yaml build                                            # CPU
+ONNX_PKG="onnxruntime-gpu[cuda,cudnn]" docker compose -f compose_realtime_inter.yaml build      # GPU NVIDIA, CUDA 13 ou mais recente
+ONNX_PKG="onnxruntime-gpu[cuda,cudnn]<1.27" docker compose -f compose_realtime_inter.yaml build # GPU NVIDIA, CUDA 12.x
+```
+Demora alguns minutos na 1.ª vez (sobretudo com `onnxruntime-gpu[cuda,cudnn]`); depois, só refaz o que mudou. Se a imagem não existir de todo, o Docker constrói-a sozinho no primeiro arranque, com o pacote que o `processar_inter.sh` detetar.
+
+**2. Iniciar.** Lance o `processar_inter.sh` indicando as câmaras **pela ordem dos dispositivos** `/dev/video`:
 ```bash
 bash processar_inter.sh 5 8                      # câmara 5 em /dev/video2, câmara 8 em /dev/video4
 bash processar_inter.sh 8 5                      # se estiverem ao contrário
@@ -671,7 +689,7 @@ As opções podem juntar-se (por exemplo, `bash processar_inter.sh 5 8 -i --regi
 * **O hardware escolhido:** `Hardware detetado: GPU NVIDIA (CUDA 13) -> onnxruntime-gpu[cuda,cudnn]`, `Hardware detetado: CPU -> onnxruntime`, ou `Hardware: GPU NVIDIA encontrada, mas falta o NVIDIA Container Toolkit no Docker -> a usar CPU` (veja 4.3).
 * **A hora do PC** (4.12): `Relógio do PC: sincronizado por NTP (...)`; se não estiver, um aviso e a pergunta `Continuar mesmo assim? [s/N]`.
 * **Como marcar os trechos e se a gravação começa já** (`Gravação: só nos trechos (nada é gravado até começar o primeiro)`, ou `desde o início (--registar-tudo)`) e a pasta da gravação (`data_realtime_inter/realtime_<data_hora>/`).
-* **Na 1.ª vez** (ou ao alternar entre CPU e GPU, ou depois de mudar o `Dockerfile_realtime_inter` ou o `requirements.txt`), o Docker constrói a imagem e descarrega as bibliotecas (alguns minutos, sobretudo com `onnxruntime-gpu[cuda,cudnn]`). Nas vezes seguintes, arranca em poucos segundos.
+* **Com GPU**, a linha `(a imagem tem de ter sido construída com: ONNX_PKG="..."; ...)` lembra com que pacote a imagem tem de ter sido construída (passo 1). Se foi construída para CPU, os modelos aparecem em `CPU`.
 * **Os modelos, a correção, a grelha local, a medição do relógio e o TF das câmaras** (do serviço `processador`):
   ```text
   Objetos (YOLOv8n): GPU (CUDA)
@@ -699,7 +717,7 @@ A deteção começa assim que chegam as primeiras imagens; a gravação, só no 
 
 **Trechos (o que fica gravado):**
 * **Com janela:** tecla **R**: a primeira vez começa um trecho, a seguinte termina-o, e assim sucessivamente. Enquanto um trecho está a ser gravado, aparece no canto superior direito `REGISTO · trecho N · tempo` (como no offline, 3.4).
-* **Sem janela (`-i`):** noutro terminal, na pasta do projeto: `bash trecho.sh` (cada vez que corre, começa ou termina um trecho).
+* **Sem janela (`-i`):** noutro terminal, na pasta do projeto, **com o `processar_inter.sh` a correr**: `bash trecho.sh` (cada vez que corre, começa ou termina um trecho).
 * **`--registar-tudo`** (4.6): o trecho 1 começa no arranque; **R** termina-o e começa outros, como sempre.
 * O terminal do processamento mostra cada trecho, com o instante desde o arranque e as imagens gravadas de cada câmara:
   ```text
@@ -711,7 +729,7 @@ A deteção começa assim que chegam as primeiras imagens; a gravação, só no 
 
 **Desligar temporariamente a câmara da direita (mais deteções por segundo na outra):**
 * **Com janela:** tecla **D** (a mesma tecla volta a ligá-la). O lado direito fica escuro, com `Câmara 8: deteção desligada`.
-* **Sem janela (`-i`):** noutro terminal, na pasta do projeto: `bash alternar_camara.sh` (cada vez que corre, desliga ou volta a ligar).
+* **Sem janela (`-i`):** noutro terminal, na pasta do projeto, **com o `processar_inter.sh` a correr**: `bash alternar_camara.sh` (cada vez que corre, desliga ou volta a ligar).
 * O terminal do processamento mostra cada mudança, com o instante (`[00:27.9] Câmara 8: deteção DESLIGADA`).
 * **O vídeo da câmara desligada também deixa de ser gravado** nos trechos (poupa espaço; não há vídeo nem deteções dela nesses períodos). Cada mudança fica gravada no tópico `/processamento/estado_camaras` e os períodos desligados aparecem no resumo (na sessão e em cada trecho); no offline, a reprodução mostra esse lado escuro, com `Câmara 8: desligada no online` (4.10).
 * A câmara da esquerda nunca se desliga (há sempre pelo menos uma câmara a ser processada). Com uma só câmara, a tecla não faz nada.
@@ -728,7 +746,7 @@ A deteção começa assim que chegam as primeiras imagens; a gravação, só no 
    * com duas câmaras, escolhe-se **Ambas**, **Câmara 5** ou **Câmara 8**. Enquanto a câmara 8 esteve desligada, os veículos por instante contam só a câmara 5.
 
    Feche a janela (ou carregue em **Fechar**) para terminar.
-4. **Sem janela (`-i`)**, o resumo não é mostrado, mas é gravado na mesma (`resumo_online.json`), tal como os trechos. Para o abrir depois (precisa do `xhost +local:root`):
+4. **Sem janela (`-i`)**, o resumo não é mostrado, mas é gravado na mesma (`resumo_online.json`), tal como os trechos. Para o abrir depois (antes: a sessão terminada, a imagem construída e o `xhost +local:root`; na pasta do projeto):
    ```bash
    docker compose -f compose_realtime_inter.yaml run --rm --no-deps visualizador python3 resumo_online.py data_realtime_inter/realtime_<data_hora>
    ```
@@ -796,6 +814,8 @@ O bag do online é o ponto de partida do offline (secção 3): os trechos podem 
 * **Comparar os dois modos** nos mesmos trechos: o offline processa todas as imagens; o online, só as que houve tempo de processar. A diferença mostra o que se perde em tempo real com aquele PC.
 
 ### 4.11 Reproduzir um bag no Docker, sem câmaras
+> **Antes:** a imagem construída (4.6, passo 1), o ecrã autorizado (4.5; não é preciso com `-i`) e um bag gravado pelo online (4.9) ou um bag antigo. O comando corre na pasta do projeto; o caminho do bag é relativo à pasta do terminal (ou absoluto).
+
 O mesmo Docker corre **sem câmaras**, com as imagens de um bag gravado: em vez dos drivers, o serviço `reprodutor` publica as imagens do bag **nos mesmos tópicos** (`/camara<N>/image_raw`), e o processamento, o planeador, o visualizador e o RViz correm **sem alterações**, como no veículo. É o que o enunciado pede para a parte 2 ("o mesmo nó de perceção corre sem alterações com dados do bag real, com o sistema ao vivo ou com o Gazebo") e o que permite a outros grupos (e aos docentes) correrem o vosso nó sem as câmaras.
 ```bash
 bash processar_inter.sh --bag data_realtime_inter/realtime_<data_hora>/realtime_<data_hora>_0.mcap
@@ -815,7 +835,7 @@ bash processar_inter.sh --bag <bag.mcap> -i                                    #
     trecho 1: 9.0 s a 20.7 s
     trecho 2: 23.5 s a 38.5 s
   ```
-* O bag pode estar em qualquer pasta (o `processar_inter.sh` monta a pasta dele, só para leitura, no Docker). O reprodutor espera que os modelos estejam carregados antes de começar.
+* O bag pode estar em qualquer pasta (o `processar_inter.sh` monta a pasta dele, só para leitura, no Docker). Antes de lançar os serviços, o script lê as câmaras e os trechos do bag com um contentor rápido do reprodutor (`--info`), porque o processamento precisa de saber que câmaras subscrever; é uma leitura, não uma construção. O reprodutor espera que os modelos estejam carregados antes de começar.
 * Com `docker compose` diretamente (sem o script): `BAG=<ficheiro> PASTA_BAG=<pasta> CAMARAS_ATIVAS="5 8" REPRODUCAO=<ficheiro> docker compose -f compose_realtime_inter.yaml --profile reproduzir up --no-deps reprodutor processador planeador visualizador`.
 
 **Testar só a imagem e os modelos** (sem câmaras nem bag), por exemplo depois de preparar a GPU:
@@ -853,7 +873,8 @@ O enunciado: "A gravação é feita com o relógio do portátil. (...) o portát
 ### 4.14 Problemas comuns
 * **`cannot open display` ou erro de janela gráfica:** falta o `xhost +local:root` (4.5); ou use `-i` se não precisar de janelas.
 * **`could not select device driver "nvidia"`:** tentou usar o `compose_realtime_gpu.yaml` sem o NVIDIA Container Toolkit (4.3). Com o `processar_inter.sh`, isto é detetado sozinho e arranca em CPU.
-* **Os modelos arrancam em `CPU` num PC com GPU:** confirme o `nvidia-smi` e o `docker info | grep -i nvidia` (4.3) e que não passou `USAR_GPU=0`.
+* **Os modelos arrancam em `CPU` num PC com GPU:** a imagem foi construída para CPU: construa-a de novo com o `ONNX_PKG` da GPU (4.6, passo 1). Confirme também o `nvidia-smi` e o `docker info | grep -i nvidia` (4.3) e que não passou `USAR_GPU=0`.
+* **`open compose_realtime_inter.yaml: no such file or directory`:** o terminal não está na pasta do projeto (`cd <pasta do projeto>`).
 * **`FileNotFoundError` ao carregar os modelos:** confirme que a pasta `modelos/` tem `objetos.onnx`, `linhas.onnx`, `linhas.json` e `estrada.onnx`.
 * **Aviso `config/camera_astra_<N>.yaml não existe`:** falta a calibração dessa câmara (secção 2); as deteções dessa câmara são feitas na imagem original (`"corrigida": false`).
 * **A janela fica em `à espera da primeira imagem`:** confirme no terminal que o `processador` arrancou (modelos carregados) e que as câmaras publicam (`--rviz`, 4.13). Em reprodução, o reprodutor só começa quando os modelos estão carregados.
@@ -1219,6 +1240,8 @@ Corrija o `config/montagem_camaras.yaml` e volte a correr o `processar_bag.py` n
 
 **Modo offline: processamento (`venv`)**
 
+Antes: o `venv` ativado (3.3), na pasta do projeto; o `processar_bag.py` precisa do bag (3.2); os outros, de um registo (3.6).
+
 | Comando | Opção | O que faz (valor por omissão) |
 |---|---|---|
 | `python processar_bag.py <bag>.mcap` (3.4) | `--camara 5`, `--camara 8`, `--camara 5,8` (ou `todas`) | câmaras a processar (todas as do bag) |
@@ -1249,6 +1272,8 @@ Corrija o `config/montagem_camaras.yaml` e volte a correr o `processar_bag.py` n
 | | `--pasta-registo <pasta>` | pasta dos registos (`data_offline`) |
 
 **Modo online (Linux, Docker)**
+
+Antes: a imagem construída (4.6, passo 1: `docker compose -f compose_realtime_inter.yaml build`, com o `ONNX_PKG` certo para GPU), na pasta do projeto; com janelas, o `xhost +local:root` (4.5). O `trecho.sh` e o `alternar_camara.sh` só funcionam com o `processar_inter.sh` a correr.
 
 | Comando | Opção | O que faz |
 |---|---|---|

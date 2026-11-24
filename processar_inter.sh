@@ -6,8 +6,11 @@
 #
 # Serviços (compose_realtime_inter.yaml): drivers das câmaras (ou reprodutor), processador, planeador,
 # visualizador (a janela) e, com --rviz, o RViz.
+#
+# Antes (README, secção 4.6): a imagem Docker construída (docker compose -f compose_realtime_inter.yaml build,
+# com o ONNX_PKG certo para CPU ou GPU). Este script não a constrói. Corre-se na pasta do projeto (os
+# caminhos, incluindo o do --bag, são relativos à pasta do terminal).
 set -euo pipefail
-cd "$(dirname "$0")"
 
 CAMARAS_VALIDAS="5 8"
 read -r -a DEVS <<< "${DEVS_VIDEO:-/dev/video2 /dev/video4}"
@@ -26,6 +29,8 @@ uso() {
     echo "  em reprodução:"
     echo "  --taxa <x>          : velocidade (1 = tempo real, 0.5 = metade, 2 = o dobro)"
     echo "  --camara <N>        : reproduzir só uma das câmaras do bag"
+    echo "Antes: a imagem construída (docker compose -f compose_realtime_inter.yaml build; README, secção 4.6),"
+    echo "  e o terminal na pasta do projeto."
     echo "Ao vivo, a deteção corre sempre; o vídeo original (JPEG) e as deteções só são gravados nos trechos:"
     echo "  tecla R na janela, ou, sem janela, bash trecho.sh (noutro terminal)."
     echo "  ex.: bash processar_inter.sh 5 8"
@@ -76,6 +81,7 @@ elif [ "${USAR_GPU:-auto}" != "0" ] \
     fi
     COMPOSE_FILES+=(-f compose_realtime_gpu.yaml)
     echo "Hardware detetado: GPU NVIDIA (CUDA ${CUDA_MAJOR:-?}) -> ${ONNX_PKG}"
+    echo "  (a imagem tem de ter sido construída com: ONNX_PKG=\"${ONNX_PKG}\"; README, secção 4.6)"
 else
     if [ "${USAR_GPU:-auto}" = "0" ]; then
         echo "Hardware: CPU (forçado por USAR_GPU=0)"
@@ -103,8 +109,6 @@ if [ -n "$BAG_PEDIDO" ]; then
     BAG="$(basename "$BAG_PEDIDO")"
     export PASTA_BAG BAG
     export CAMARAS_ATIVAS="$CAMARA_BAG"
-    echo "A preparar a imagem Docker..."
-    compose build
     # câmaras e trechos do bag (lidos dentro do Docker, como o reprodutor os vai ler)
     INFO=$(compose --profile reproduzir run --rm --no-deps -T reprodutor python3 reprodutor.py "/bag/$BAG" --info) || {
         echo "Erro: o bag não tem imagens de câmaras que se possam reproduzir."; exit 1; }
@@ -187,11 +191,6 @@ else
     echo "Gravação (vídeo original em JPEG + deteções, só nos trechos) e resumo em: $PASTA_SESSAO/"
 fi
 echo
-
-if [ -z "$BAG_PEDIDO" ]; then
-    echo "A preparar a imagem Docker..."
-    compose build
-fi
 
 # O RViz arranca à parte: fechá-lo não termina a sessão
 if [ "$RVIZ" = "1" ]; then
