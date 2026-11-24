@@ -254,9 +254,13 @@ def main():
     camaras = visual.ordenar_camaras(dict.fromkeys(os.environ.get('CAMARAS_ATIVAS', '5').split()))
     sem_interface = os.environ.get('SEM_INTERFACE', '0') == '1'
     sem_correcao = os.environ.get('SEM_CORRECAO', '0') == '1'
-    sessao = os.environ.get('SESSAO') or f"g05_camaras_{datetime.datetime.now():%Y%m%d_%H%M%S}"
     registar_tudo = os.environ.get('REGISTAR_TUDO', '0') == '1'
     bag_reproducao = os.environ.get('REPRODUCAO', '').strip() or None
+    # nome da sessão (o scripts/online.sh dá-o; sem ele, o mesmo formato): ao vivo g05_camaras_<data_hora>,
+    # em reprodução g05_reproducao_<bag>_<data_hora> (aí só fica o resumo)
+    agora_txt = f"{datetime.datetime.now():%Y%m%d_%H%M%S}"
+    sessao = os.environ.get('SESSAO') or (f"g05_reproducao_{Path(bag_reproducao).stem}_{agora_txt}" if bag_reproducao
+                                          else f"g05_camaras_{agora_txt}")
     processar = os.environ.get('SEM_PROCESSAMENTO', '0') != '1'
     gravar = bag_reproducao is None
     modo = "reprodução" if bag_reproducao else ("tempo real" if processar else "sem processamento")

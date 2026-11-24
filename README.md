@@ -1078,7 +1078,7 @@ bash scripts/online.sh --bag <bag.mcap> -i                                    # 
   docker compose build
   docker compose --profile reproduzir --profile foxglove up
   ```
-  No Foxglove Studio, ligação `ws://localhost:8765` e o layout `docs/layout.json`.
+  No Foxglove Studio, ligação `ws://localhost:8765` e o layout `docs/layout.json`. A imagem é a mesma do Linux (o Docker Desktop corre-a numa máquina virtual Linux); sem o script, as câmaras não se leem do bag: num bag de uma só câmara, indique-a antes do `up` (`$env:CAMARAS_ATIVAS = "5"`). O resumo fica em `data/g05_reproducao_<bag>_<data_hora>/`, como com o script.
 
 **Testar a imagem e os modelos** (sem câmaras nem bag), por exemplo depois de preparar a GPU: os testes do CI (1.7) carregam e correm os três modelos.
 ```bash
