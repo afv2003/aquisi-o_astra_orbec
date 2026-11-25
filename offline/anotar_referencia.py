@@ -2,7 +2,7 @@
 """
 anotar_referencia.py - Marcar à mão a referência (objetos, linhas, área circulável e faixa ao lado)
 em imagens escolhidas ao acaso dos bags, para medir o desempenho da deteção (metricas_referencia.py).
-README, secção 3.11.
+README, secção 4.11.
 
   python offline/anotar_referencia.py <nome> --bag <bag.mcap> [--bag <outro.mcap>] [--n 60]   criar e marcar
   python offline/anotar_referencia.py <nome>                                                 continuar a marcar
@@ -292,7 +292,7 @@ class Anotador:
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Marcar a referência para as métricas de desempenho (README 3.11).")
+    ap = argparse.ArgumentParser(description="Marcar a referência para as métricas de desempenho (README 4.11).")
     ap.add_argument("nome", help="nome do conjunto (pasta docs/referencia/<nome>)")
     ap.add_argument("--bag", action="append", default=[], help="bag de onde escolher as imagens (pode repetir)")
     ap.add_argument("--n", type=int, default=60, help="número de imagens a escolher (60)")

@@ -97,7 +97,7 @@ def texto_completo(est):
                 "timedatectl (\"System clock synchronized: yes\").")
     return (f"ATENÇÃO - relógio do PC NÃO sincronizado ({est['texto']}). Os instantes das imagens vêm deste "
             "relógio: os bags não ficam comparáveis com os de outros PCs. Com internet: sudo timedatectl "
-            "set-ntp true, espere um pouco e confirme com: timedatectl (README, secção 4.12).")
+            "set-ntp true, espere um pouco e confirme com: timedatectl (README, secção 3.12).")
 
 
 def resumo_curto(est):

@@ -2,7 +2,7 @@
 
 > Ramo `Extra-Line-Comparison`: fica **à parte do `main`** e não é para juntar ao `main`. Tudo o resto do projeto (README.md) é igual ao do `main`; este ramo só acrescenta a pasta `comparacao_linhas/` e este documento (secção 11). Corre no `venv` do offline, sem Docker.
 
-Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de linhas do projeto (**CLRNet ResNet34**, README 5.1) com o **UFLDv2 ResNet34** (Ultra-Fast-Lane-Detection-v2). Os dois foram treinados no mesmo conjunto de dados (CULane) e têm o mesmo backbone. Segue o processamento offline (`offline/processar_bag.py`, README 3.4): lê o vídeo de uma câmara, corrige a distorção e mostra-o **duas vezes, lado a lado**: à esquerda com as linhas do CLRNet, à direita com as do UFLDv2. É uma ferramenta **demonstrativa**: em vez de gravar o vídeo inteiro com as deteções, guarda em `.png` os instantes em que se pausa o vídeo.
+Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de linhas do projeto (**CLRNet ResNet34**, README 5.1) com o **UFLDv2 ResNet34** (Ultra-Fast-Lane-Detection-v2). Os dois foram treinados no mesmo conjunto de dados (CULane) e têm o mesmo backbone. Segue o processamento offline (`offline/processar_bag.py`, README 4.4): lê o vídeo de uma câmara, corrige a distorção e mostra-o **duas vezes, lado a lado**: à esquerda com as linhas do CLRNet, à direita com as do UFLDv2. É uma ferramenta **demonstrativa**: em vez de gravar o vídeo inteiro com as deteções, guarda em `.png` os instantes em que se pausa o vídeo.
 
 ```
  bag .mcap (câmara 5 ou 8)              ┌──▶ CLRNet (linhas.py) ──▶ esquerda ─┐
@@ -33,12 +33,12 @@ Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de lin
 ## 0. Onde encaixa no projeto e quando usar
 **Ponto comum com o resto do projeto: o vídeo original em `.mcap`.** Tal como o modo offline e o modo online (README 1.1), a comparação parte do vídeo original das câmaras gravado num bag:
 ```
- online (aquisição, README 4) ──▶ data/g05_camaras_<data_hora>/*.mcap (vídeo, só os trechos) ───┐
+ online (aquisição, README 3) ──▶ data/g05_camaras_<data_hora>/*.mcap (vídeo, só os trechos) ───┐
                                                                                                 ├──▶ comparacao_linhas/comparar_linhas.py
  vídeos / imagens externos (ex. nuScenes, Argoverse) ───────────────────────────────────────────┘
 ```
 * Lê os bags **da mesma forma que o `processar_bag.py`** (`leitura_bag.py`): mesma câmara, mesma calibração, mesma correção da distorção e mesmo `stamp_ns` de cada imagem. Por isso, o que se vê aqui é o que o CLRNet do offline e do online vê.
-* As deteções ficam no **mesmo formato do registo do offline** (README 3.6-3.7), com cada modelo no lugar de uma câmara (secção 5).
+* As deteções ficam no **mesmo formato do registo do offline** (README 4.6-4.7), com cada modelo no lugar de uma câmara (secção 5).
 * Vídeos e pastas de imagens externos são lidos **como no `processar_video_teste.py`** (o script de testes do offline com vídeos externos, por exemplo do Argoverse 2 ou do nuScenes).
 
 **Diferenças em relação ao `processar_bag.py`:**
@@ -56,12 +56,12 @@ Ferramenta para comparar, **no mesmo vídeo e na mesma imagem**, o modelo de lin
 * para **demonstrar** casos concretos (curvas, linhas apagadas, sombras, noite): pausa-se e fica o `.png` lado a lado;
 * para testar os dois modelos em **conjuntos de dados públicos** antes de os testar na estrada.
 
-Para processar uma viagem com todas as deteções, use o `processar_bag.py` (offline); para processar em tempo real no veículo, o modo online (README 4; quando usar cada modo: README 1.2).
+Para processar uma viagem com todas as deteções, use o `processar_bag.py` (offline); para processar em tempo real no veículo, o modo online (README 3; quando usar cada modo: README 1.2).
 
 **Relevância para a parte 2 (online, README 1.3):** o online usa o CLRNet e precisa de imagens por segundo. O UFLD é conhecido por ser rápido; esta comparação mostra, nas mesmas imagens e na mesma GPU, quanto custa cada modelo em tempo (secção 8) e onde diferem as deteções (secções 4, 6 e 7.2), antes de pensar em mudar o modelo do online.
 
 ## 1. Preparar o ambiente e o modelo UFLDv2 (uma vez por PC)
-1. **Ambiente Python:** o mesmo `venv` do offline (README 3.3; GPU: README 3.5). Ative-o **em cada terminal novo**:
+1. **Ambiente Python:** o mesmo `venv` do offline (README 4.3; GPU: README 4.5). Ative-o **em cada terminal novo**:
    ```bash
    venv\Scripts\activate          # Windows
    source venv/bin/activate       # Linux / macOS
@@ -90,7 +90,7 @@ Para processar uma viagem com todas as deteções, use o `processar_bag.py` (off
 O primeiro argumento do `comparar_linhas.py` é a entrada; o tipo é reconhecido sozinho.
 
 **Bags `.mcap`** (como no `processar_bag.py`):
-* Os do online, no formato e com o nome atuais (`data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap`, README 3.1). Funciona também com bags sem índice ou com blocos estragados (lê sequencialmente, como no offline).
+* Os do online, no formato e com o nome atuais (`data/g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap`, README 4.1). Funciona também com bags sem índice ou com blocos estragados (lê sequencialmente, como no offline).
 * **Uma câmara de cada vez**: por omissão a primeira do bag (a 5 num bag com as duas); `--camara 8` para a outra.
 * A imagem é **corrigida da distorção antes dos dois modelos** com `src/va_g05/config/camera_astra_<N>.yaml` (ou o `/camera_info` do bag); `--calib <yaml>` para outra calibração, `--sem-correcao` para não corrigir.
 
@@ -168,7 +168,7 @@ data/comparacao/<origem>/<sessão>/instantes/001_01m12.37s/
 * Um instante é guardado mesmo fora de um trecho do registo.
 
 ## 5. Registo das deteções (trechos)
-Igual ao do `processar_bag.py` (README 3.6 e 3.7): por **trechos** (tecla **R**, `--trechos`, `--registar-tudo`), com as deteções **de cada modelo em separado, como se fossem duas câmaras**:
+Igual ao do `processar_bag.py` (README 4.6 e 4.7): por **trechos** (tecla **R**, `--trechos`, `--registar-tudo`), com as deteções **de cada modelo em separado, como se fossem duas câmaras**:
 ```
 data/comparacao/<origem>/<sessão>/
     deteccoes.mcap    um tópico por modelo: /clrnet/processamento/dados_deteccoes e /ufld/processamento/dados_deteccoes
@@ -258,7 +258,7 @@ Fontes: CULane ([página do conjunto](https://xingangpan.github.io/projects/CULa
 **O que o corte do topo não corrige: a proporção da imagem.** O CULane tem 2,78:1 e a Astra 4:3. Ao passar para a entrada fixa de cada modelo (CLRNet 800x320, UFLDv2 1600x320), a imagem da Astra fica, em relação às do treino, cerca de **2 vezes mais esticada na horizontal**: as linhas aparecem mais "abertas" (menos inclinadas) do que o modelo viu no treino. Isto acontece **por igual aos dois modelos** (a diferença depende só da proporção da imagem: 2,78 ÷ 1,33 ≈ 2,1 nas Astra; ≈ 1,6 em vídeos 16:9, como o nuScenes), por isso a comparação continua justa, mas os dois ficam abaixo dos valores publicados. Cortar só o topo não muda a proporção da parte que os modelos veem; para a aproximar do CULane seria preciso cortar também em baixo (uma faixa horizontal da imagem com a proporção do CULane, à volta do horizonte), o que perde a estrada mais perto do carro.
 
 ## 8. Desempenho e GPU
-* A GPU é escolhida como no resto do projeto (README 3.5), pelo `gpu.py` do pacote `va_g05`: CUDA se o `onnxruntime-gpu` estiver instalado, senão CPU. No arranque, cada modelo corre uma vez numa imagem neutra, e o dispositivo indicado (terminal, registo e resumo) é o que fica **de facto** em uso; se a GPU falhar, aparece `Aviso: a GPU (CUDA) falhou ao correr o modelo de ...; a usar o CPU`.
+* A GPU é escolhida como no resto do projeto (README 4.5), pelo `gpu.py` do pacote `va_g05`: CUDA se o `onnxruntime-gpu` estiver instalado, senão CPU. No arranque, cada modelo corre uma vez numa imagem neutra, e o dispositivo indicado (terminal, registo e resumo) é o que fica **de facto** em uso; se a GPU falhar, aparece `Aviso: a GPU (CUDA) falhou ao correr o modelo de ...; a usar o CPU`.
 * No Windows, as bibliotecas do cuDNN instaladas pelo `pip` são encontradas sozinhas (o `gpu.py` junta as pastas `venv\Lib\site-packages\nvidia\*\bin` ao `PATH` do processo). Antes disso, aparecia `Could not locate cudnn_engines_tensor_ir64_9.dll` e os dois modelos corriam no CPU.
 * Tempos medidos no PC do projeto, nuScenes `CAM_BACK` reduzida a 640x360, tempo só do modelo:
 

@@ -1,6 +1,6 @@
 # G5 (projeto 3, câmaras laterais): câmaras -> perceção (deteções, grelha local, avisos) -> planeador.
 # O GRUPO, o ROS_DOMAIN_ID, as câmaras, a pasta dos dados e o motor ONNX vêm do ficheiro .env.
-# Normalmente lança-se com o scripts/online.sh (README, secção 4), que escolhe os perfis e as variáveis:
+# Normalmente lança-se com o scripts/online.sh (README, secção 3), que escolhe os perfis e as variáveis:
 #   bash scripts/online.sh 5 8                      ao vivo         (perfis sensor + visualizador)
 #   bash scripts/online.sh --bag <ficheiro.mcap>    reprodução      (perfis reproduzir + visualizador)
 # Os mesmos serviços, diretamente com o docker compose (modelo da aula 10):
