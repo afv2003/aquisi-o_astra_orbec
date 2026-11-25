@@ -439,7 +439,7 @@ Os bags são ficheiros grandes (com as imagens em JPEG, cerca de 0,3 a 0,6 GB po
 ### 3.3 Preparar o ambiente Python (`venv`, apenas na 1.ª vez)
 O processamento é feito diretamente no computador, num ambiente virtual Python (`venv`), sem precisar das câmaras nem do Docker. Funciona em **Linux, Windows e macOS**; cada sistema precisa do seu próprio `venv` (um `venv` criado num sistema não funciona no outro).
 
-Abra o terminal na pasta do projeto e crie o ambiente com as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `pyyaml`, `pillow`, `customtkinter` e `tkintermapview` para a janela de resultados, e o motor `onnxruntime`):
+Abra o terminal na pasta do projeto e crie o ambiente com as bibliotecas do `requirements.txt` (`opencv-python`, `numpy`, `mcap-ros2-support`, `pyyaml`, `pillow`, `customtkinter` e `tkintermapview` para a janela de resultados, `matplotlib` para as figuras do relatório, e o motor `onnxruntime`):
 
 **Linux / macOS:**
 ```bash
@@ -798,7 +798,7 @@ O resultado vai para `docs/referencia/<nome>/metricas.md`, com tabelas prontas a
 * **Num PC fraco**, `--sem-processamento` deixa só as câmaras e a gravação dos trechos (sem os modelos), e o processamento faz-se depois, no offline (4.6).
 
 ### 4.2 Ficheiros, serviços e tópicos
-* `Dockerfile`: a imagem (`va/g05`), com tudo o que o online precisa, sem nada fora do contentor além dos dados: ROS 2 Jazzy, o driver `usb_cam`, o `compressed_image_transport` (o driver publica também a imagem em JPEG), o `rosbag2` em MCAP, o `rviz2`, o `foxglove_bridge`, as bibliotecas do sistema para o OpenCV e para a janela do resumo (`python3-tk`), um ambiente Python (`/opt/venv`) instalado a partir do `requirements.txt` (sem `ultralytics` nem PyTorch; o `tkintermapview`, só do mapa do offline, também não é instalado) e o **workspace ROS** (`/ws`: `src/va_planeamento` e `src/va_g05`, construídos com `colcon build`, com os modelos e a configuração). O argumento `ONNX_PKG` (no `.env`; por omissão `onnxruntime`, em CPU) escolhe a versão do `onnxruntime` (CPU ou GPU). Como o código está **dentro** da imagem, depois de mudar um `.py`, a configuração ou os modelos é preciso construí-la de novo (`docker compose build`, rápido: só refaz o fim).
+* `Dockerfile`: a imagem (`va/g05`), com tudo o que o online precisa, sem nada fora do contentor além dos dados: ROS 2 Jazzy, o driver `usb_cam`, o `compressed_image_transport` (o driver publica também a imagem em JPEG), o `rosbag2` em MCAP, o `rviz2`, o `foxglove_bridge`, as bibliotecas do sistema para o OpenCV e para a janela do resumo (`python3-tk`), um ambiente Python (`/opt/venv`) instalado a partir do `requirements.txt` (sem `ultralytics` nem PyTorch; o `tkintermapview`, só do mapa do offline, e o `matplotlib`, só das figuras do relatório, também não são instalados) e o **workspace ROS** (`/ws`: `src/va_planeamento` e `src/va_g05`, construídos com `colcon build`, com os modelos e a configuração). O argumento `ONNX_PKG` (no `.env`; por omissão `onnxruntime`, em CPU) escolhe a versão do `onnxruntime` (CPU ou GPU). Como o código está **dentro** da imagem, depois de mudar um `.py`, a configuração ou os modelos é preciso construí-la de novo (`docker compose build`, rápido: só refaz o fim).
 * `compose.yaml`: os serviços (nós ROS), todos na rede do PC (`network_mode: host`), com a pasta dos dados montada em `/data` (`DADOS` no `.env`, por omissão `./data`). Segue o modelo da aula 10: a `percecao` e o `planeador` não têm perfil (arrancam sempre); o resto escolhe-se com perfis:
 
   | Serviço | O que faz | Perfil | Com o `scripts/online.sh` |
@@ -1108,7 +1108,7 @@ O enunciado: "A gravação é feita com o relógio do portátil. (...) o portát
   * **layout dos painéis:** `docs/layout.json` (no Foxglove, *Layouts* → *Importar*): as duas câmaras, a vista de cima no `base_link` (grelha, caminho do A\*, TF) e os três avisos e o estado do planeador em texto. Se um painel aparecer vazio (o formato dos layouts muda entre versões do Foxglove), escolha o tópico no próprio painel e guarde o layout de novo.
 * **Gravar só os resultados** (`ros2 bag record`, como o perfil `gravar` do modelo da aula 10): `bash scripts/online.sh 5 8 --gravar` (ou com `--bag`) grava a grelha, os avisos, o caminho do A\*, o TF e as deteções em `data/g05_resultados_<data_hora>/`, à parte do bag da sessão (que tem o vídeo, só nos trechos).
 * **A partir de outro PC na mesma rede** (Linux, com ROS 2 Jazzy ou com este Docker): com o mesmo `ROS_DOMAIN_ID` (42, no `.env`), os tópicos do online aparecem sozinhos (`ros2 topic list`), como pede a arquitetura da parte 2.
-* **Figuras, GIF e métricas para o relatório e a apresentação** (`tools/figura_bag.py`, sem ROS, no `venv` do offline com `pip install matplotlib`; antes: um bag do online, copiado como em 3.2):
+* **Figuras, GIF e métricas para o relatório e a apresentação** (`tools/figura_bag.py`, sem ROS, no `venv` do offline (o `matplotlib` vem no `requirements.txt`; num `venv` que já existia: `pip install matplotlib`); antes: um bag do online, copiado como em 3.2):
   ```bash
   python tools/figura_bag.py data/g05_camaras_<data_hora>                                # figuras em docs/img/
   python tools/figura_bag.py data/g05_camaras_<data_hora> --gif docs/img/demo.gif         # e um GIF
@@ -1646,7 +1646,7 @@ Antes: a imagem construída (4.6, passo 1: `docker compose build`, com o `ONNX_P
 | `docker compose run --rm --no-deps visualizador resumo_online /data/<sessão>` (4.8) | — | abre o resumo de uma sessão (no `venv`: `python offline/resumo_online.py data/<sessão>`) |
 | `docker compose --profile sensor [--profile visualizador] up` (4.6) | `--profile gravar`, `foxglove`, `rviz` | os serviços diretamente, como no modelo da aula 10 (câmaras e `/dev/video` do `.env`) |
 | `docker compose run --rm --no-deps planeador python3 -m pytest -q /ws/src` (1.7) | — | os testes (o mesmo do CI) |
-| `python tools/figura_bag.py <sessão ou .mcap>` (4.13, `venv` + `matplotlib`) | `--gif <ficheiro>`, `--instantes N`, `--saida <pasta>`, `--largura-gif`, `--fps-gif` | figuras, GIF e métricas dos avisos, para o relatório |
+| `python tools/figura_bag.py <sessão ou .mcap>` (4.13, `venv`) | `--gif <ficheiro>`, `--instantes N`, `--saida <pasta>`, `--largura-gif`, `--fps-gif` | figuras, GIF e métricas dos avisos, para o relatório |
 
 **Ficheiro `.env`** (lido pelo `docker compose` e pelo `scripts/online.sh`): `GRUPO` (`g05`), `ROS_DOMAIN_ID` (42), `ONNX_PKG` (`onnxruntime`; GPU: 4.3), `CAMARAS` (`5 8`), `DEV_CAMARA5` / `DEV_CAMARA8` (`/dev/video2`, `/dev/video4`; só para o `docker compose` sem o script), `DADOS` (`./data`; o disco externo, 1.6) e `BAG` (para o `--profile reproduzir` sem o script).
 
