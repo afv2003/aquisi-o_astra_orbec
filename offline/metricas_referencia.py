@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 metricas_referencia.py - Desempenho da deteção face à referência marcada à mão (anotar_referencia.py).
-README, secção 3.11.
+README, secção 4.11.
 
   python offline/metricas_referencia.py <nome>                      métricas + imagens de comparação
   python offline/metricas_referencia.py <nome> --figuras 3          e copia 3 comparações para docs/img
@@ -142,7 +142,7 @@ def tabela_md(cabecalho, linhas_):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Métricas de desempenho face à referência marcada (README 3.11).")
+    ap = argparse.ArgumentParser(description="Métricas de desempenho face à referência marcada (README 4.11).")
     ap.add_argument("nome", help="nome do conjunto (docs/referencia/<nome>)")
     ap.add_argument("--sem-imagens", action="store_true", help="não gravar as imagens de comparação")
     ap.add_argument("--figuras", type=int, default=0,
@@ -249,7 +249,7 @@ def main():
     md = [f"# Métricas de desempenho: {args.nome}\n",
           f"{len(usadas)} imagens marcadas à mão (câmaras {', '.join(cams)}; {len(marcadas) - len(usadas)} ignoradas), "
           f"bags: {', '.join(b['nome'] for b in amostra['bags'])}. Gerado com `python offline/metricas_referencia.py "
-          f"{args.nome}` (README 3.11).\n"]
+          f"{args.nome}` (README 4.11).\n"]
 
     # objetos
     linhas_md = []

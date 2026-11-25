@@ -7,7 +7,7 @@
 # Serviços (compose.yaml): drivers das câmaras (perfil sensor) ou reprodutor (perfil reproduzir),
 # percecao, planeador, visualizador (a janela, perfil visualizador) e, a pedido, RViz, Foxglove e gravador.
 #
-# Antes (README, secção 4.6): a imagem construída (docker compose build, com o ONNX_PKG do .env). Este
+# Antes (README, secção 3.6): a imagem construída (docker compose build, com o ONNX_PKG do .env). Este
 # script não a constrói. Pode correr-se de qualquer pasta: os caminhos (incluindo o do --bag) são
 # relativos à pasta do terminal; o compose.yaml, o .env e a pasta dos dados são os do repositório.
 set -euo pipefail
@@ -33,7 +33,7 @@ uso() {
     echo "  em reprodução:"
     echo "  --taxa <x>          : velocidade (1 = tempo real, 0.5 = metade, 2 = o dobro)"
     echo "  --camara <N>        : reproduzir só uma das câmaras do bag"
-    echo "Antes: a imagem construída (docker compose build; README, secção 4.6)."
+    echo "Antes: a imagem construída (docker compose build; README, secção 3.6)."
     echo "Ao vivo, a deteção corre sempre; o vídeo original (JPEG) e as deteções só são gravados nos trechos:"
     echo "  tecla R na janela, ou, sem janela, bash scripts/trecho.sh (noutro terminal)."
     echo "  ex.: bash scripts/online.sh 5 8"
@@ -104,7 +104,7 @@ elif [ "${USAR_GPU:-auto}" != "0" ] \
     case "$ONNX_PKG" in
         onnxruntime-gpu*) ;;
         *) echo "  Aviso: a imagem tem o onnxruntime de CPU: os modelos correm no CPU. Para a GPU, mude o"
-           echo "  ONNX_PKG no .env e construa de novo a imagem (docker compose build; README, secção 4.3)." ;;
+           echo "  ONNX_PKG no .env e construa de novo a imagem (docker compose build; README, secção 3.3)." ;;
     esac
 else
     if [ "${USAR_GPU:-auto}" = "0" ]; then

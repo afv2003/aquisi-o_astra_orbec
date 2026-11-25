@@ -3,7 +3,7 @@
 referencia.py - Conjunto de referência (marcado à mão) para medir o desempenho da deteção.
 
 Usado pelo anotar_referencia.py (escolher as imagens e marcá-las) e pelo metricas_referencia.py
-(comparar o processamento com a referência). README, secção 3.11.
+(comparar o processamento com a referência). README, secção 4.11.
 
 Um conjunto tem um nome e duas pastas:
   docs/referencia/<nome>/            (pequeno, pode ir para o git: é a "verdade" do relatório)

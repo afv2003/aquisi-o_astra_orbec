@@ -1,7 +1,7 @@
 # GPU NVIDIA para a perceção (os três modelos ONNX). O scripts/online.sh junta este ficheiro sozinho
 # quando encontra a GPU e o NVIDIA Container Toolkit; à mão:
 #   docker compose -f compose.yaml -f compose.gpu.yaml --profile sensor up
-# A imagem tem de ter o onnxruntime-gpu (ONNX_PKG no .env; README, secção 4.3).
+# A imagem tem de ter o onnxruntime-gpu (ONNX_PKG no .env; README, secção 3.3).
 services:
   percecao:
     deploy:

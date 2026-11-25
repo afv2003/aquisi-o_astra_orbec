@@ -1,7 +1,7 @@
 # Imagem do G5 (ROS 2 Jazzy): drivers das câmaras, perceção, planeador, visualizador, RViz e Foxglove.
 # Tudo o que o online precisa está aqui dentro (código, modelos ONNX, configuração e dependências);
 # fora do contentor ficam só os dados (./data, ou o disco externo, montados em /data).
-#   docker compose build                  (ONNX_PKG no .env: onnxruntime = CPU; GPU NVIDIA: README, 4.3)
+#   docker compose build                  (ONNX_PKG no .env: onnxruntime = CPU; GPU NVIDIA: README, 3.3)
 # Quando a imagem base dos docentes estiver publicada no repositório comum:
 #   docker compose build --build-arg BASE_IMAGE=<imagem-base-do-repositorio-comum>
 ARG BASE_IMAGE=ros:jazzy-ros-base
