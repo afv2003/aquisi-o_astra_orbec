@@ -4,7 +4,7 @@ figura_bag.py - Figuras, GIF e métricas para o relatório e a apresentação, a
 (sem ROS). Adaptado do tools/figura_bag.py do modelo da aula 10 (va-projeto-g00) para o G5: em vez da
 grelha de um LiDAR, os avisos das câmaras laterais.
 
-    pip install matplotlib            (no venv do offline; o resto já está no requirements.txt)
+    (no venv do offline, com o requirements.txt; num venv que já existia: pip install matplotlib)
     python tools/figura_bag.py data/g05_camaras_<data_hora>
     python tools/figura_bag.py data/g05_camaras_<data_hora> --gif docs/img/demo.gif
     python tools/figura_bag.py data/g05_camaras_<data_hora> --instantes 4 --saida docs/img

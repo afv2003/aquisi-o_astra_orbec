@@ -32,12 +32,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Python do G5 num ambiente virtual (OpenCV, onnxruntime, mcap, ...), no PATH; vê também o ROS
-# (PYTHONPATH do setup.bash). Ignora as linhas onnxruntime* do requirements.txt (usa ONNX_PKG) e o
-# tkintermapview (o mapa é só da janela de resultados do offline)
+# (PYTHONPATH do setup.bash). Ignora as linhas onnxruntime* do requirements.txt (usa ONNX_PKG), o
+# tkintermapview (o mapa é só da janela de resultados do offline) e o matplotlib (só do tools/figura_bag.py)
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 COPY requirements.txt /tmp/
-RUN grep -Ev '^[[:space:]]*(onnxruntime|tkintermapview)' /tmp/requirements.txt > /tmp/req_base.txt \
+RUN grep -Ev '^[[:space:]]*(onnxruntime|tkintermapview|matplotlib)' /tmp/requirements.txt > /tmp/req_base.txt \
     && pip install --no-cache-dir -r /tmp/req_base.txt "${ONNX_PKG}" pytest
 
 # Workspace ROS 2: o pacote comum (va_planeamento, sem alterações) e o do grupo (va_g05).
