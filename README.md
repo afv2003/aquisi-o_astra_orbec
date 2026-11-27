@@ -671,6 +671,36 @@ O enunciado pede o portátil com a hora certa (NTP) para os bags serem comparáv
 * **`No space left on device` numa câmara:** largura de banda USB; portas de lados diferentes (3.4).
 * **Poucas deteções por segundo:** a GPU (3.3), **D** num trecho, ou `-i`; num PC fraco, `--sem-processamento` e o offline.
 
+#### Ecrã preto ou PC bloqueado quando começa a deteção
+
+O modo `--sem-processamento` grava sem carregar os modelos. Na deteção, o YOLOv8n, o CLRNet e o YOLOP têm três sessões ONNX e partilham a VRAM; correm em sequência para cada imagem. Se o bloqueio ocorrer também em reprodução, use um bag curto para testar sem câmaras. Reconstrua primeiro a imagem com `docker compose build` para incluir as opções abaixo.
+
+No Linux, compare o mesmo trecho com uma câmara, a meia velocidade e sem visualizador:
+
+```bash
+bag=/caminho/para/trecho.mcap
+USAR_GPU=0 bash scripts/online.sh --bag "$bag" --camara 5 --taxa 0.5 -i
+USAR_GPU=auto CUDA_MEMORIA_REDUZIDA=1 bash scripts/online.sh --bag "$bag" --camara 5 --taxa 0.5 -i
+```
+
+No Windows com Docker Desktop, use o mesmo procedimento em reprodução. A segunda execução requer o backend WSL 2 e uma imagem construída com o pacote de GPU (passo 5 da secção 3.3).
+
+```powershell
+$env:BAG = "sessao/trecho.mcap"  # caminho dentro de data/
+$env:CAMARAS_ATIVAS = "5"
+$env:TAXA = "0.5"
+docker compose -f compose.windows.yaml build
+$env:USAR_GPU = "0"
+docker compose -f compose.windows.yaml --profile reproduzir up --abort-on-container-exit
+$env:USAR_GPU = "auto"
+$env:CUDA_MEMORIA_REDUZIDA = "1"
+docker compose -f compose.windows.yaml -f compose.gpu.yaml --profile reproduzir up --abort-on-container-exit
+```
+
+O modo de memória reduzida usa uma pesquisa mais leve dos algoritmos cuDNN e pede menos memória temporária para as convoluções. Pode alterar a frequência de deteção. Confirme no terminal os três dispositivos (`CPU` ou `GPU (CUDA)`). Se o ensaio com CUDA for estável, teste à velocidade normal e depois com as duas câmaras. Compare `deteccoes_por_segundo` por câmara no `resumo_online.json` à mesma velocidade. No Linux, a mesma opção funciona ao vivo com `CUDA_MEMORIA_REDUZIDA=1 bash scripts/online.sh 5 8 -i`.
+
+Se o PC continuar a bloquear, anote a hora e o último modelo mostrado no terminal. No Ubuntu, consulte o arranque anterior com `journalctl -k -b -1` e procure `NVRM`, `Xid`, `oom` ou `thermal`. No Windows, consulte o Histórico de Fiabilidade (`perfmon /rel`) e o log **Sistema** do Visualizador de Eventos nessa hora. Um bloqueio do anfitrião pode envolver o controlador gráfico, temperatura ou alimentação. Os registos ajudam a orientar o diagnóstico. [ONNX Runtime CUDA](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html) · [Docker Desktop GPU](https://docs.docker.com/desktop/features/gpu/) · [NVIDIA Xid](https://docs.nvidia.com/deploy/xid-errors/latest/index.html) · [Windows TDR](https://learn.microsoft.com/en-us/windows-hardware/drivers/display/timeout-detection-and-recovery)
+
 ---
 
 ## 4. Modo offline: processar os bags gravados (em qualquer sistema)

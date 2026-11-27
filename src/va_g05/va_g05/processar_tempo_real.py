@@ -285,12 +285,17 @@ def main():
         from . import objetos
         from . import linhas
         from . import estrada
+        if os.environ.get("USAR_GPU") != "0" and os.environ.get("CUDA_MEMORIA_REDUZIDA") == "1":
+            print("ONNX Runtime: modo de memória reduzida pedido para CUDA.", flush=True)
+        print("A carregar objetos (YOLOv8n)...", flush=True)
         detetor_objetos = objetos.DetetorObjetos(confianca=0.25, classes=objetos.CLASSES_ESTRADA)
+        print(f"Objetos (YOLOv8n): {detetor_objetos.dispositivo}", flush=True)
+        print("A carregar linhas (CLRNet)...", flush=True)
         detetor_linhas = linhas.DetetorLinhas()
+        print(f"Linhas  (CLRNet):  {detetor_linhas.dispositivo}", flush=True)
+        print("A carregar estrada (YOLOP)...", flush=True)
         detetor_estrada = estrada.DetetorEstrada()
-        print(f"Objetos (YOLOv8n): {detetor_objetos.dispositivo}")
-        print(f"Linhas  (CLRNet):  {detetor_linhas.dispositivo}")
-        print(f"Estrada (YOLOP):   {detetor_estrada.dispositivo}")
+        print(f"Estrada (YOLOP):   {detetor_estrada.dispositivo}", flush=True)
     else:
         print("Sem processamento (--sem-processamento): só as câmaras e a gravação dos trechos.")
     dispositivos = {k: d.dispositivo for k, d in (("objetos", detetor_objetos), ("linhas", detetor_linhas),

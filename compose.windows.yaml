@@ -40,6 +40,8 @@ services:
       CAMARAS_ATIVAS: ${CAMARAS_ATIVAS:-${CAMARAS:-5 8}}
       SEM_INTERFACE: "1"
       SEM_CORRECAO: ${SEM_CORRECAO:-0}
+      USAR_GPU: ${USAR_GPU:-auto}
+      CUDA_MEMORIA_REDUZIDA: ${CUDA_MEMORIA_REDUZIDA:-0}
       REPRODUCAO: ${BAG:-indicar_BAG}
       PASTA_REGISTO: /data
     stop_grace_period: 30s

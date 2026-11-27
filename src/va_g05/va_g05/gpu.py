@@ -21,6 +21,11 @@ import sys
 from pathlib import Path
 
 NOMES = {"CUDAExecutionProvider": "GPU (CUDA)", "DmlExecutionProvider": "GPU (DirectML)"}
+OPCOES_CUDA_MEMORIA_REDUZIDA = {
+    "arena_extend_strategy": "kSameAsRequested",
+    "cudnn_conv_algo_search": "HEURISTIC",
+    "cudnn_conv_use_max_workspace": "0",
+}
 _preparado = False
 _pastas_dll = []          # referências do os.add_dll_directory (as pastas saem da procura se forem libertadas)
 
@@ -40,6 +45,9 @@ def preparar(ort):
     global _preparado
     if hasattr(ort, "set_default_logger_severity"):
         ort.set_default_logger_severity(3)   # avisos inofensivos do CUDA (ScatterND/Memcpy) ficam escondidos
+    if os.environ.get("USAR_GPU") == "0":
+        return ["CPUExecutionProvider"]
+
     disponiveis = ort.get_available_providers()
     # com o PyTorch carregado, o CUDA já está carregado (não se mexe)
     if not _preparado and "CUDAExecutionProvider" in disponiveis and "torch" not in sys.modules:
@@ -58,8 +66,11 @@ def preparar(ort):
                 ort.preload_dlls()
             except Exception:
                 pass
-    return [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider")
-            if p in disponiveis]
+    fornecedores = [p for p in ("CUDAExecutionProvider", "DmlExecutionProvider", "CPUExecutionProvider")
+                    if p in disponiveis]
+    if "CUDAExecutionProvider" in fornecedores and os.environ.get("CUDA_MEMORIA_REDUZIDA") == "1":
+        fornecedores[0] = ("CUDAExecutionProvider", OPCOES_CUDA_MEMORIA_REDUZIDA)
+    return fornecedores
 
 
 def dispositivo(sessao):

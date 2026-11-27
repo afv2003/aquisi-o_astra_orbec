@@ -40,6 +40,7 @@ uso() {
     echo "  ex.: bash scripts/online.sh 5 8 -i --registar-tudo --percurso ua_ria"
     echo "  ex.: bash scripts/online.sh --bag data/g05_camaras_20261124_101500/g05_camaras_20261124_101500_0.mcap"
     echo "  Para forçar CPU num PC com GPU: USAR_GPU=0 bash scripts/online.sh 5 8"
+    echo "  Para reduzir o uso de memória CUDA: CUDA_MEMORIA_REDUZIDA=1 bash scripts/online.sh 5 8"
     echo "  Sem janela, para desligar/ligar a câmara da direita: bash scripts/alternar_camara.sh (noutro terminal)"
     exit 1
 }
@@ -92,9 +93,11 @@ export DADOS
 # --- Docker: CPU ou GPU NVIDIA (omissão: a GPU, se existir; forçar CPU com USAR_GPU=0) ---
 COMPOSE_FILES=(-f "$RAIZ/compose.yaml")
 ONNX_PKG="$(valor_env ONNX_PKG onnxruntime)"
+USAR_GPU="$(valor_env USAR_GPU auto)"
+export USAR_GPU
 if [ "$SEM_PROCESSAMENTO" = "1" ]; then
     echo "Hardware: sem processamento (os modelos não são usados)"
-elif [ "${USAR_GPU:-auto}" != "0" ] \
+elif [ "$USAR_GPU" != "0" ] \
     && command -v nvidia-smi >/dev/null 2>&1 \
     && nvidia-smi >/dev/null 2>&1 \
     && docker info 2>/dev/null | grep -qi nvidia; then
@@ -107,13 +110,14 @@ elif [ "${USAR_GPU:-auto}" != "0" ] \
            echo "  ONNX_PKG no .env e construa de novo a imagem (docker compose build; README, secção 3.3)." ;;
     esac
 else
-    if [ "${USAR_GPU:-auto}" = "0" ]; then
+    if [ "$USAR_GPU" = "0" ]; then
         echo "Hardware: CPU (forçado por USAR_GPU=0)"
     elif command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
         echo "Hardware: GPU NVIDIA encontrada, mas falta o NVIDIA Container Toolkit no Docker -> a usar CPU"
     else
         echo "Hardware detetado: CPU"
     fi
+    export USAR_GPU=0
 fi
 # o compose precisa destas variáveis em todos os modos (os serviços que não arrancam não as usam)
 export DEV_CAMARA5=/dev/null DEV_CAMARA8=/dev/null BAG="" PASTA_BAG="$DADOS" RELOGIO_NTP="" CAMARAS_ATIVAS=""
