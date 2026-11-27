@@ -21,7 +21,7 @@ uso() {
     echo "  Ao vivo:     bash scripts/online.sh <câmara no ${DEVS[0]}> [<câmara no ${DEVS[1]}>] [opções]"
     echo "  Reprodução:  bash scripts/online.sh --bag <ficheiro .mcap> [opções]"
     echo "Opções:"
-    echo "  -i                  : sem janela (sem o visualizador; corre só no terminal)"
+    echo "  -i                  : sem janela (sem o visualizador - corre só no terminal)"
     echo "  --rviz              : abre também o RViz (TF das câmaras, grelha local, caminho do A*, imagens)"
     echo "  --foxglove          : lança também o foxglove_bridge (Foxglove Studio em ws://localhost:8765)"
     echo "  --gravar            : grava também os resultados (ros2 bag: grelha, avisos, caminho) em data/"
