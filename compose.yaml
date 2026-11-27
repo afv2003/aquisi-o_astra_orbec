@@ -10,6 +10,8 @@
 #   ... --profile gravar                             -> grava os resultados (ros2 bag) em ./data
 #   ... --profile foxglove                           -> foxglove_bridge (porta 8765; layout docs/layout.json)
 #   ... --profile rviz                               -> rviz2 (Linux, X11)
+#   docker compose --profile manobra up              -> aula 11: estrada simulada + faixa + manobra seguir (sem câmaras)
+#   ... --profile planeamento                        -> junta o A* da aula 10, com o objetivo ao longo da estrada
 # Os executáveis são chamados diretamente (o mesmo que "ros2 run va_g05 percecao"): o ros2 run não passa
 # o Ctrl+C / docker stop (SIGINT) ao nó, e a perceção precisa dele para fechar a gravação e o resumo.
 
@@ -88,6 +90,8 @@ services:
       RELOGIO_NTP: ${RELOGIO_NTP:-}
       SERVIDOR_NTP: ${SERVIDOR_NTP:-pool.ntp.org}
       PASTA_REGISTO: /data
+      OUTROS_SENSORES: ${OUTROS_SENSORES:-}   # vazio: /fix /odom /tf /estrada/centro (README, 3.15)
+    profiles: [sensor, reproduzir]   # com as câmaras ou com um bag (no simulador da aula 11 não há imagens)
     stop_grace_period: 30s
     command: percecao
 
@@ -95,8 +99,54 @@ services:
   # /g05/estado, /g05/zona_proibida
   planeador:
     <<: *ros
+    profiles: [sensor, reproduzir, planeamento]   # como no modelo da aula 11 (não faz parte do perfil manobra)
     command: >
       local_astar --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  # ----------------------------------------------------------------- aula 11: estrada e manobra
+  # Pacote comum va_manobras (copiado sem alterações do modelo). No simulador não há imagens das câmaras:
+  # a grelha /g05/grelha_local vem do LiDAR 2D simulado (o scan_to_grid do modelo), em vez da perceção do G5
+  percecao_simulada:          # /scan do simulador -> /g05/grelha_local
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      scan_to_grid --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  simulador_estrada:          # estrada de duas faixas, o carro (bicicleta) e outros veículos: /scan, /odom, /tf
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      sim_estrada --ros-args
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  estrada:                    # fonte da estrada por rota gravada: /estrada/centro no base_link
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      estrada_rota --ros-args
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  faixa:                      # grelha_local + /estrada/centro -> distancia_livre na faixa
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      faixa_livre --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  objetivo:                   # objetivo do A* ao longo da estrada: --profile manobra --profile planeamento
+    <<: *ros
+    profiles: [planeamento]
+    command: >
+      objetivo_estrada --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  manobra:                    # manobra de exemplo do modelo: seguir o carro da frente -> /cmd_vel
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      seguir --ros-args -r __ns:=/${GRUPO:-g05}
       --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
 
   # ----------------------------------------------------------------- visualização e gravação
@@ -115,7 +165,8 @@ services:
     command: visualizador
 
   # Resultados (ros2 bag, MCAP) em ./data/g05_resultados_<data_hora>: grelha, caminho, avisos, TF e
-  # deteções (o vídeo original grava-o a perceção, só nos trechos)
+  # deteções (o vídeo original grava-o a perceção, só nos trechos); os outros sensores (GNSS, odometria,
+  # TF, estrada), se existirem na rede; e os tópicos da aula 11 (simulador, faixa e manobra)
   gravador:
     <<: *ros
     profiles: [gravar]
@@ -127,7 +178,11 @@ services:
       /${GRUPO:-g05}/caminho_local /${GRUPO:-g05}/estado
       /${GRUPO:-g05}/aviso_faixa /${GRUPO:-g05}/aviso_saida_faixa /${GRUPO:-g05}/aviso_colisao
       /camara5/processamento/dados_deteccoes /camara8/processamento/dados_deteccoes
-      /processamento/painel /processamento/estado_camaras'
+      /processamento/painel /processamento/estado_camaras
+      /fix /odom /tf /cmd_vel /scan /estrada/centro /estrada/rota
+      /sim/veiculos /sim/distancia_real /sim/desvio_lateral
+      /${GRUPO:-g05}/distancia_livre /${GRUPO:-g05}/obstaculo /${GRUPO:-g05}/faixa
+      /${GRUPO:-g05}/estado_manobra /${GRUPO:-g05}/objetivo'
 
   # Foxglove Studio: abrir ligação Foxglove WebSocket em ws://localhost:8765; layout em docs/layout.json
   foxglove:

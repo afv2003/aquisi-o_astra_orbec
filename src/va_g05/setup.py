@@ -28,6 +28,7 @@ setup(
             'visualizador = va_g05.visualizador:main',
             'reprodutor = va_g05.reprodutor:main',
             'resumo_online = va_g05.resumo_online:main',
+            'scan_to_grid = va_g05.grelha_scan:main',      # só no simulador da aula 11 (perfil manobra)
         ],
     },
 )

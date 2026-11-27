@@ -17,3 +17,59 @@
     corredor_y_min: 0.0        # limites laterais da estrada (m), se conhecidos; iguais = desligado
     corredor_y_max: 0.0
     limiar_desvio: 0.3
+
+# ---------------------------------------------------------------- aula 11: estrada e manobra (perfil manobra)
+# Secções do modelo da aula 11 (va-projeto-g00), com os mesmos valores, exceto o estrada_rota.atras.
+
+# Grelha a partir do LiDAR 2D do simulador (o scan_to_grid do modelo; só no perfil manobra: no simulador
+# não há imagens das câmaras)
+/**/scan_to_grid:
+  ros__parameters:
+    frame_grelha: base_link
+    resolucao: 0.2
+    x_min: -5.0
+    x_max: 35.0
+    y_min: -10.0
+    y_max: 10.0
+    marcar_livre: true
+
+# Rota da estrada (CSV x,y): a pista de teste do simulador, ou uma rota gravada em /data
+# (tools/rota_de_bag.py, a partir do /odom ou do /fix de um bag)
+/**/sim_estrada:
+  ros__parameters:
+    rota: /ws/install/va_manobras/share/va_manobras/rotas/pista_oval.csv
+    cenario: seguir            # seguir | parado | livre
+    vizinho: true              # um carro mais lento na faixa da esquerda
+    largura_faixa: 3.5
+    frame_sensor: lidar2d_frente
+    sensor_x: 3.0
+
+/**/estrada_rota:
+  ros__parameters:
+    rota: /ws/install/va_manobras/share/va_manobras/rotas/pista_oval.csv
+    frame_rota: odom           # frame em que a rota está escrita (odom, ou map com GNSS)
+    atras: 30.0                # G5: as câmaras olham para trás (aviso de faixa até 30 m atrás); modelo: 5.0
+    frente: 50.0
+
+/**/faixa_livre:
+  ros__parameters:
+    largura_faixa: 3.5
+    x_frente: 3.0              # do base_link (eixo traseiro) à frente do carro
+    alcance: 40.0
+    modo: frenet               # frenet | reto
+
+/**/objetivo_estrada:
+  ros__parameters:
+    distancia: 25.0            # objetivo do A* a 25 m ao longo da estrada
+    margem: 4.0                # ou 4 m antes do primeiro obstáculo na faixa
+
+/**/seguir:
+  ros__parameters:
+    v_max: 10.0
+    tempo_seguranca: 1.8       # s
+    distancia_minima: 5.0      # m
+    ganho_distancia: 0.3
+    alcance: 40.0
+    x_frente: 3.0
+    lookahead_min: 5.0
+    lookahead_ganho: 0.8

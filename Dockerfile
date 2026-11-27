@@ -40,7 +40,7 @@ COPY requirements.txt /tmp/
 RUN grep -Ev '^[[:space:]]*(onnxruntime|tkintermapview|matplotlib)' /tmp/requirements.txt > /tmp/req_base.txt \
     && pip install --no-cache-dir -r /tmp/req_base.txt "${ONNX_PKG}" pytest
 
-# Workspace ROS 2: o pacote comum (va_planeamento, sem alterações) e o do grupo (va_g05).
+# Workspace ROS 2: os pacotes comuns (va_planeamento e va_manobras, sem alterações) e o do grupo (va_g05).
 # O colcon corre com o python3 do sistema (o do ROS); os executáveis do va_g05 usam o do venv.
 WORKDIR /ws
 COPY src/ src/
@@ -54,7 +54,7 @@ ENV VA_G05_DIR=/ws/src/va_g05
 ENV PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 # Os executáveis no PATH, para o compose os chamar diretamente: o "ros2 run" não passa o Ctrl+C
 # (SIGINT do docker stop) ao nó, que assim não fecharia a gravação nem gravaria o resumo
-ENV PATH="/ws/install/va_g05/lib/va_g05:/ws/install/va_planeamento/lib/va_planeamento:$PATH"
+ENV PATH="/ws/install/va_g05/lib/va_g05:/ws/install/va_planeamento/lib/va_planeamento:/ws/install/va_manobras/lib/va_manobras:$PATH"
 
 # Entrypoint: carrega o ROS 2 e o workspace antes de qualquer comando
 RUN printf '%s\n' '#!/bin/bash' 'set -e' \

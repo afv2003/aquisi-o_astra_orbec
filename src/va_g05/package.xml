@@ -17,6 +17,7 @@
   <exec_depend>usb_cam</exec_depend>
   <exec_depend>compressed_image_transport</exec_depend>
   <exec_depend>va_planeamento</exec_depend>
+  <exec_depend>va_manobras</exec_depend>
   <test_depend>python3-pytest</test_depend>
 
   <export>

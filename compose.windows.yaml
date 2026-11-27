@@ -6,6 +6,7 @@
 #   $env:BAG = "g05_camaras_<data_hora>/g05_camaras_<data_hora>_0.mcap"     (dentro de ./data)
 #   docker compose build
 #   docker compose --profile reproduzir --profile foxglove up
+#   docker compose --profile manobra --profile foxglove up      (aula 11: estrada simulada + faixa + manobra)
 # Quem alterar um serviço no compose.yaml altera-o também aqui.
 
 x-ros: &ros
@@ -42,13 +43,58 @@ services:
       SEM_CORRECAO: ${SEM_CORRECAO:-0}
       REPRODUCAO: ${BAG:-indicar_BAG}
       PASTA_REGISTO: /data
+    profiles: [reproduzir]
     stop_grace_period: 30s
     command: percecao
 
   planeador:
     <<: *ros
+    profiles: [reproduzir, planeamento]
     command: >
       local_astar --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  # ----------------------------------------------------------------- aula 11: estrada e manobra
+  percecao_simulada:          # /scan do simulador -> /g05/grelha_local (no simulador não há imagens)
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      scan_to_grid --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  simulador_estrada:
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      sim_estrada --ros-args
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  estrada:
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      estrada_rota --ros-args
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  faixa:
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      faixa_livre --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  objetivo:
+    <<: *ros
+    profiles: [planeamento]
+    command: >
+      objetivo_estrada --ros-args -r __ns:=/${GRUPO:-g05}
+      --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
+
+  manobra:
+    <<: *ros
+    profiles: [manobra]
+    command: >
+      seguir --ros-args -r __ns:=/${GRUPO:-g05}
       --params-file /ws/install/va_g05/share/va_g05/config/params.yaml
 
   gravador:
@@ -62,7 +108,11 @@ services:
       /${GRUPO:-g05}/caminho_local /${GRUPO:-g05}/estado
       /${GRUPO:-g05}/aviso_faixa /${GRUPO:-g05}/aviso_saida_faixa /${GRUPO:-g05}/aviso_colisao
       /camara5/processamento/dados_deteccoes /camara8/processamento/dados_deteccoes
-      /processamento/painel /processamento/estado_camaras'
+      /processamento/painel /processamento/estado_camaras
+      /fix /odom /tf /cmd_vel /scan /estrada/centro /estrada/rota
+      /sim/veiculos /sim/distancia_real /sim/desvio_lateral
+      /${GRUPO:-g05}/distancia_livre /${GRUPO:-g05}/obstaculo /${GRUPO:-g05}/faixa
+      /${GRUPO:-g05}/estado_manobra /${GRUPO:-g05}/objetivo'
 
   foxglove:
     <<: *ros
