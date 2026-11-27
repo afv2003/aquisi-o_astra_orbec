@@ -8,7 +8,7 @@
 
 | Sensor | Posição no carro | Driver ROS 2 | Saídas | Equipa |
 |---|---|---|---|---|
-| 2 × Orbbec Astra (RGB, 640×480, 30 Hz): **5** esquerda, **8** direita | tejadilho, ~10 cm atrás dos retrovisores (x 1,55 m, y ±0,60 m, z 1,75 m no `base_link`), viradas para trás, 12° para fora e 15° para baixo (`src/va_g05/config/montagem_camaras.yaml`) | `usb_cam` (+ `compressed_image_transport`) | `/camara<N>/image_raw`, `/camara<N>/image_raw/compressed` → `/g05/grelha_local` e os três avisos | G5 |
+| 2 × Orbbec Astra (RGB, 640×480, 30 Hz): **5** esquerda, **8** direita | tejadilho, ~10 cm atrás dos retrovisores (x 1,55 m, y ±0,60 m, z 1,75 m no `base_link`), viradas para trás, 12° para fora e 15° para baixo (`src/va_g05/config/montagem_camaras.yaml`) | `usb_cam` (+ `compressed_image_transport`) | `/camara<N>/image_raw`, `/camara<N>/image_raw/compressed` → `/g05/grelha_local` e os três avisos | G5<br>Alexandre Vieira, 108427<br>Rodrigo Malheiro, 115320 |
 
 ### Arquitetura
 
@@ -17,7 +17,7 @@
 | `usb_cam` × 2 (`driver_camara5`, `driver_camara8`, perfil `sensor`) | driver do ROS | — | `/camara<N>/image_raw`, `/camara<N>/image_raw/compressed` |
 | `reprodutor` (perfil `reproduzir`, em vez dos drivers) | `src/va_g05/va_g05/reprodutor.py` | `/processamento/estado_camaras`, `/processamento/comando` | `/camara<N>/image_raw` (as imagens de um bag), `/processamento/reproducao` |
 | `percecao` (perfis `sensor`, `reproduzir`) | `src/va_g05/va_g05/processar_tempo_real.py` (+ `decisao.py`, `grelha_local.py`, `aviso_*.py`, `objetos.py`, `linhas.py`, `estrada.py`, `estrada_local.py`, `outros_sensores.py`) | `/camara<N>/image_raw` (e `/compressed`, para gravar), `/processamento/comando`, saídas do planeador; parte 2, se existirem: `/estrada/centro` (avisos), `/fix`, `/odom`, `/tf` (gravados) | `/g05/grelha_local`, `/g05/aviso_faixa`, `/g05/aviso_saida_faixa`, `/g05/aviso_colisao`, `/tf_static`, `/camara<N>/processamento/dados_deteccoes`, `/processamento/painel`, `/processamento/estado_camaras`; grava os trechos em `data/` |
-| `planeador` (comum, sem alterações; perfis `sensor`, `reproduzir`, `planeamento`) | `src/va_planeamento/va_planeamento/local_astar.py` | `/g05/grelha_local` | `/g05/caminho_local`, `/g05/estado`, `/g05/zona_proibida` |
+| `planeador` (comum; perfis `sensor`, `reproduzir`, `planeamento`) | `src/va_planeamento/va_planeamento/local_astar.py` | `/g05/grelha_local` | `/g05/caminho_local`, `/g05/estado`, `/g05/zona_proibida` |
 | `visualizador` (perfil `visualizador`) | `src/va_g05/va_g05/visualizador.py` | as imagens, as deteções, a grelha, os avisos, o painel, o planeador | a janela; `/processamento/comando` (teclas); `/camara<N>/processamento/imagem_anotada` |
 | `gravador`, `foxglove`, `rviz` (perfis `gravar`, `foxglove`, `rviz`) | `ros2 bag record`, `foxglove_bridge`, `rviz2` | os resultados | `data/g05_resultados_<data_hora>/`, `ws://localhost:8765`, a janela do RViz |
 | `percecao_simulada` (aula 11, perfil `manobra`) | `src/va_g05/va_g05/grelha_scan.py` (o `scan_to_grid` do modelo) | `/scan` (do simulador), `/tf_static` | `/g05/grelha_local` (no simulador não há imagens das câmaras) |
@@ -52,7 +52,7 @@ câmaras 5 e 8 ─▶ usb_cam ─▶ /camara<N>/image_raw ─▶ percecao ─▶
 
 O bag reproduz-se com o perfil `reproduzir` (`bash scripts/online.sh --bag <bag.mcap>`, 3.11): os mesmos nós correm sem alterações, sem câmaras.
 
-### Grelha local (contrato da aula 10)
+### Grelha local
 
 | | |
 |---|---|
@@ -214,19 +214,19 @@ flowchart LR
 
 ### 1.3 Relevância do modo online para a parte 2
 O offline desenvolve e valida a deteção; o **online é o que os outros grupos vão usar** e a base da parte 2:
-* **segue a arquitetura pedida:** tudo no Docker (ROS 2 Jazzy), com a estrutura do modelo da aula 10 (workspace `src/` com `colcon`, `compose.yaml` com perfis, `.env`, CI), tópicos e tipos standard (`sensor_msgs/Image` e `CompressedImage`, `nav_msgs/OccupancyGrid`, `tf2_msgs/TFMessage`) e gravação em MCAP com as imagens comprimidas e o `/tf_static`;
+* **segue a arquitetura pedida:** tudo no Docker (ROS 2 Jazzy), com a estrutura do modelo referenciada pelos docentes (workspace `src/` com `colcon`, `compose.yaml` com perfis, `.env`, CI), tópicos e tipos standard (`sensor_msgs/Image` e `CompressedImage`, `nav_msgs/OccupancyGrid`, `tf2_msgs/TFMessage`) e gravação em MCAP com as imagens comprimidas e o `/tf_static`;
 * **separa processamento e visualização** (guião da avaliação): a perceção só processa e publica; o visualizador e o RViz só mostram (3.2, 3.7);
 * **corre com ou sem câmaras** sem mudar o nó (3.11): os bags reais agora, o simulador mais tarde;
 * **mostra os limites do tempo real:** deteções por segundo de cada câmara, peso de cada modelo, CPU vs GPU; a tecla **D** troca cobertura (duas câmaras) por frequência (uma);
 * **grava tudo no mesmo bag e com o mesmo relógio**, só nos trechos (viável em viagens longas); outros sensores (por exemplo, o **GPS**) entram como mais um tópico.
 
 ### 1.4 Ficheiros do repositório
-Segue a estrutura do modelo da aula 10 (`va-projeto-g00`): um workspace ROS 2 em `src/` (o pacote comum `va_planeamento` e o do grupo, `va_g05`), construído no Docker com `colcon`. O offline e as ferramentas usam o código do pacote a partir de `src/va_g05`, sem ROS.
+Segue a estrutura do modelo referenciada no E-Learning (`va-projeto-g00`): um workspace ROS 2 em `src/` (o pacote comum `va_planeamento` e o do grupo, `va_g05`), construído no Docker com `colcon`. O offline e as ferramentas usam o código do pacote a partir de `src/va_g05`, sem ROS.
 ```
 README.md   Dockerfile   compose.yaml   compose.gpu.yaml   compose.windows.yaml   .env   requirements.txt
 .github/workflows/ci.yml      CI: constrói a imagem e corre os testes a cada push (1.7)
 .devcontainer/                VS Code dentro da imagem (opcional)
-src/va_planeamento/           planeador A* comum da aula 10, sem alterações (5.4.6)
+src/va_planeamento/           planeador A* comum (5.4.6)
 src/va_manobras/              estrada (Frenet), ocupação da faixa, manobra de exemplo e simulador 2D da aula 11, sem alterações (3.16)
 src/va_g05/                   pacote ROS 2 do G5 (package.xml, setup.py)
     va_g05/                   o código: nós do online e biblioteca comum aos dois modos
@@ -304,12 +304,12 @@ No PC Linux do veículo:
 **Disco externo:** conte com **0,3 a 0,6 GB por minuto de trecho** (duas câmaras, JPEG). Para gravar noutro disco, indique a pasta no `.env` (`DADOS=/media/<utilizador>/<disco>/g05`, montada em `/data`); não use um *symlink* dentro de `data/` (o Docker não o segue). Use um disco **USB 3**, de preferência **ext4** (exFAT se também for lido no Windows), numa porta do lado oposto às câmaras. Um bag a reproduzir (3.11) pode estar em qualquer pasta.
 
 ### 1.7 Testes automáticos (CI)
-A cada `git push`, o GitHub Actions (`.github/workflows/ci.yml`, como no modelo da aula 10) constrói a imagem e corre os testes dentro dela; no PC, o mesmo comando depois do `docker compose build`:
+A cada `git push`, o GitHub Actions (`.github/workflows/ci.yml`) constrói a imagem e corre os testes dentro dela; no PC, o mesmo comando depois do `docker compose build`:
 ```bash
 docker compose run --rm --no-deps planeador python3 -m pytest -q /ws/src
 ```
 Não precisam de câmaras nem de bags:
-* `src/va_planeamento/test`: os testes do planeador comum (da aula);
+* `src/va_planeamento/test`: os testes do planeador comum;
 * `src/va_g05/test/test_avisos.py`: o contrato da grelha (`int8`, só −1 / 0 / 100, as dimensões do `montagem_camaras.yaml`) e os **três avisos** com **cenas sintéticas** (linhas da estrada e veículos de 4,5 × 1,8 × 1,5 m postos no chão e projetados nas câmaras com a calibração e a montagem do `config/`). Testa-se a decisão (`decisao.py`): faixa ao lado ocupada (pelas linhas e pelo centro), veículo na 2.ª faixa, sem linhas, veículo a aproximar-se, carro a derivar para a linha, saída com a faixa ocupada, colisão por trás (AVISO e depois PERIGO, com o TTC), veículo a afastar-se, a passar duas faixas ao lado e a seguir colado;
 * `src/va_g05/test/test_modelos.py`: os três modelos ONNX estão na imagem e correm com o `onnxruntime` dela;
 * `src/va_g05/test/test_estrada.py` (parte 2): os avisos numa curva, com e sem a estrada (Frenet), a saída de faixa pela estrada, e o GNSS gravado e lido de um bag;
@@ -431,14 +431,14 @@ O modo do veículo: a **aquisição** (câmaras e gravação) e o **processament
 
 ### 3.2 Ficheiros, serviços e tópicos
 * **`Dockerfile`**: a imagem `va/g05`, com tudo o que o online precisa (fora do contentor ficam só os dados): ROS 2 Jazzy, `usb_cam` e `compressed_image_transport` (JPEG), `rosbag2` em MCAP, `rviz2`, `foxglove_bridge`, as bibliotecas do sistema (OpenCV, `python3-tk`), o Python do `requirements.txt` em `/opt/venv` (sem `ultralytics` nem PyTorch; sem `tkintermapview` nem `matplotlib`, que só o offline usa) e o **workspace** `/ws` (`va_planeamento` e `va_g05`, com `colcon build`, modelos e configuração). O `ONNX_PKG` (`.env`) escolhe CPU ou GPU. Como o código está **dentro** da imagem, cada alteração ao código, à configuração ou aos modelos pede um `docker compose build` (rápido: só refaz o fim).
-* **`compose.yaml`**: os serviços, na rede do PC (`network_mode: host`), com os dados em `/data` (`DADOS`, por omissão `./data`). Como no modelo da aula 11, todos os serviços se escolhem com perfis (a `percecao` e o `planeador` com `sensor` ou `reproduzir`; os da aula 11 com `manobra` e `planeamento`, 3.16):
+* **`compose.yaml`**: os serviços, na rede do PC (`network_mode: host`), com os dados em `/data` (`DADOS`, por omissão `./data`). Como no modelo, todos os serviços se escolhem com perfis (a `percecao` e o `planeador` com `sensor` ou `reproduzir`; os da aula 11 com `manobra` e `planeamento`, 3.16):
 
   | Serviço | O que faz | Perfil | Com o `scripts/online.sh` |
   |---|---|---|---|
   | `driver_camara5`, `driver_camara8` | drivers `usb_cam`: publicam `/camara<N>/image_raw` e `/camara<N>/image_raw/compressed` | `sensor` | ao vivo |
   | `reprodutor` | publica as imagens de um bag nos mesmos tópicos dos drivers (`reprodutor.py`) | `reproduzir` | em reprodução (`--bag`) |
   | `percecao` | o `processar_tempo_real.py`: deteções, grelha, avisos, TF e, ao vivo, a gravação dos trechos (e dos outros sensores, 3.15) | `sensor`, `reproduzir` | sempre |
-  | `planeador` | o planeador A\* comum da aula 10 (`src/va_planeamento`, sem alterações), 5.4.6 | `sensor`, `reproduzir`, `planeamento` | sempre (exceto `--sem-processamento`) |
+  | `planeador` | o planeador A\* comum (`src/va_planeamento`, sem alterações), 5.4.6 | `sensor`, `reproduzir`, `planeamento` | sempre (exceto `--sem-processamento`) |
   | `visualizador` | a janela (`visualizador.py`) e, no fim, o resumo | `visualizador` | sempre (exceto `-i`) |
   | `gravador` | `ros2 bag record` dos resultados (grelha, avisos, caminho, TF, deteções) em `data/g05_resultados_<data_hora>/` | `gravar` | com `--gravar` |
   | `rviz` | o RViz com o `src/va_g05/config/g05.rviz` | `rviz` | com `--rviz` |
@@ -535,7 +535,7 @@ As opções juntam-se (ex. `bash scripts/online.sh 5 8 -i --registar-tudo`). O t
   *(ou `CPU`; sem a calibração de uma câmara, um aviso e essa câmara não é corrigida)*;
 * os controlos (**R**, **D**, **Q**; sem janela, `scripts/trecho.sh`, `scripts/alternar_camara.sh` e `Ctrl + C`).
 
-A deteção começa com as primeiras imagens; a gravação, só no primeiro trecho. Também se pode usar o `docker compose` diretamente, como no modelo da aula 10 (câmaras e `/dev/video` do `.env`; sem resumo): `docker compose --profile sensor up` (com a janela: `--profile visualizador`).
+A deteção começa com as primeiras imagens; a gravação, só no primeiro trecho. Também se pode usar o `docker compose` diretamente (câmaras e `/dev/video` do `.env`; sem resumo): `docker compose --profile sensor up` (com a janela: `--profile visualizador`).
 
 **Só gravação (`--sem-processamento`):** sem modelos, grelha nem planeador; ficam as câmaras, os trechos (**R**) e o mesmo bag, sem deteções. A janela mostra as imagens sem desenhos. Os trechos processam-se depois no offline (3.10).
 
@@ -697,7 +697,7 @@ O enunciado pede o portátil com a hora certa (NTP) para os bags serem comparáv
 * **RViz:** `--rviz` (ao vivo ou com `--bag`) abre o RViz com o `src/va_g05/config/g05.rviz`: as imagens (`/camara<N>/image_raw`, para confirmar a taxa e o `frame_id`, passo 3 do enunciado), o **TF** das câmaras, a **grelha local** e o **caminho do A\***, vistos de cima no `base_link`. Fechá-lo não termina a sessão. Para ver os desenhos, troque o tópico de uma imagem para `/camara<N>/processamento/imagem_anotada`.
 * **Câmaras trocadas?** Tape a câmara 5: deve escurecer o `/camara5/image_raw` (à esquerda no visualizador). Se não, relance com `bash scripts/online.sh 8 5`.
 * **Lichtblick ou Foxglove Studio** (os dois indicados pelos docentes, em qualquer sistema e sem ROS; o [Lichtblick](https://github.com/lichtblick-suite/lichtblick/releases) é gratuito e não pede conta): abra o `.mcap` diretamente; ao vivo, `--foxglove` lança o `foxglove_bridge` (*Abrir ligação* → *Foxglove WebSocket* → `ws://localhost:8765`, ou o IP deste PC noutro da mesma rede). Layout: `docs/layout.json` (no formato dos dois; *Layouts* → *Importar*), com as câmaras, a vista de cima (grelha, caminho, TF) e os avisos em texto; se um painel ficar vazio (o formato muda entre versões), escolha o tópico no painel e guarde de novo.
-* **Gravar só os resultados:** `--gravar` (o perfil `gravar` do modelo da aula 10) grava a grelha, os avisos, o caminho, o TF e as deteções em `data/g05_resultados_<data_hora>/`, à parte do bag da sessão.
+* **Gravar só os resultados:** `--gravar` grava a grelha, os avisos, o caminho, o TF e as deteções em `data/g05_resultados_<data_hora>/`, à parte do bag da sessão.
 * **Noutro PC da mesma rede** (com ROS 2 Jazzy ou este Docker): com o mesmo `ROS_DOMAIN_ID` (42), os tópicos aparecem sozinhos (`ros2 topic list`).
 * **Figuras, GIF e métricas para o relatório** (`tools/figura_bag.py`, no `venv`, sem ROS; num `venv` antigo, `pip install matplotlib`), a partir de uma sessão do online copiada como em 4.2:
   ```bash
@@ -749,7 +749,7 @@ O pacote comum `src/va_manobras` (copiado sem alterações do modelo da aula 11)
 ```bash
 docker compose build
 docker compose --profile manobra --profile foxglove up                       # Lichtblick / Foxglove: ws://localhost:8765
-docker compose --profile manobra --profile planeamento --profile foxglove up  # e o A* da aula 10, com o objetivo ao longo da estrada
+docker compose --profile manobra --profile planeamento --profile foxglove up  # e o A* comum, com o objetivo ao longo da estrada
 docker compose --profile manobra --profile gravar up                         # grava 50 a 60 s (Ctrl+C) em data/g05_resultados_<data_hora>/
 python tools/figura_manobra.py data/g05_resultados_<data_hora> --grupo g05   # figura e métricas da manobra (docs/img/)
 ```
@@ -1257,7 +1257,7 @@ python offline/processar_bag.py <bag>.mcap --camara 5 --sem-estrada         # se
 * Funciona sem linhas pintadas, em cruzamentos e de noite, mas não diz em que faixa vai o veículo (isso é das linhas, 5.1).
 * Bordas aproximadas (alguns píxeis); pode falhar em sombras fortes ou pisos invulgares (empedrado, terra). Usado tal como vem pré-treinado.
 
-### 5.4 Decisão local (aula 10): posição das câmaras, grelha local, planeador e avisos
+### 5.4 Decisão local: posição das câmaras, grelha local, planeador e avisos
 
 Os modelos dizem **o que** está na imagem; para o carro decidir (parte 2: seguir um veículo, ultrapassar, mudar de faixa, manter a distância a quem segue atrás) é preciso saber **onde** está à volta do carro e **se se aproxima**. Por isso, todos os grupos publicam o mesmo resultado, a **grelha de ocupação local**, usada por um **planeador A\*** comum.
 
@@ -1282,7 +1282,7 @@ As câmaras do G5 fazem de **retrovisores** (de um carro autónomo, que não pod
 **Distâncias e velocidades:** a câmara não as mede. Os avisos usam **posições aproximadas no chão** (calibração + montagem + chão plano, 5.4.1), só para saber **em que faixa** está cada coisa e se está junto ao carro (os metros mostrados são aproximados: por cada píxel de erro, ~0,1 m a 10 m e ~0,6 m a 25 m), e o **tempo até contacto** (TTC), pelo ritmo a que a caixa cresce na imagem (5.4.5). Com outros sensores (LiDAR, radar, GNSS e odometria, o CAN do carro), os avisos melhoram (5.4.10).
 
 #### 5.4.1 O que é a grelha local (e o que muda com câmaras)
-* Uma **vista de cima** à volta do carro, em quadrados de **0,2 m**, no `base_link` (x para a frente, y para a esquerda, origem no chão ao centro do eixo traseiro), com **-1** (desconhecido), **0** (livre) ou **100** (ocupado): o formato comum da aula 10, igual para todos os sensores, por isso o planeador é o mesmo para todos.
+* Uma **vista de cima** à volta do carro, em quadrados de **0,2 m**, no `base_link` (x para a frente, y para a esquerda, origem no chão ao centro do eixo traseiro), com **-1** (desconhecido), **0** (livre) ou **100** (ocupado): o formato comum, igual para todos os sensores, por isso o planeador é o mesmo para todos.
 * Ao contrário de um LiDAR, um píxel é só uma direção: com a **posição da câmara no carro**, a **calibração** (secção 2) e o **chão plano**, cada píxel abaixo do horizonte dá um ponto do chão (`geometria.py`). É isto que é específico das câmaras.
 * **Como as câmaras enchem a grelha** (`grelha_local.py`):
 
@@ -1318,7 +1318,7 @@ base_link ──▶ camara5_link ──▶ camara5      (camara<N>_link: x ao lo
 Confirma-se no Docker com `ros2 run tf2_ros tf2_echo base_link camara5`.
 
 #### 5.4.3 Faixas e aviso de mudança de faixa (`aviso_faixa.py`)
-**Porque não é o planeador a decidir:** o A\* da aula procura um caminho até um objetivo **à frente** (25 m; para mudar de faixa, ±3,5 m para o lado), mas estas câmaras olham **para trás**: a zona à frente fica desconhecida e um veículo atrás, na faixa ao lado, nunca está no caminho. Numa cena sintética (faixa livre, carro 10 m atrás na faixa da esquerda, carro no ângulo morto), o planeador deu **o mesmo estado nos três casos**. A pergunta destas câmaras é a de um retrovisor (e dos assistentes de ângulo morto e de mudança de faixa): há um veículo na faixa ao lado, junto ao carro ou a aproximar-se por trás?
+**Porque não é o planeador a decidir:** o A\* procura um caminho até um objetivo **à frente** (25 m; para mudar de faixa, ±3,5 m para o lado), mas estas câmaras olham **para trás**: a zona à frente fica desconhecida e um veículo atrás, na faixa ao lado, nunca está no caminho. Numa cena sintética (faixa livre, carro 10 m atrás na faixa da esquerda, carro no ângulo morto), o planeador deu **o mesmo estado nos três casos**. A pergunta destas câmaras é a de um retrovisor (e dos assistentes de ângulo morto e de mudança de faixa): há um veículo na faixa ao lado, junto ao carro ou a aproximar-se por trás?
 
 **Onde está a faixa ao lado** (`modo_faixa` no `montagem_camaras.yaml`):
 
@@ -1389,8 +1389,8 @@ Um objeto que se afasta ou mantém a distância não tem TTC (com o carro a anda
 **Limites do TTC com a câmara:** precisa de várias imagens do mesmo objeto (em **CPU**, a ~1 imagem por segundo por câmara, aparece ao fim de alguns segundos e reage tarde; com **GPU**, numa fração de segundo); o tremor das caixas dá erros de 10 a 20%; o mesmo veículo nas duas câmaras conta duas vezes. No online, só é fiável com GPU; no offline, que processa todas as imagens, funciona sempre.
 
 #### 5.4.6 Planeador A\* comum (`src/va_planeamento`)
-* O `va_planeamento` do modelo da aula (`va-projeto-g00`), **copiado sem alterações** (`LocalGrid`, A\*, o nó `local_astar` e os testes da aula, que correm no CI, 1.7), construído com `colcon` na imagem.
-* Corre no serviço **`planeador`** (`local_astar --ros-args -r __ns:=/g05 --params-file .../va_g05/config/params.yaml`), com os parâmetros da aula (objetivo 25 m à frente, inflação 1 m, desconhecido livre). Lê `/g05/grelha_local` e publica `/g05/estado` (`LIVRE`, `DESVIO <m>` ou `BLOQUEADO`), `/g05/caminho_local` (`nav_msgs/Path`) e `/g05/zona_proibida`.
+* O `va_planeamento` disponível em `va-projeto-g00`, **copiado sem alterações** (`LocalGrid`, A\*, o nó `local_astar` e os testes, que correm no CI, 1.7), construído com `colcon` na imagem.
+* Corre no serviço **`planeador`** (`local_astar --ros-args -r __ns:=/g05 --params-file .../va_g05/config/params.yaml`), com os parâmetros (objetivo 25 m à frente, inflação 1 m, desconhecido livre). Lê `/g05/grelha_local` e publica `/g05/estado` (`LIVRE`, `DESVIO <m>` ou `BLOQUEADO`), `/g05/caminho_local` (`nav_msgs/Path`) e `/g05/zona_proibida`.
 * Com estas câmaras não decide a mudança de faixa (5.4.3); corre para cumprir o contrato comum, para a parte 2 e para quando houver informação à frente do carro (outro grupo ou outro sensor).
 
 #### 5.4.7 Onde aparece
@@ -1541,7 +1541,7 @@ Antes: a imagem construída (3.6, passo 1: `docker compose build`, com o `ONNX_P
 | `bash scripts/trecho.sh` (3.7) | — | noutro terminal: começa/termina um trecho (sem janela) |
 | `bash scripts/alternar_camara.sh` (3.7) | — | noutro terminal: desliga/liga a câmara da direita (sem janela) |
 | `docker compose run --rm --no-deps visualizador resumo_online /data/<sessão>` (3.8) | — | abre o resumo de uma sessão (no `venv`: `python offline/resumo_online.py data/<sessão>`) |
-| `docker compose --profile sensor [--profile visualizador] up` (3.6) | `--profile gravar`, `foxglove`, `rviz` | os serviços diretamente, como no modelo da aula 10 (câmaras e `/dev/video` do `.env`) |
+| `docker compose --profile sensor [--profile visualizador] up` (3.6) | `--profile gravar`, `foxglove`, `rviz` | os serviços diretamente (câmaras e `/dev/video` do `.env`) |
 | `docker compose run --rm --no-deps planeador python3 -m pytest -q /ws/src` (1.7) | — | os testes (o mesmo do CI) |
 | `docker compose --profile manobra [--profile planeamento] [--profile foxglove] up` (3.16) | `--profile gravar` | aula 11: simulador, estrada, faixa e manobra `seguir` (sem câmaras) |
 | `python tools/figura_manobra.py <pasta do bag> --grupo g05` (3.16, `venv`) | `--instante S` | figura e métricas da manobra (`docs/img/`) |
