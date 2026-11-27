@@ -41,6 +41,7 @@ from PIL import Image, ImageTk
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src" / "va_g05"))   # biblioteca comum (pacote va_g05)
 from va_g05 import caminhos
+from va_g05 import leitura_bag
 from va_g05 import registo
 from va_g05 import relogio
 from reproducao import ErroRegisto, Reproducao
@@ -58,6 +59,8 @@ from va_g05.gui_comum import (ACENTO, CARTAO, CARTAO_2, FUNDO, GAMAS_VEICULOS, T
                        cartao, cor_da_gama, linhas_chave_valor, misturar, tempo_txt)
 
 INTERVALO_REFERENCIAS_S = 5      # pontos de referência a cada 5 s (contados desde o início da gravação)
+PASSO_TRAJETO_GNSS_M = 2.0       # trajeto a partir do GNSS: um ponto a cada 2 m (no máximo)
+FOLGA_GNSS_NS = 2_000_000_000    # um instante a mais de 2 s da posição do GNSS mais próxima fica sem referência
 COR_PERCURSO_POR_FAZER = "#6B7280"
 URL_TESTE_MAPA = "https://tile.openstreetmap.org/0/0/0.png"
 
@@ -362,6 +365,8 @@ class TabPercurso(ctk.CTkFrame):
     Por trecho: (1) trajeto (forma do caminho, com as curvas); (2) pontos de referência (onde o carro
     estava em instantes fixos do vídeo, de INTERVALO em INTERVALO segundos); (3) mapa, vídeo e
     intervalos lado a lado. A cor de cada intervalo entre referências é a da média de veículos.
+    Com GNSS no bag (parte 2: sensor_msgs/NavSatFix, outros_sensores.py), os passos 1 e 2 fazem-se sozinhos:
+    o trajeto é o caminho do GNSS e as referências são as posições do GNSS nesses instantes.
     Dentro de cada intervalo, a posição avança à velocidade média do trecho a partir da referência;
     no início do intervalo seguinte salta para a referência seguinte. O que fica por pintar entre o
     ponto estimado e a referência seguinte é o desvio (drift) da estimativa, visível no mapa.
@@ -497,6 +502,11 @@ class TabPercurso(ctk.CTkFrame):
             self.msg.configure(text=str(e))
             return
         self.ordem = self.opcoes_trecho[self.escolha_trecho.get()]
+        try:                                        # parte 2: GNSS gravado no bag (se houver)
+            self.gnss = leitura_bag.ler_gnss(self.rep.bag, self.rep.indice_ok)
+        except Exception as e:                      # bag estragado, etc.: segue sem GNSS (modo manual)
+            print(f"Aviso: não foi possível ler o GNSS do bag ({type(e).__name__}: {e}).")
+            self.gnss = []
         self._passo_trajeto(0)
 
     # ---------- mapa ----------
@@ -598,6 +608,17 @@ class TabPercurso(ctk.CTkFrame):
         dir_ = ctk.CTkScrollableFrame(self, fg_color=CARTAO_2, corner_radius=10, width=350)
         dir_.pack(side="right", fill="y")
         self._titulo_trecho(dir_, i, "1. Trajeto")
+        gnss = self._gnss_do_trecho(n)
+        if gnss:
+            caixa_gnss = ctk.CTkFrame(dir_, fg_color=CARTAO, corner_radius=8)
+            caixa_gnss.pack(fill="x", padx=18, pady=(0, 10))
+            ctk.CTkLabel(caixa_gnss, text=f"GNSS no bag: {len(gnss)} posições neste trecho", text_color=TEXTO,
+                         anchor="w", font=ctk.CTkFont(weight="bold")).pack(fill="x", padx=12, pady=(8, 0))
+            ctk.CTkLabel(caixa_gnss, text="O trajeto e os pontos de referência saem do GNSS, sem cliques "
+                                          "(neste trecho e nos seguintes que também tenham GNSS).",
+                         text_color=TEXTO_2, anchor="w", wraplength=300, justify="left").pack(fill="x", padx=12)
+            ctk.CTkButton(caixa_gnss, text="Usar o GNSS", fg_color=ACENTO,
+                          command=lambda: self._usar_gnss(i)).pack(fill="x", padx=12, pady=(6, 10))
         ctk.CTkLabel(dir_, text="Coordenadas de início (latitude, longitude)", text_color=TEXTO,
                      anchor="w").pack(fill="x", padx=18)
         linha = ctk.CTkFrame(dir_, fg_color="transparent")
@@ -631,7 +652,68 @@ class TabPercurso(ctk.CTkFrame):
             self.entrada.configure(state="disabled")
         elif self.pontos:
             self._enquadrar(self.pontos)
+        elif gnss:                                  # sem trajeto ainda: o mapa começa na 1.ª posição do GNSS
+            self.entrada.insert(0, f"{gnss[0][1]:.6f}, {gnss[0][2]:.6f}")
+            self.mapa.set_position(gnss[0][1], gnss[0][2])
+            self.mapa.set_zoom(17)
         self._atualizar_trajeto()
+
+    # ---------- GNSS (parte 2) ----------
+    def _gnss_do_trecho(self, n):
+        """Posições do GNSS [(t_ns, lat, lon)] dentro do trecho n (com uma pequena folga)."""
+        if not getattr(self, "gnss", None):
+            return []
+        t = self.rep.trecho(n)
+        return [g for g in self.gnss if t["inicio_ns"] - FOLGA_GNSS_NS <= g[0] <= t["fim_ns"] + FOLGA_GNSS_NS]
+
+    def _trajeto_e_referencias_gnss(self, n):
+        """Trajeto (pontos a cada PASSO_TRAJETO_GNSS_M) e referências (posição do GNSS em cada instante de
+        referência) de um trecho, a partir do GNSS. None se o GNSS não chegar (menos de 2 pontos distintos)."""
+        gnss = self._gnss_do_trecho(n)
+        if len(gnss) < 2:
+            return None
+        tr = self.rep.trecho(n)
+        dentro = [g for g in gnss if tr["inicio_ns"] <= g[0] <= tr["fim_ns"]]   # o trajeto é o do trecho
+        base = dentro if len(dentro) >= 2 else gnss
+        trajeto = [base[0][1:]]
+        for _, lat, lon in base[1:]:
+            if distancia_m(trajeto[-1], (lat, lon)) >= PASSO_TRAJETO_GNSS_M:
+                trajeto.append((lat, lon))
+        if distancia_m(trajeto[-1], base[-1][1:]) > 0.1:
+            trajeto.append(base[-1][1:])
+        if len(trajeto) < 2:
+            return None                             # o carro não se moveu: não há trajeto a desenhar
+        perc = Percurso(trajeto)
+        ts = [g[0] for g in gnss]
+        refs, d_ant = [], 0.0
+        for t_ns in self._grelha(self.rep.trecho(n)):
+            k = min(range(len(ts)), key=lambda j: abs(ts[j] - t_ns))
+            if abs(ts[k] - t_ns) > FOLGA_GNSS_NS:   # sem GNSS perto deste instante
+                refs.append({"t_ns": t_ns, "lat": None, "lon": None, "d": None, "saltado": True})
+                continue
+            # posição no instante (interpolada entre as duas posições do GNSS mais próximas)
+            j = max(1, min(len(ts) - 1, next((m for m, tt in enumerate(ts) if tt >= t_ns), len(ts) - 1)))
+            f = 0.0 if ts[j] == ts[j - 1] else min(1.0, max(0.0, (t_ns - ts[j - 1]) / (ts[j] - ts[j - 1])))
+            lat = gnss[j - 1][1] + f * (gnss[j][1] - gnss[j - 1][1])
+            lon = gnss[j - 1][2] + f * (gnss[j][2] - gnss[j - 1][2])
+            d = max(perc.projetar((lat, lon))[0], d_ant)    # nunca antes da referência anterior
+            d_ant = d
+            refs.append({"t_ns": t_ns, "lat": lat, "lon": lon, "d": d, "saltado": False})
+        return trajeto, refs
+
+    def _usar_gnss(self, i):
+        """Trajeto e referências pelo GNSS neste trecho e nos seguintes; o primeiro trecho sem GNSS fica para
+        os passos à mão."""
+        for k in range(i, len(self.ordem)):
+            n = self.ordem[k]
+            res = self._trajeto_e_referencias_gnss(n)
+            if res is None:
+                self._passo_trajeto(k)
+                self.msg_passo.configure(text=f"O trecho {n} não tem GNSS suficiente (ou o carro não se moveu): "
+                                              "desenhe o trajeto à mão.", text_color="#F59E0B")
+                return
+            self.trajetos[n], self.refs[n] = res
+        self._preparar_reproducao()
 
     def _ir(self):
         texto = self.entrada.get().replace(";", ",").strip()

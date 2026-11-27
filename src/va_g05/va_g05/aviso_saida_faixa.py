@@ -21,6 +21,10 @@ Estado de cada lado (o mais grave primeiro):
   SEM_LINHA     a linha desse lado não é vista (sem linhas pintadas, ou a deteção falhou).
 Com a faixa desse lado OCUPADA (aviso de mudança de faixa), uma saída para esse lado é PERIGO.
 
+Sem a linha desse lado mas com a estrada da parte 2 (/estrada/centro, a linha de centro da faixa do carro;
+estrada_local.py), a linha é a borda da faixa (a largura_faixa / 2 do centro, junto ao carro): "fonte":
+"estrada" no JSON. As linhas detetadas têm prioridade (são a pintura que se vê).
+
 Não se sabe se a saída é intencional (pisca): sem o estado do pisca (CAN do carro, ou outro grupo), o
 aviso dispara também numa mudança de faixa voluntária.
 """
@@ -42,20 +46,26 @@ def parametros(montagem):
 
 
 class AvisoSaida:
-    def __init__(self, p, carro):
-        """carro: (trás, frente, largura) em m (GrelhaLocal.carro)."""
+    def __init__(self, p, carro, largura_faixa=3.5):
+        """carro: (trás, frente, largura) em m (GrelhaLocal.carro); largura_faixa: para a borda da faixa
+        pela estrada."""
         self.p = p
+        self.largura_faixa = float(largura_faixa)
         self.tras, self.frente, self.largura = carro
         self.hist = {lado: deque() for lado in LADOS}
 
-    def avaliar(self, estimador, t_ns, mudanca=None):
+    def avaliar(self, estimador, t_ns, mudanca=None, estrada=None):
         """estimador: aviso_faixa.EstimadorFaixas (as linhas da própria faixa, de cada lado, sempre
-        estimadas, qualquer que seja o modo_faixa); mudanca: o aviso de mudança de faixa (para o PERIGO)."""
+        estimadas, qualquer que seja o modo_faixa); mudanca: o aviso de mudança de faixa (para o PERIGO);
+        estrada: EstradaLocal recente (ou None), para quando não há linha desse lado."""
         t_s = t_ns / 1e9
         res = {}
         for lado in LADOS:
             s = SINAL[lado]
             linha = estimador._recente((lado, "interior"), t_ns)
+            fonte = "linhas"
+            if linha is None and estrada is not None:
+                linha, fonte = estrada.reta_local(s * self.largura_faixa / 2, self.tras - 2.0, self.frente + 2.0), "estrada"
             info = {"estado": "SEM_LINHA"}
             h = self.hist[lado]
             if linha is None:
@@ -79,7 +89,7 @@ class AvisoSaida:
                 if ritmo < -float(self.p["min_ritmo_m_s"]) and dist > 0:
                     tlc = dist / -ritmo
             info.update(distancia_m=round(float(dist), 2), tlc_s=round(float(tlc), 2) if tlc is not None else None,
-                        linha=[round(a, 3), round(b, 4)])
+                        linha=[round(a, 3), round(b, 4)], fonte=fonte)
             if dist <= 0:
                 info["estado"] = "A_PISAR"
             elif dist < float(self.p["limiar_perto_m"]):

@@ -9,8 +9,8 @@ colisão só com câmara. A posição aproximada no chão (geometria, chão plan
 apenas para saber EM QUE FAIXA está o objeto, para não avisar de um carro que se aproxima noutra faixa
 mais longe, nem de um que vira.
 
-Zonas (as mesmas faixas do aviso de mudança de faixa: pelas linhas detetadas ou supondo o carro no
-centro, aviso_faixa.py):
+Zonas (as mesmas faixas do aviso de mudança de faixa: pela estrada da parte 2 em Frenet, pelas linhas
+detetadas ou supondo o carro no centro, aviso_faixa.py):
   atrás      a própria faixa, atrás do carro (um veículo que vem na mesma faixa);
   esquerda   a faixa ao lado, à esquerda (inclui o ângulo morto e o lado do carro);
   direita    a faixa ao lado, à direita;
@@ -45,7 +45,19 @@ def parametros(montagem):
 def zona(o, faixas, carro_tras, p, largura_faixa):
     """Em que zona está o objeto (pela posição aproximada no chão)."""
     x, y = o.get("x"), o.get("y")
-    if x is None or x < float(p["x_tras_max"]):
+    if x is None:
+        return "fora"
+    estrada = next((f["estrada"] for f in faixas.values() if f and f.get("modo") == "estrada"
+                    and f.get("estrada") is not None), None)
+    if estrada is not None:                          # com a estrada: s e d de Frenet (também nas curvas)
+        s, d = (float(v) for v in estrada.frenet(x, y))
+        if s < float(p["x_tras_max"]):
+            return "fora"
+        for lado in ("esquerda", "direita"):
+            if bool(aviso_faixa.na_faixa(faixas.get(lado), lado, x, y)):
+                return lado
+        return "atras" if abs(d) <= largura_faixa / 2 and s <= carro_tras else "fora"
+    if x < float(p["x_tras_max"]):
         return "fora"
     for lado in ("esquerda", "direita"):
         if bool(aviso_faixa.na_faixa(faixas.get(lado), lado, x, y)):

@@ -55,6 +55,62 @@ def topicos_do_bag(caminho):
         return []
 
 
+def tipos_do_bag(caminho):
+    """{tópico: tipo} (ex.: "sensor_msgs/msg/NavSatFix"), lido do índice; {} sem índice."""
+    try:
+        with open(caminho, "rb") as f:
+            resumo = make_reader(f).get_summary()
+        if not resumo:
+            return {}
+        return {c.topic: resumo.schemas[c.schema_id].name for c in resumo.channels.values()
+                if c.schema_id in resumo.schemas}
+    except Exception:
+        return {}
+
+
+def topicos_do_tipo(caminho, tipo, indice_ok=True):
+    """Tópicos do bag com mensagens desse tipo. Sem índice, procura-se pelos nomes habituais."""
+    if indice_ok:
+        return sorted(t for t, n in tipos_do_bag(caminho).items() if n == tipo)
+    from . import outros_sensores
+    return sorted(t for t, n in outros_sensores.POR_OMISSAO.items() if n == tipo)
+
+
+def ler_gnss(caminho, indice_ok=True, inicio_ns=None, fim_ns=None):
+    """Posições do GNSS do bag (sensor_msgs/NavSatFix, parte 2): [(t_ns, latitude, longitude)], por ordem,
+    só as com fix (status >= 0) e valores válidos. t_ns é o instante da mensagem no bag (o mesmo relógio
+    das imagens). [] se o bag não tiver GNSS."""
+    import math
+    from . import outros_sensores
+    topicos = topicos_do_tipo(caminho, outros_sensores.TIPO_GNSS, indice_ok)
+    if not topicos:
+        return []
+    res = []
+    for m in ler_mensagens(caminho, topicos[:1], indice_ok, inicio_ns, fim_ns):
+        g = m.ros_msg
+        try:
+            if int(g.status.status) < 0 or not (math.isfinite(g.latitude) and math.isfinite(g.longitude)):
+                continue
+        except AttributeError:
+            continue
+        if abs(g.latitude) <= 90 and abs(g.longitude) <= 180 and (g.latitude or g.longitude):
+            res.append((int(m.log_time_ns), float(g.latitude), float(g.longitude)))
+    return res
+
+
+_SERIALIZADORES = {}
+
+
+def serializar(m):
+    """Uma mensagem lida do bag (ler_mensagens) serializada outra vez em CDR (os bytes de uma mensagem ROS 2),
+    com a definição gravada no próprio bag: para a voltar a publicar tal como foi gravada."""
+    from mcap_ros2._dynamic import serialize_dynamic
+    chave = (m.schema.name, m.schema.data)
+    if chave not in _SERIALIZADORES:
+        _SERIALIZADORES[chave] = serialize_dynamic(m.schema.name, m.schema.data.decode())[m.schema.name]
+    return bytes(_SERIALIZADORES[chave](m.ros_msg))
+
+
 def intervalo_do_bag(caminho):
     """(primeiro, último) instante das mensagens, em ns, lido do índice; (None, None) se não houver."""
     try:

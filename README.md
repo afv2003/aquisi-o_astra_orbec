@@ -2,6 +2,8 @@
 
 **G5, projeto 3: câmaras laterais.** Duas câmaras Orbbec Astra no tejadilho, viradas para trás (como retrovisores), dão a grelha local e três avisos: mudança de faixa, saída de faixa e colisão.
 
+> **Ramo `Main-2` (parte 2).** É o `main` (parte 1) com a integração da aula 11 e a preparação para os outros sensores do carro: o pacote comum `va_manobras` e os perfis `manobra` e `planeamento` (3.16); a gravação, a reprodução e o uso do GNSS, da odometria, do TF do carro e da estrada (`/estrada/centro`) de outros grupos (3.15); os avisos em coordenadas de Frenet quando há estrada (5.4.3 a 5.4.5); o GNSS no mapa do offline (4.10.2); e o plano da parte 2 (abaixo). Sem esses tópicos, tudo funciona como no `main`. Recebe o `main` com `git merge main`.
+
 *Demonstração: `docs/img/demo.gif`, gerado a partir de um bag real com o `tools/figura_bag.py` (3.13).*
 
 | Sensor | Posição no carro | Driver ROS 2 | Saídas | Equipa |
@@ -14,10 +16,16 @@
 |---|---|---|---|
 | `usb_cam` × 2 (`driver_camara5`, `driver_camara8`, perfil `sensor`) | driver do ROS | — | `/camara<N>/image_raw`, `/camara<N>/image_raw/compressed` |
 | `reprodutor` (perfil `reproduzir`, em vez dos drivers) | `src/va_g05/va_g05/reprodutor.py` | `/processamento/estado_camaras`, `/processamento/comando` | `/camara<N>/image_raw` (as imagens de um bag), `/processamento/reproducao` |
-| `percecao` | `src/va_g05/va_g05/processar_tempo_real.py` (+ `decisao.py`, `grelha_local.py`, `aviso_*.py`, `objetos.py`, `linhas.py`, `estrada.py`) | `/camara<N>/image_raw` (e `/compressed`, para gravar), `/processamento/comando`, saídas do planeador | `/g05/grelha_local`, `/g05/aviso_faixa`, `/g05/aviso_saida_faixa`, `/g05/aviso_colisao`, `/tf_static`, `/camara<N>/processamento/dados_deteccoes`, `/processamento/painel`, `/processamento/estado_camaras`; grava os trechos em `data/` |
-| `planeador` (comum, sem alterações) | `src/va_planeamento/va_planeamento/local_astar.py` | `/g05/grelha_local` | `/g05/caminho_local`, `/g05/estado`, `/g05/zona_proibida` |
+| `percecao` (perfis `sensor`, `reproduzir`) | `src/va_g05/va_g05/processar_tempo_real.py` (+ `decisao.py`, `grelha_local.py`, `aviso_*.py`, `objetos.py`, `linhas.py`, `estrada.py`, `estrada_local.py`, `outros_sensores.py`) | `/camara<N>/image_raw` (e `/compressed`, para gravar), `/processamento/comando`, saídas do planeador; parte 2, se existirem: `/estrada/centro` (avisos), `/fix`, `/odom`, `/tf` (gravados) | `/g05/grelha_local`, `/g05/aviso_faixa`, `/g05/aviso_saida_faixa`, `/g05/aviso_colisao`, `/tf_static`, `/camara<N>/processamento/dados_deteccoes`, `/processamento/painel`, `/processamento/estado_camaras`; grava os trechos em `data/` |
+| `planeador` (comum, sem alterações; perfis `sensor`, `reproduzir`, `planeamento`) | `src/va_planeamento/va_planeamento/local_astar.py` | `/g05/grelha_local` | `/g05/caminho_local`, `/g05/estado`, `/g05/zona_proibida` |
 | `visualizador` (perfil `visualizador`) | `src/va_g05/va_g05/visualizador.py` | as imagens, as deteções, a grelha, os avisos, o painel, o planeador | a janela; `/processamento/comando` (teclas); `/camara<N>/processamento/imagem_anotada` |
 | `gravador`, `foxglove`, `rviz` (perfis `gravar`, `foxglove`, `rviz`) | `ros2 bag record`, `foxglove_bridge`, `rviz2` | os resultados | `data/g05_resultados_<data_hora>/`, `ws://localhost:8765`, a janela do RViz |
+| `percecao_simulada` (aula 11, perfil `manobra`) | `src/va_g05/va_g05/grelha_scan.py` (o `scan_to_grid` do modelo) | `/scan` (do simulador), `/tf_static` | `/g05/grelha_local` (no simulador não há imagens das câmaras) |
+| `simulador_estrada` (aula 11, perfil `manobra`) | `sim_estrada` (`src/va_manobras`, comum) | `/cmd_vel` | `/scan`, `/odom`, `/tf`, `/sim/veiculos`, `/sim/distancia_real` |
+| `estrada` (aula 11, perfil `manobra`) | `estrada_rota` (comum) | `/tf` (odom → base_link) | `/estrada/centro` (`nav_msgs/Path` no `base_link`), `/estrada/rota` |
+| `faixa` (aula 11, perfil `manobra`) | `faixa_livre` (comum) | `/g05/grelha_local`, `/estrada/centro` | `/g05/distancia_livre`, `/g05/obstaculo`, `/g05/faixa` |
+| `objetivo` (aula 11, perfil `planeamento`) | `objetivo_estrada` (comum) | `/estrada/centro`, `/g05/distancia_livre` | `/g05/objetivo` (objetivo do A\* ao longo da estrada) |
+| `manobra` (aula 11, perfil `manobra`) | `seguir` (exemplo comum) | `/g05/distancia_livre`, `/estrada/centro`, `/odom` | `/cmd_vel`, `/g05/estado_manobra` |
 
 ```
 câmaras 5 e 8 ─▶ usb_cam ─▶ /camara<N>/image_raw ─▶ percecao ─▶ /g05/grelha_local ─▶ planeador A* ─▶ /g05/caminho_local, /g05/estado
@@ -40,6 +48,7 @@ câmaras 5 e 8 ─▶ usb_cam ─▶ /camara<N>/image_raw ─▶ percecao ─▶
 | `/g05/caminho_local`, `/g05/estado`, `/g05/zona_proibida` | `nav_msgs/Path`, `std_msgs/String`, `nav_msgs/OccupancyGrid` | `base_link` | 5 Hz (planeador comum) | reliable, keep last 10 |
 | `/processamento/estado_camaras` | `std_msgs/String` (JSON) | — | a cada mudança (tecla **D**) | transient local, keep last 1 |
 | `/processamento/painel`, `/processamento/comando` | `std_msgs/String` | — | por imagem processada / a pedido | reliable, keep last 10 |
+| **Parte 2 (de outros grupos; subscritos e gravados nos trechos, se existirem, 3.15):** `/estrada/centro`, `/fix`, `/odom`, `/tf` | `nav_msgs/Path`, `sensor_msgs/NavSatFix`, `nav_msgs/Odometry`, `tf2_msgs/TFMessage` | `base_link` (estrada), os do publicador | os do publicador | a perceção subscreve em best effort, keep last 100 |
 
 O bag reproduz-se com o perfil `reproduzir` (`bash scripts/online.sh --bag <bag.mcap>`, 3.11): os mesmos nós correm sem alterações, sem câmaras.
 
@@ -62,6 +71,7 @@ bash scripts/online.sh 5 8                              # ao vivo: câmaras + pe
 bash scripts/online.sh --bag data/<sessão>/<bag>.mcap   # reprodução de um bag, sem câmaras (3.11)
 docker compose run --rm --no-deps planeador python3 -m pytest -q /ws/src   # testes (1.7; o mesmo do CI)
 python offline/processar_bag.py data/<sessão>/<bag>.mcap                   # offline, no venv (secção 4)
+docker compose --profile manobra --profile foxglove up                    # aula 11: estrada + faixa + manobra simuladas (3.16)
 ```
 
 ### Dados
@@ -70,6 +80,8 @@ python offline/processar_bag.py data/<sessão>/<bag>.mcap                   # of
 |---|---|---|
 | `g05_camaras_<data_hora>[_<percurso>]/g05_camaras_<data_hora>_0.mcap` | vídeo das duas câmaras (JPEG), deteções, grelha, avisos, planeador, `/tf_static`, só nos trechos; `resumo_online.json` | `data/` no PC do carro (ou o disco externo, `DADOS` no `.env`); para o offline, copiado com verificação (4.2) |
 | `g05_resultados_<data_hora>/` | só os resultados (`ros2 bag record`: grelha, avisos, caminho, TF, deteções), com `--gravar` | `data/` |
+
+Na parte 2, o bag da sessão leva também o GNSS, a odometria, o TF do carro e a estrada de outros grupos, se existirem na rede (3.15).
 
 Os bags não vão para o GitHub (`data/` está no `.gitignore`).
 
@@ -80,6 +92,39 @@ Os bags não vão para o GitHub (`data/` está no `.gitignore`).
 *(por preencher: a marcação ainda não foi feita)*
 
 **Funcionamento ao longo do tempo:** figuras, GIF e métricas do online (tempo em cada estado de cada aviso, mensagens por segundo de cada tópico, deteções por segundo), com `python tools/figura_bag.py data/<sessão>` (3.13).
+
+### Parte 2: plano
+
+*(Exercícios 4 a 6 da aula 11; por preencher pela equipa. Figura da manobra: `python tools/figura_manobra.py data/<bag> --grupo g05`, 3.16.)*
+
+**Contributo do grupo para a estrada** (Exercício 4):
+
+| | G5 |
+|---|---|
+| Produzimos a estrada? Como, e a partir de que tópico? | |
+| Frame, frequência e alcance da estrada que publicamos | |
+| Consumimos a estrada? Em que nó, para quê? | a `percecao` (`/estrada/centro`): os três avisos em coordenadas de Frenet (5.4.3 a 5.4.5) |
+| O que fazem os nós do grupo quando a estrada falha | voltam ao modo da parte 1 (linhas detetadas ou centro), sem a estrada (`idade_max_estrada_s`, 1 s) |
+
+**Afinar e avaliar a manobra** (Exercício 5, `tools/figura_manobra.py`):
+
+| Parâmetro | Valores | Distância mín. (m) | Intervalo de tempo (s) | Desvio lateral máx. (m) | Observação |
+|---|---|---|---|---|---|
+| `tempo_seguranca` | 1,0 / 1,8 / 2,5 | | | | |
+| `ganho_distancia` | 0,1 / 0,3 / 0,8 | | | | |
+| `lookahead_ganho` | 0,3 / 0,8 / 1,5 | | | | |
+| cenário `parado` | por omissão | | | | |
+
+**Plano da parte 2** (Exercício 6):
+
+| | Manobra 1 | Manobra 2 |
+|---|---|---|
+| Manobra (seguir, manter distância ao de trás, ultrapassar, estacionar, ...) | | |
+| Deteções do grupo usadas (tópico, tipo) | | |
+| Deteções de outros grupos (grupo, tópico) | | |
+| Fonte da estrada | | |
+| Critério de sucesso (métrica e valor) | | |
+| Como testar: simulador → bag → Gazebo | | |
 
 ### Limitações
 
@@ -99,7 +144,7 @@ Dois modos, com o mesmo código de deteção e o mesmo ecrã, ligados pelo bag `
 |---|---|---|
 | [1](#1-visão-geral) | Visão geral: os dois modos, quando usar cada um, relevância para a parte 2, ficheiros e estrutura do repositório, pré-requisitos, preparação do PC Linux (Docker, projeto, disco externo), testes automáticos (CI) e organização do repositório (branches, fluxo de trabalho) | — |
 | [2](#2-preparação-calibração-das-câmaras) | Preparação: calibração das câmaras (correção da distorção da lente) | Windows (ou Linux), com Python |
-| [3](#3-modo-online-aquisição-e-processamento-no-veículo-docker) | **Modo online**: câmaras → processamento ao vivo → gravação dos trechos (JPEG) → resumo; visualizador e RViz; reprodução de um bag sem câmaras; hora certa (NTP) | Linux com Docker (CPU ou GPU NVIDIA) |
+| [3](#3-modo-online-aquisição-e-processamento-no-veículo-docker) | **Modo online**: câmaras → processamento ao vivo → gravação dos trechos (JPEG) → resumo; visualizador e RViz; reprodução de um bag sem câmaras; hora certa (NTP); parte 2: outros sensores e simulador da aula 11 | Linux com Docker (CPU ou GPU NVIDIA) |
 | [4](#4-modo-offline-processar-os-bags-gravados-em-qualquer-sistema) | **Modo offline**: bag gravado → processar → registar → reproduzir → janela de resultados; métricas de desempenho contra uma referência marcada à mão | Windows, Linux ou macOS, com `venv` (sem Docker nem câmaras) |
 | [5](#5-modelos-de-deteção-comuns-aos-dois-modos) | Modelos de deteção (comuns aos dois modos): linhas (CLRNet), objetos (YOLO) e estrada (YOLOP); decisão local: posição das câmaras, grelha local, avisos de mudança de faixa, saída de faixa e colisão, planeador A\*, e como outros sensores completam cada aviso | dentro do processamento |
 | [6](#6-referência-rápida-comandos-opções-teclas-e-pastas) | Referência rápida: todos os comandos, opções, teclas, variáveis e pastas | — |
@@ -182,6 +227,7 @@ README.md   Dockerfile   compose.yaml   compose.gpu.yaml   compose.windows.yaml 
 .github/workflows/ci.yml      CI: constrói a imagem e corre os testes a cada push (1.7)
 .devcontainer/                VS Code dentro da imagem (opcional)
 src/va_planeamento/           planeador A* comum da aula 10, sem alterações (5.4.6)
+src/va_manobras/              estrada (Frenet), ocupação da faixa, manobra de exemplo e simulador 2D da aula 11, sem alterações (3.16)
 src/va_g05/                   pacote ROS 2 do G5 (package.xml, setup.py)
     va_g05/                   o código: nós do online e biblioteca comum aos dois modos
     config/                   calibração das câmaras, montagem no carro, parâmetros do planeador, RViz
@@ -189,7 +235,7 @@ src/va_g05/                   pacote ROS 2 do G5 (package.xml, setup.py)
     test/                     testes (pytest): avisos e grelha com cenas sintéticas, modelos ONNX
 scripts/                      online.sh (arranque do online), trecho.sh, alternar_camara.sh
 offline/                      processar_bag.py, reproduzir_registo.py, juntar_registos.py, gui_resultados.py, ...
-tools/                        calibrar_astra.py, figura_bag.py, exportar_linhas.py
+tools/                        calibrar_astra.py, figura_bag.py, exportar_linhas.py, figura_manobra.py, rota_de_bag.py
 docs/                         layout.json (Lichtblick / Foxglove), img/ (figuras e GIF), referencia/ (marcação e métricas, 4.11)
 data/                         bags e gravações (não vão para o git)
 ```
@@ -212,6 +258,9 @@ data/                         bags e gravações (não vão para o git)
 | `src/va_g05/va_g05/aviso_faixa.py`, `aviso_saida_faixa.py`, `aviso_colisao.py`, `seguimento.py` | os três avisos; seguimento dos objetos e tempo até contacto (5.4.3 a 5.4.5) | ambos |
 | `src/va_g05/va_g05/painel.py`, `visual.py` | o desenho do ecrã, igual no visualizador, no `processar_bag.py` e na reprodução dos registos | ambos |
 | `src/va_g05/va_g05/leitura_bag.py`, `registo.py`, `gui_comum.py` | leitura dos bags e correção da distorção; formato das deteções e estatísticas; cartões do resumo | ambos |
+| `src/va_g05/va_g05/outros_sensores.py`, `estrada_local.py` | parte 2: os tópicos de outros sensores (gravar, reproduzir, ler) e a estrada em coordenadas de Frenet (3.15, 5.4.3) | ambos |
+| `src/va_g05/va_g05/grelha_scan.py` | o `scan_to_grid` do modelo: grelha a partir do `/scan`, só no simulador da aula 11 (3.16) | online |
+| `src/va_manobras/` | pacote comum da aula 11 (sem alterações): estrada e Frenet, `faixa_livre`, `seguir`, `objetivo_estrada`, simulador 2D, testes (3.16) | online |
 | `src/va_g05/va_g05/caminhos.py` | onde estão a configuração, os modelos e os dados (no Docker e fora dele) | ambos |
 | `src/va_g05/config/camera_astra_5.yaml`, `camera_astra_8.yaml` | calibração de cada câmara (K e D, secção 2) | ambos |
 | `src/va_g05/config/montagem_camaras.yaml` | posição das câmaras no carro, grelha local e parâmetros dos avisos (5.4.2) | ambos |
@@ -228,6 +277,7 @@ data/                         bags e gravações (não vão para o git)
 | `tools/calibrar_astra.py` | calibração de cada câmara (secção 2) | preparação |
 | `tools/figura_bag.py` | figuras, GIF e métricas para o relatório, a partir de um bag do online (3.13) | relatório |
 | `tools/exportar_linhas.py` | só para gerar de novo o modelo das linhas (5.1.4) | — |
+| `tools/figura_manobra.py`, `tools/rota_de_bag.py` | aula 11: figuras e métricas da manobra; rota (CSV) a partir do `/odom` ou do `/fix` de um bag (3.16) | parte 2 |
 | `requirements.txt` | bibliotecas Python (`venv` do offline e imagem do online) | ambos |
 
 **Caminhos** (`caminhos.py`): os scripts encontram a configuração e os modelos a partir da sua própria pasta, por isso correm de qualquer pasta do terminal. No Docker: o pacote instalado em `/ws/install`, a configuração e os modelos em `/ws/src/va_g05` e os dados em `/data` (`DADOS` no `.env`). Fora do Docker: `src/va_g05/config`, `src/va_g05/modelos` e `data/` (registos do offline em `data/offline/`).
@@ -261,7 +311,9 @@ docker compose run --rm --no-deps planeador python3 -m pytest -q /ws/src
 Não precisam de câmaras nem de bags:
 * `src/va_planeamento/test`: os testes do planeador comum (da aula);
 * `src/va_g05/test/test_avisos.py`: o contrato da grelha (`int8`, só −1 / 0 / 100, as dimensões do `montagem_camaras.yaml`) e os **três avisos** com **cenas sintéticas** (linhas da estrada e veículos de 4,5 × 1,8 × 1,5 m postos no chão e projetados nas câmaras com a calibração e a montagem do `config/`). Testa-se a decisão (`decisao.py`): faixa ao lado ocupada (pelas linhas e pelo centro), veículo na 2.ª faixa, sem linhas, veículo a aproximar-se, carro a derivar para a linha, saída com a faixa ocupada, colisão por trás (AVISO e depois PERIGO, com o TTC), veículo a afastar-se, a passar duas faixas ao lado e a seguir colado;
-* `src/va_g05/test/test_modelos.py`: os três modelos ONNX estão na imagem e correm com o `onnxruntime` dela.
+* `src/va_g05/test/test_modelos.py`: os três modelos ONNX estão na imagem e correm com o `onnxruntime` dela;
+* `src/va_g05/test/test_estrada.py` (parte 2): os avisos numa curva, com e sem a estrada (Frenet), a saída de faixa pela estrada, e o GNSS gravado e lido de um bag;
+* `src/va_manobras/test`: os testes do pacote comum da aula 11.
 
 No `venv`: `pip install pytest` e `python -m pytest -q src/va_g05/test`.
 
@@ -274,6 +326,7 @@ Estes testes **não são os resultados do projeto** e não é preciso mexer nele
 |---|---|---|
 | `main` | a versão do projeto: a que o CI verifica e a que os docentes e os outros grupos usam | — |
 | uma por tarefa (ex.: `metricas`, `aviso-colisao`) | desenvolvimento: cria-se a partir do `main`, as alterações fazem-se e testam-se aqui, e depois juntam-se ao `main`; no fim apaga-se | sim, com `git merge` (depois de o CI passar) |
+| `Main-2` | a parte 2: o `main` com a integração da aula 11 e os outros sensores | ainda não; recebe o `main` (`git merge main`) |
 | `Extra-Line-Comparison` | a comparação CLRNet vs UFLDv2 (`comparacao_linhas/`, `COMPARACAO_LINHAS.md`), à parte | **não**; recebe o `main` (`git merge main`) para ficar atualizada |
 
 **Uma alteração, do princípio ao fim:**
@@ -378,14 +431,14 @@ O modo do veículo: a **aquisição** (câmaras e gravação) e o **processament
 
 ### 3.2 Ficheiros, serviços e tópicos
 * **`Dockerfile`**: a imagem `va/g05`, com tudo o que o online precisa (fora do contentor ficam só os dados): ROS 2 Jazzy, `usb_cam` e `compressed_image_transport` (JPEG), `rosbag2` em MCAP, `rviz2`, `foxglove_bridge`, as bibliotecas do sistema (OpenCV, `python3-tk`), o Python do `requirements.txt` em `/opt/venv` (sem `ultralytics` nem PyTorch; sem `tkintermapview` nem `matplotlib`, que só o offline usa) e o **workspace** `/ws` (`va_planeamento` e `va_g05`, com `colcon build`, modelos e configuração). O `ONNX_PKG` (`.env`) escolhe CPU ou GPU. Como o código está **dentro** da imagem, cada alteração ao código, à configuração ou aos modelos pede um `docker compose build` (rápido: só refaz o fim).
-* **`compose.yaml`**: os serviços, na rede do PC (`network_mode: host`), com os dados em `/data` (`DADOS`, por omissão `./data`). Como no modelo da aula 10, a `percecao` e o `planeador` arrancam sempre; o resto escolhe-se com perfis:
+* **`compose.yaml`**: os serviços, na rede do PC (`network_mode: host`), com os dados em `/data` (`DADOS`, por omissão `./data`). Como no modelo da aula 11, todos os serviços se escolhem com perfis (a `percecao` e o `planeador` com `sensor` ou `reproduzir`; os da aula 11 com `manobra` e `planeamento`, 3.16):
 
   | Serviço | O que faz | Perfil | Com o `scripts/online.sh` |
   |---|---|---|---|
   | `driver_camara5`, `driver_camara8` | drivers `usb_cam`: publicam `/camara<N>/image_raw` e `/camara<N>/image_raw/compressed` | `sensor` | ao vivo |
   | `reprodutor` | publica as imagens de um bag nos mesmos tópicos dos drivers (`reprodutor.py`) | `reproduzir` | em reprodução (`--bag`) |
-  | `percecao` | o `processar_tempo_real.py`: deteções, grelha, avisos, TF e, ao vivo, a gravação dos trechos | — | sempre |
-  | `planeador` | o planeador A\* comum da aula 10 (`src/va_planeamento`, sem alterações), 5.4.6 | — | sempre (exceto `--sem-processamento`) |
+  | `percecao` | o `processar_tempo_real.py`: deteções, grelha, avisos, TF e, ao vivo, a gravação dos trechos (e dos outros sensores, 3.15) | `sensor`, `reproduzir` | sempre |
+  | `planeador` | o planeador A\* comum da aula 10 (`src/va_planeamento`, sem alterações), 5.4.6 | `sensor`, `reproduzir`, `planeamento` | sempre (exceto `--sem-processamento`) |
   | `visualizador` | a janela (`visualizador.py`) e, no fim, o resumo | `visualizador` | sempre (exceto `-i`) |
   | `gravador` | `ros2 bag record` dos resultados (grelha, avisos, caminho, TF, deteções) em `data/g05_resultados_<data_hora>/` | `gravar` | com `--gravar` |
   | `rviz` | o RViz com o `src/va_g05/config/g05.rviz` | `rviz` | com `--rviz` |
@@ -544,6 +597,7 @@ O bag só existe se houver um trecho com imagens. Começa no arranque da sessão
   | `/g05/aviso_saida_faixa` | aviso de saída de faixa (JSON, 5.4.4), um por imagem processada, só nos trechos |
   | `/g05/aviso_colisao` | aviso de colisão (JSON, 5.4.5), um por imagem processada, só nos trechos |
   | `/g05/estado`, `/g05/caminho_local`, `/g05/zona_proibida` | saídas do planeador A\* (5.4.6), só nos trechos |
+  | `/fix`, `/odom`, `/tf`, `/estrada/centro` | parte 2: os outros sensores do carro (GNSS, odometria, TF, estrada; 3.15), tal como chegam, só nos trechos e só se existirem na rede |
 
 * **Espaço:** o JPEG ocupa 4 a 8 vezes menos (sem compressão, ~1 GB por minuto por câmara): **0,3 a 0,6 GB por minuto de trecho** com as duas câmaras. Se o disco não acompanhar ou encher, a gravação avisa e a deteção continua.
 * **JPEG:** o do driver (`compressed_image_transport`), gravado sem recodificar; sem ele, o processamento comprime com a mesma qualidade (o resumo diz quantas, `comprimidas pelo processamento`).
@@ -596,6 +650,7 @@ bash scripts/online.sh --bag <bag.mcap> --camara 5                            # 
 bash scripts/online.sh --bag <bag.mcap> -i                                    # sem janela
 ```
 * **Coerente com o offline:** lê o bag com o `leitura_bag.py` (JPEG, sem índice, blocos estragados) e reproduz **trecho a trecho**, sem esperar entre trechos.
+* **Outros sensores (parte 2):** o GNSS, a odometria, o TF e a estrada gravados no bag (3.15) são publicados outra vez nos seus tópicos, ao ritmo das imagens: a estrada entra nos avisos e os nós de outros grupos recebem-nos como ao vivo.
 * **Tempos do bag:** a grelha e os avisos funcionam como ao vivo, e os tempos são os do offline e da sessão original.
 * **Como ao vivo:** processa as imagens que houver tempo de processar, ao ritmo da gravação (ou de `--taxa`); para todas, use o offline.
 * **Nada é gravado** (**R** não faz nada); no fim do bag, termina e mostra o resumo, guardado em `data/g05_reproducao_<bag>_<data_hora>/resumo_online.json`.
@@ -670,6 +725,39 @@ O enunciado pede o portátil com a hora certa (NTP) para os bags serem comparáv
 * **A saída de faixa dá sempre `SEM LINHA`:** o CLRNet não está a detetar as linhas laterais, ou a montagem está errada (5.4.8).
 * **`No space left on device` numa câmara:** largura de banda USB; portas de lados diferentes (3.4).
 * **Poucas deteções por segundo:** a GPU (3.3), **D** num trecho, ou `-i`; num PC fraco, `--sem-processamento` e o offline.
+* **Perfil `manobra`: o carro não arranca e o estado é `SEM DADOS`:** falta a estrada (`docker compose ps`: o serviço `estrada` a correr) ou a grelha (o serviço `percecao_simulada`); o cenário só começa com o primeiro `/cmd_vel`.
+* **`docker compose up` já não arranca a perceção:** desde o ramo `Main-2`, a `percecao` e o `planeador` têm perfis; use o `scripts/online.sh`, ou `--profile sensor` / `--profile reproduzir`.
+
+
+### 3.15 Outros sensores do carro (parte 2): GNSS, odometria, TF e estrada
+Na parte 2, os outros grupos publicam na mesma rede (mesmo `ROS_DOMAIN_ID`, mesmo relógio por NTP, 3.12). Sem nada a configurar, a `percecao` subscreve, se existirem:
+
+| Tópico | Tipo | O que o G5 faz com ele |
+|---|---|---|
+| `/estrada/centro` | `nav_msgs/Path` (no `base_link`; contrato da aula 11) | grava-o e usa-o nos **três avisos**, em coordenadas de Frenet: a faixa ao lado e a própria faixa seguem a estrada, também nas curvas (5.4.3 a 5.4.5). Só conta se for do mesmo instante que a imagem (`idade_max_estrada_s`, 1 s) |
+| `/fix` | `sensor_msgs/NavSatFix` (GNSS) | grava-o; no offline, o mapa da tab Percurso usa-o em vez dos cliques (4.10.2); `tools/rota_de_bag.py` faz dele a rota da estrada (3.16) |
+| `/odom` | `nav_msgs/Odometry` | grava-o (rota da estrada com `tools/rota_de_bag.py --topico /odom`; velocidade do carro, 5.4.10) |
+| `/tf` | `tf2_msgs/TFMessage` | grava-o (a pose do carro, `odom`/`map` → `base_link`, que o `estrada_rota` usa) |
+
+* Ficam no bag da sessão, **nos trechos**, tal como chegam (com o instante de chegada, o relógio do PC), junto com as câmaras. O terminal diz quando cada um começa a chegar (`Outro sensor a chegar: /fix (NavSatFix)`).
+* Na **reprodução** (3.11), são publicados outra vez; no **offline**, o `processar_bag.py` usa a estrada nos avisos e a janela de resultados usa o GNSS.
+* **Outros nomes:** `OUTROS_SENSORES` no `.env` (ou antes do `scripts/online.sh`), por exemplo `OUTROS_SENSORES="/gnss/fix=sensor_msgs/msg/NavSatFix /odom /estrada/centro"`; `nenhum` desliga. Tipos suportados: os quatro da tabela (`outros_sensores.py`).
+* Sem esses tópicos, tudo funciona como na parte 1. Com `--gravar` (3.13), o `ros2 bag record` grava-os também, continuamente.
+
+### 3.16 Estrada e manobra em simulação (aula 11)
+O pacote comum `src/va_manobras` (copiado sem alterações do modelo da aula 11) traz a estrada como referência (coordenadas de Frenet), a ocupação da faixa (`faixa_livre`), uma manobra de exemplo (`seguir` o carro da frente) e um simulador 2D (sem o carro nem o Gazebo). Corre-se com o perfil `manobra`:
+```bash
+docker compose build
+docker compose --profile manobra --profile foxglove up                       # Lichtblick / Foxglove: ws://localhost:8765
+docker compose --profile manobra --profile planeamento --profile foxglove up  # e o A* da aula 10, com o objetivo ao longo da estrada
+docker compose --profile manobra --profile gravar up                         # grava 50 a 60 s (Ctrl+C) em data/g05_resultados_<data_hora>/
+python tools/figura_manobra.py data/g05_resultados_<data_hora> --grupo g05   # figura e métricas da manobra (docs/img/)
+```
+* **Porque há uma `percecao_simulada`:** o simulador gera um LiDAR 2D (`/scan`), não imagens. A `percecao` das câmaras não tem nada para processar, por isso no perfil `manobra` a grelha `/g05/grelha_local` vem do `scan_to_grid` do modelo (`grelha_scan.py`). A `percecao` e o `planeador` têm os perfis `sensor` e `reproduzir` (e o planeador `planeamento`): o `scripts/online.sh` e o uso da parte 1 não mudam.
+* **Com as câmaras:** a grelha do G5 olha para trás (x de −30 a 10 m) e o `faixa_livre` e o `seguir` procuram o carro da **frente**; por isso a manobra de exemplo não serve com a grelha das câmaras. As manobras do G5 são as da parte 2 (o plano no topo): o contributo do grupo é dizer se uma mudança de faixa é segura e manter a distância a quem vem atrás (tabela da aula 11, Exercício 4b).
+* **Com o bag da parte 1** (Exercício 6b): `bash scripts/online.sh --bag <bag>` e, noutro terminal, `docker compose run --rm faixa faixa_livre --ros-args -r __ns:=/g05 -p modo:=reto` (sem estrada no bag, só o modo reto funciona).
+* **Rota gravada ("teach and repeat"):** `python tools/rota_de_bag.py data/<bag> --topico /fix --saida data/rota_<percurso>.csv` (ou `--topico /odom`); no `params.yaml`, `rota: /data/rota_<percurso>.csv` em `sim_estrada` e em `estrada_rota`, e `docker compose build` (o `params.yaml` está na imagem).
+* **Parâmetros** (`src/va_g05/config/params.yaml`): as secções `scan_to_grid`, `sim_estrada`, `estrada_rota`, `faixa_livre`, `objetivo_estrada` e `seguir`, com os valores do modelo, exceto `estrada_rota.atras` = 30 m (em vez de 5 m), para a estrada chegar à zona que as câmaras veem atrás do carro.
 
 ---
 
@@ -761,6 +849,7 @@ pip install -r requirements.txt
 * As imagens das duas câmaras são processadas pela ordem de gravação: **com as duas, demora o dobro**. Para acelerar: `--sem-interface`, desligar modelos, ou uma câmara de cada vez e juntar os registos (4.9).
 * A janela (1284 px de largura) redimensiona-se com o rato. Até chegar a primeira imagem de uma câmara, o lado dela diz `à espera da primeira imagem`.
 * Os trechos do registo são os do online (4.6, 3.10).
+* **Parte 2:** se o bag tiver a estrada (`/estrada/centro`, 3.15), os avisos usam-na (coordenadas de Frenet, 5.4.3); o terminal diz `Estrada da parte 2 (/estrada/centro) no bag: os avisos usam-na`.
 
 **Ligar e desligar cada deteção** (as opções juntam-se, ex. `--sem-objetos --sem-estrada`):
 
@@ -920,7 +1009,7 @@ O mesmo resumo do fim do online (3.8): mesmos cálculos e cartões (`registo.py`
 * **Veículos por imagem** (com **Ambas**, **por instante**): média, máximo e % em cada gama de cores do mapa. Cada imagem junta-se à da outra câmara mais próxima no tempo (até 0,1 s no offline; no online, até 60% do intervalo entre imagens processadas).
 
 #### 4.10.2 Tab Percurso
-Sem GPS, o vídeo liga-se ao mapa à mão, por trecho:
+Sem GPS, o vídeo liga-se ao mapa à mão, por trecho (com GNSS no bag, ver o fim desta secção):
 
 0. **Escolha:** o registo (ou «Outra pasta…»), o trecho (ou «Todos os trechos»), o intervalo entre referências (5 s) e, com duas câmaras, as **câmaras** (as duas: vídeo lado a lado e cor pela soma dos veículos).
 1. **Trajeto:** escreva as coordenadas de início (`latitude, longitude`, ex. `40.6405, -8.6538`, como copia o Google Maps) e **Ir** (ou **Enter**); clique no mapa ponto a ponto, pela ordem do percurso, com pontos suficientes nas curvas («Desfazer ponto», «Limpar»; arrastar move o mapa, a roda aproxima).
@@ -944,7 +1033,7 @@ Gamas: `GAMAS_VEICULOS` (`registo.py`); cores: `CORES_GAMAS` (`gui_comum.py`, as
 
 * O mapa (OpenStreetMap) precisa de internet; sem ligação, aparece um aviso e um botão para tentar de novo.
 * Ao sair para o Resumo e voltar, tudo recomeça (os ficheiros guardados evitam repetir os cliques).
-* **Com GPS** (gravado no bag na parte 2, 1.3), os passos 1 e 2 deixariam de ser precisos.
+* **Com GNSS no bag** (parte 2: `sensor_msgs/NavSatFix`, gravado pelo online, 3.15): no passo 1 aparece «GNSS no bag: N posições neste trecho» e o botão **Usar o GNSS**, que faz os passos 1 e 2 sozinhos, neste trecho e nos seguintes que também tenham GNSS: o trajeto é o caminho do GNSS (um ponto a cada 2 m) e cada referência é a posição do GNSS nesse instante (um instante a mais de 2 s de uma posição fica saltado). O mapa começa na primeira posição. Sem GNSS (ou com o carro parado), fica o modo à mão.
 
 ### 4.11 Métricas de desempenho com uma referência marcada à mão
 > **Antes:** o `venv` ativado (4.3) e um ou mais bags (4.2). Só no offline.
@@ -1237,9 +1326,10 @@ Confirma-se no Docker com `ros2 run tf2_ros tf2_echo base_link camara5`.
 |---|---|---|
 | `centro` | supõe o carro **no centro** da sua faixa e faixas de `largura_faixa` (3,5 m): a faixa ao lado vai de 1,75 a 5,25 m para o lado, paralela ao carro | sempre (não precisa de linhas), mas erra se o carro estiver fora do centro ou as faixas tiverem outra largura: um carro duas faixas ao lado pode contar como estando na faixa ao lado, e um na faixa ao lado pode ficar de fora |
 | `linhas` | usa as **linhas detetadas** (CLRNet) e projetadas no chão: de cada lado, a linha da própria faixa mais perto do carro é o limite interior da faixa ao lado, e a seguinte (se for vista) o exterior (senão, o interior + `largura_faixa`). As linhas são ajustadas a retas (só as compridas e quase paralelas ao carro), suavizadas no tempo e guardadas 1,5 s quando a deteção falha | segue a faixa real (carro fora do centro, faixas mais largas ou estreitas, ligeiramente inclinadas); sem linhas desse lado, o lado fica `SEM_INFORMACAO (sem linhas)` |
-| `auto` (omissão) | `linhas` quando há linhas desse lado, `centro` quando não há (cada lado à parte) | o melhor dos dois |
+| `estrada` (parte 2) | usa a **estrada** de outro grupo (`/estrada/centro`, contrato da aula 11: a linha de centro da faixa do carro) em **coordenadas de Frenet** (`estrada_local.py`, com a biblioteca comum `va_manobras.estrada`): cada célula e cada objeto passam a (s, d), s ao longo da estrada e d para o lado; a faixa ao lado é d de 1,75 a 5,25 m (com sinal) e a zona vai de s = −20 a 2 m | segue a faixa **também nas curvas** (as linhas e o centro supõem a estrada reta junto ao carro); só se a estrada for do mesmo instante da imagem (`idade_max_estrada_s`, 1 s); sem ela, `SEM_INFORMACAO (sem estrada)` |
+| `auto` (omissão) | `estrada` quando há estrada recente; senão `linhas` quando há linhas desse lado, `centro` quando não há (cada lado à parte) | o melhor dos três |
 
-A coluna **Avisos** diz a forma usada de cada lado (`esq. pelas linhas, dir. pelo centro`). Numa cena sintética, com o carro 0,5 m fora do centro e um veículo na **segunda** faixa à esquerda: `centro` dá **OCUPADA** (errado), `linhas` dá **LIVRE** (certo).
+A coluna **Avisos** diz a forma usada de cada lado (`esq. pelas linhas, dir. pelo centro`, ou `pela estrada`). Numa curva atrás do carro (testes, `test_estrada.py`): um carro na **nossa** faixa, já na curva, sem a estrada dá a faixa da esquerda **OCUPADA** e a colisão "à esquerda" (errado); com a estrada, a esquerda não fica ocupada e o carro está "atrás" (certo); um carro na faixa da esquerda, na curva, só dá **OCUPADA** com a estrada. Com a estrada, a zona no JSON é o contorno ao longo da curva (mais de 4 cantos). Numa cena sintética, com o carro 0,5 m fora do centro e um veículo na **segunda** faixa à esquerda: `centro` dá **OCUPADA** (errado), `linhas` dá **LIVRE** (certo).
 
 **Estados** (de cada lado: a faixa ao lado, do ângulo morto até 20 m atrás, x de -20 a 2 m, e os seus veículos até 30 m atrás):
 
@@ -1273,6 +1363,8 @@ Cada câmara vê a **linha da própria faixa junto ao carro** (o que se vê no r
 | **OK** | longe da linha e sem se aproximar (ex. `OK (1.0 m)`) |
 | **SEM_LINHA** | a linha desse lado não é vista (sem linhas pintadas, ou a deteção falhou) |
 
+**Parte 2:** sem a linha desse lado, mas com a estrada (3.15), a linha é a borda da faixa pela estrada (a `largura_faixa` / 2 do centro, junto ao carro) e o JSON diz `"fonte": "estrada"` (as linhas detetadas têm prioridade).
+
 Com a faixa desse lado **OCUPADA** (5.4.3), a saída é **perigo**: `PERTO (0.1 m) + FAIXA OCUPADA`. Sem o estado do **pisca** (CAN do carro, ou de outro grupo), o aviso dispara também numa mudança de faixa voluntária. Numa cena sintética, com o carro a derivar 0,3 m/s para a esquerda: `OK (1.0 m)` → `OK (0.4 m)` → `PERTO (0.3 m)` → `PERTO (0.1 m)`; com um carro no ângulo morto à esquerda, `+ FAIXA OCUPADA`.
 
 **Saída** `/g05/aviso_saida_faixa` (JSON): `{"stamp_ns": ..., "esquerda": {"estado": "PERTO", "distancia_m": 0.21, "tlc_s": 0.7, "perigo": false, "linha": [a, b]}, "direita": {...}}` (`linha`: a reta y = a + b·x, no `base_link`).
@@ -1281,7 +1373,7 @@ Com a faixa desse lado **OCUPADA** (5.4.3), a saída é **perigo**: `PERTO (0.1 
 Sem medir distâncias nem velocidades, o risco vem do **tempo até contacto** (TTC) de cada objeto:
 1. **Seguimento** (`seguimento.py`): cada caixa do YOLO (veículos, peões, bicicletas) associa-se à da imagem anterior da mesma câmara que mais se lhe sobrepõe (IoU).
 2. **TTC:** um objeto que se aproxima fica maior na imagem; com s = altura da caixa, **TTC = s / (ds/dt) = 1 / (d ln s / dt)**, sem saber a distância nem a velocidade (o princípio dos avisos de colisão só com câmara). Calcula-se com uma reta de mínimos quadrados de ln(s) no último 1,5 s (para não reagir ao tremor de uma caixa), corrigida para o instante atual. Usa-se a altura, porque de lado a largura inclui o comprimento do veículo; uma caixa cortada pela borda não conta.
-3. **Zona** (pela posição aproximada e pelas faixas de 5.4.3): **atrás** (a própria faixa), **esquerda** / **direita** (as faixas ao lado, com o ângulo morto) ou **fora** (outras faixas, passeios, objetos sem posição). Um carro duas faixas ao lado, ou que vira, não dá aviso.
+3. **Zona** (pela posição aproximada e pelas faixas de 5.4.3; com a estrada, em Frenet: a própria faixa é |d| < 1,75 m): **atrás** (a própria faixa), **esquerda** / **direita** (as faixas ao lado, com o ângulo morto) ou **fora** (outras faixas, passeios, objetos sem posição). Um carro duas faixas ao lado, ou que vira, não dá aviso.
 
 | Nível | Quando |
 |---|---|
@@ -1320,7 +1412,7 @@ Corrija o `src/va_g05/config/montagem_camaras.yaml` e volte a correr o `processa
 * **Modelos treinados com câmaras viradas para a frente** (CULane, BDD100K, COCO): o YOLOP e o CLRNet sofrem mais do que o YOLO; sem as linhas laterais, a saída de faixa dá `SEM LINHA` e o modo `auto` passa para o centro.
 * As pegadas usam dimensões típicas e supõem o veículo alinhado com a estrada (pior em curvas e cruzamentos); a precisão piora com a distância (daí o limite de 25 m) e depende da montagem (5.4.8).
 * **Mudança de faixa:** não vê a segunda faixa ao lado nem veículos muito rápidos a mais de 30 m. **Saída de faixa:** sem o pisca, não distingue uma mudança voluntária; em CPU, o TLC reage tarde. **Colisão:** os limites do TTC (5.4.5).
-* Os sensores que resolvem cada limitação: 5.4.10.
+* Os sensores que resolvem cada limitação: 5.4.10. A estrada da parte 2 (`/estrada/centro`) já resolve a de supor a estrada reta junto ao carro (5.4.3).
 
 #### 5.4.10 Complementar os avisos com outros sensores (parte 2)
 As câmaras dizem **o quê** e **em que faixa**, mas não medem distâncias nem velocidades. Para cada aviso, os sensores que resolvem as limitações principais (5.4.9) e como se juntam. Os outros sensores (de outros grupos) chegam como tópicos ROS no mesmo `ROS_DOMAIN_ID`, cada um com o seu `frame_id`, o TF para o `base_link` e o mesmo relógio (NTP, 3.12), o que permite juntar as medições pelo instante (`header.stamp`).
@@ -1346,6 +1438,8 @@ As câmaras dizem **o quê** e **em que faixa**, mas não medem distâncias nem 
 |---|---|---|
 | **LiDAR traseiro** (ou radar traseiro) | o **TTC medido**: TTC = distância / velocidade de aproximação, sem depender do tamanho da caixa na imagem (que treme 10–20% e precisa de várias imagens); um só objeto quando o mesmo veículo é visto pelas duas câmaras; objetos cortados pela borda da imagem ou fora do campo de visão de uma câmara | associação objeto a objeto, como na mudança de faixa (aglomerado do LiDAR projetado na imagem ↔ caixa do YOLO); cada objeto passa a ser seguido no `base_link` (filtro de Kalman com posição e velocidade, por exemplo), em vez de por câmara; em `avaliar`, o `ttc_s` vem do LiDAR quando há associação e do crescimento da caixa quando não há (só a câmara vê o objeto); a zona (`atras`, `esquerda`, `direita`) usa a posição medida |
 | **Velocidade do carro** (CAN ou odometria) | separar o que se move do que está parado: com o carro a andar, um objeto parado afasta-se; com o carro parado (semáforo), um veículo que chega por trás é o caso típico de colisão traseira | velocidade absoluta do objeto = velocidade relativa medida + velocidade do carro; os limiares `ttc_aviso_s` e `ttc_perigo_s` passam a depender da velocidade, e o `segue colado` (ATENÇÃO) passa a usar a distância em segundos (a "regra dos 2 segundos") em vez dos 8 m fixos |
+
+**Já feito no ramo `Main-2`:** a estrada (`/estrada/centro`) entra nos três avisos em Frenet (`DecisaoLocal.atualizar_estrada`), e o GNSS, a odometria e o TF do carro são gravados, reproduzidos e lidos (3.15). **Por fazer:** a associação aos objetos do LiDAR e o estado do carro (velocidade, pisca), descritos acima.
 
 **No código:** hoje, os avisos recebem de cada objeto `x`, `y` (aproximados) e `ttc_s` (do crescimento da caixa), e as linhas no `base_link`. Com outros sensores, o `decisao.DecisaoLocal` recebe também as suas medições (um `atualizar_lidar(pontos ou objetos, t_ns)` e o estado do carro: velocidade, taxa de viragem, pisca) e junta-as como acima; os avisos ficam iguais por fora (os mesmos tópicos e estados), só com valores melhores. O offline faz o mesmo com os bags de todos os sensores, gravados com o mesmo relógio.
 
@@ -1449,9 +1543,12 @@ Antes: a imagem construída (3.6, passo 1: `docker compose build`, com o `ONNX_P
 | `docker compose run --rm --no-deps visualizador resumo_online /data/<sessão>` (3.8) | — | abre o resumo de uma sessão (no `venv`: `python offline/resumo_online.py data/<sessão>`) |
 | `docker compose --profile sensor [--profile visualizador] up` (3.6) | `--profile gravar`, `foxglove`, `rviz` | os serviços diretamente, como no modelo da aula 10 (câmaras e `/dev/video` do `.env`) |
 | `docker compose run --rm --no-deps planeador python3 -m pytest -q /ws/src` (1.7) | — | os testes (o mesmo do CI) |
+| `docker compose --profile manobra [--profile planeamento] [--profile foxglove] up` (3.16) | `--profile gravar` | aula 11: simulador, estrada, faixa e manobra `seguir` (sem câmaras) |
+| `python tools/figura_manobra.py <pasta do bag> --grupo g05` (3.16, `venv`) | `--instante S` | figura e métricas da manobra (`docs/img/`) |
+| `python tools/rota_de_bag.py <bag> --saida data/rota_<percurso>.csv` (3.16, `venv`) | `--topico /odom` (omissão) ou `/fix`, `--passo` (1 m) | rota da estrada (CSV x,y) a partir de um bag |
 | `python tools/figura_bag.py <sessão ou .mcap>` (3.13, `venv`) | `--gif <ficheiro>`, `--instantes N`, `--saida <pasta>`, `--largura-gif`, `--fps-gif` | figuras, GIF e métricas dos avisos, para o relatório |
 
-**Ficheiro `.env`** (lido pelo `docker compose` e pelo `scripts/online.sh`): `GRUPO` (`g05`), `ROS_DOMAIN_ID` (42), `ONNX_PKG` (`onnxruntime`; GPU: 3.3), `CAMARAS` (`5 8`), `DEV_CAMARA5` / `DEV_CAMARA8` (`/dev/video2`, `/dev/video4`; só para o `docker compose` sem o script), `DADOS` (`./data`; o disco externo, 1.6) e `BAG` (para o `--profile reproduzir` sem o script).
+**Ficheiro `.env`** (lido pelo `docker compose` e pelo `scripts/online.sh`): `GRUPO` (`g05`), `ROS_DOMAIN_ID` (42), `ONNX_PKG` (`onnxruntime`; GPU: 3.3), `CAMARAS` (`5 8`), `DEV_CAMARA5` / `DEV_CAMARA8` (`/dev/video2`, `/dev/video4`; só para o `docker compose` sem o script), `DADOS` (`./data`; o disco externo, 1.6), `BAG` (para o `--profile reproduzir` sem o script) e `OUTROS_SENSORES` (parte 2: vazio = `/fix /odom /tf /estrada/centro`, 3.15).
 
 ### 6.2 Teclas
 
@@ -1504,6 +1601,7 @@ Antes: a imagem construída (3.6, passo 1: `docker compose build`, com o `ONNX_P
 | `calibracoes/camara<N>_<data_hora>/` | calibração, relatório e fotos | `tools/calibrar_astra.py` | — |
 | `data/g05_camaras_<data_hora>[_<percurso>]/` | bag do vídeo original (JPEG) + deteções, só nos trechos, e `resumo_online.json` (online); no PC do offline, a cópia (4.2) | `scripts/online.sh` | não |
 | `data/g05_reproducao_<bag>_<data_hora>/` | `resumo_online.json` de uma reprodução no Docker (3.11) | `scripts/online.sh --bag` | não |
+| `data/rota_<percurso>.csv` | rota da estrada (x,y), para o `estrada_rota` e o simulador (3.16) | `tools/rota_de_bag.py` | não |
 | `data/g05_resultados_<data_hora>/` | `ros2 bag record` dos resultados (3.13) | `scripts/online.sh --gravar` (perfil `gravar`) | não |
 | `data/offline/<viagem ou sessão online>/<ensaio>/` | registo das deteções (`deteccoes.mcap`, `ensaio.json`, vídeos `.mp4`, trajetos e referências do percurso) | `offline/processar_bag.py`, `juntar_registos.py`, `reproduzir_registo.py`, `gui_resultados.py` | não |
 | `docs/img/` | figuras e GIF para o README, o relatório e a apresentação | `tools/figura_bag.py`, `offline/metricas_referencia.py --figuras` | sim (as que forem usadas) |

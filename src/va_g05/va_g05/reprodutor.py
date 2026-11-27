@@ -17,6 +17,10 @@ Para ser coerente com o offline, o bag é lido com o leitura_bag.py, o mesmo do 
 Os instantes das imagens (header.stamp) são os do bag: a grelha local e o aviso usam-nos, e os tempos
 no terminal e no resumo são os do bag (os mesmos do offline).
 
+Parte 2: os outros sensores gravados no bag (GNSS, odometria, TF do carro, estrada; outros_sensores.py)
+são publicados outra vez nos seus tópicos, tal como foram gravados (os mesmos bytes), ao mesmo ritmo das
+imagens: a perceção (estrada nos avisos) e os nós de outros grupos recebem-nos como ao vivo.
+
 Publica também /processamento/reproducao (std_msgs/String, JSON; "transient local"): o bag, o início,
 a duração, os trechos e o estado ("a reproduzir", "pausa", "fim"), que o processamento e o
 visualizador usam. Comando "pausa" em /processamento/comando (Espaço no visualizador): pausa / retoma.
@@ -36,6 +40,7 @@ import time
 from pathlib import Path
 
 from . import leitura_bag
+from . import outros_sensores
 from . import visual
 
 TOPICO_TRECHOS = "/processamento/trechos"
@@ -73,8 +78,15 @@ def analisar(bag):
     for t in trechos:
         t["inicio_s"] = round((t["inicio_ns"] - inicio) / 1e9, 3)
         t["fim_s"] = round((t["fim_ns"] - inicio) / 1e9, 3)
+    configurados = outros_sensores.configurados()
+    if indice_ok:
+        tipos = leitura_bag.tipos_do_bag(bag)
+        outros = {t: tipo for t, tipo in configurados.items() if tipos.get(t) == tipo}
+    else:                                       # sem índice não se sabe o que há: tenta os configurados
+        outros = dict(configurados)
     return {"bag": str(bag), "indice_ok": indice_ok, "camaras": cams, "inicio_ns": inicio, "fim_ns": fim,
-            "duracao_s": round((fim - inicio) / 1e9, 3), "trechos": trechos, "relogio": relogio}
+            "duracao_s": round((fim - inicio) / 1e9, 3), "trechos": trechos, "relogio": relogio,
+            "outros": outros}
 
 
 def _terminar(*_):
@@ -98,6 +110,8 @@ def main():
             print(f"  trecho {t['n']}: {t['inicio_s']:.1f} s a {t['fim_s']:.1f} s", file=sys.stderr)
         if not info["trechos"]:
             print("  sem trechos: reproduz-se o bag todo", file=sys.stderr)
+        if info["outros"] and info["indice_ok"]:
+            print(f"  outros sensores: {', '.join(info['outros'])}", file=sys.stderr)
         sys.exit(0 if camaras else 1)
     if not camaras:
         raise SystemExit(f"Erro: o bag {bag} não tem imagens de câmaras (/camara<N>/image_raw[/compressed]).")
@@ -115,6 +129,12 @@ def main():
     rclpy.init()
     no = Node("reprodutor")
     pubs = {c: no.create_publisher(ROSImage, f"/camara{c}/image_raw", 10) for c in camaras}
+    pubs_outros = {}
+    for topico, tipo in info["outros"].items():           # parte 2: GNSS, odometria, TF, estrada
+        try:
+            pubs_outros[topico] = no.create_publisher(outros_sensores.classe(tipo), topico, 10)
+        except (ImportError, AttributeError) as e:
+            print(f"Aviso: {topico} não vai ser publicado ({e}).")
     pub_estado = no.create_publisher(String, TOPICO_REPRODUCAO, qos_estado)
     pronto = threading.Event()
     pausa = threading.Event()
@@ -142,7 +162,8 @@ def main():
     estado(estado="à espera do processamento")
     print(f"Reprodução de {bag.name}: câmaras {', '.join(camaras)}, {info['duracao_s']:.1f} s"
           + (f", {len(info['trechos'])} trecho(s)" if info["trechos"] else ", bag todo")
-          + (f", velocidade x{taxa:g}" if taxa != 1 else ""))
+          + (f", velocidade x{taxa:g}" if taxa != 1 else "")
+          + (f"; outros sensores: {', '.join(pubs_outros)}" if pubs_outros and info["indice_ok"] else ""))
     if not pronto.wait(timeout=300):
         print("Aviso: o processamento não respondeu em 5 minutos; a reproduzir na mesma.")
 
@@ -154,9 +175,11 @@ def main():
             if n is not None:
                 print(f"Trecho {n}: {(ini - info['inicio_ns']) / 1e9:.1f} s a {(fim - info['inicio_ns']) / 1e9:.1f} s")
             t_ref, r_ref, t_estado = None, None, 0.0
-            for m in leitura_bag.ler_mensagens(bag, list(topico_cam), info["indice_ok"], ini, fim):
+            for m in leitura_bag.ler_mensagens(bag, list(topico_cam) + list(pubs_outros), info["indice_ok"],
+                                               ini, fim):
                 cam = topico_cam.get(m.channel.topic)
-                if cam is None:
+                outro = pubs_outros.get(m.channel.topic)
+                if cam is None and outro is None:
                     continue
                 if pausa.is_set():
                     estado(estado="pausa", trecho=n, t_ns=m.log_time_ns)
@@ -168,6 +191,9 @@ def main():
                 espera = (m.log_time_ns - t_ref) / 1e9 / taxa - (time.monotonic() - r_ref)
                 if espera > 0:
                     time.sleep(espera)
+                if outro is not None:
+                    outro.publish(leitura_bag.serializar(m))   # tal como foi gravado (mensagem serializada)
+                    continue
                 img = publicar_imagem(pubs[cam], m.ros_msg, ROSImage)
                 if img and time.monotonic() - t_estado > 0.5:
                     t_estado = time.monotonic()

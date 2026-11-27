@@ -61,9 +61,10 @@ grelha:
 # Aviso de mudança de faixa (aviso_faixa.py): para cada lado, a faixa ao lado do carro, do ângulo morto
 # até x_tras metros para trás, e os veículos dessa faixa que se aproximam (até x_tras_aproximacao).
 aviso_faixa:
-  modo_faixa: auto        # onde está a faixa ao lado: auto (pelas linhas detetadas quando há, senão pelo
-                          # centro), linhas (só pelas linhas; sem linhas: SEM_INFORMACAO) ou centro
-                          # (supõe o carro no centro da sua faixa)
+  modo_faixa: auto        # onde está a faixa ao lado: auto (pela estrada da parte 2 quando há; senão pelas
+                          # linhas detetadas quando há, senão pelo centro), estrada (só pela estrada,
+                          # /estrada/centro, em Frenet; sem ela: SEM_INFORMACAO), linhas (só pelas linhas;
+                          # sem linhas: SEM_INFORMACAO) ou centro (supõe o carro no centro da sua faixa)
   largura_faixa: 3.5      # m; no modo centro, a faixa ao lado vai de largura/2 a 1,5 x largura para o lado
   x_tras: -20.0           # m (atrás do eixo traseiro) até onde se procura um veículo na faixa ao lado
   x_frente: 2.0           # m (à frente do eixo traseiro)
@@ -80,6 +81,8 @@ aviso_faixa:
   max_inclinacao_linha: 0.25    # inclinação máxima de uma linha em relação ao carro (0,25 = 14 graus)
   validade_linhas_s: 1.5        # uma linha deixa de contar se não for vista há mais do que isto
   suavizacao_linhas: 0.5        # peso da linha nova na média com a anterior (1 = sem suavização)
+  # estrada da parte 2 (/estrada/centro, modos auto e estrada)
+  idade_max_estrada_s: 1.0      # a estrada só conta se for deste instante (diferença para a imagem, em s)
 
 # Aviso de saída de faixa (aviso_saida_faixa.py): a linha da própria faixa de cada lado, vista pelas câmaras.
 aviso_saida_faixa:

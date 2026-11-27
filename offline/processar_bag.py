@@ -135,6 +135,12 @@ topico_da_camara = {cams_no_bag[c]: c for c in camaras}
 TOPICO_TRECHOS_ONLINE = leitura_bag.TOPICO_TRECHOS
 TOPICO_ESTADO_ONLINE = "/processamento/estado_camaras"
 topicos_leitura = list(topico_da_camara) + [TOPICO_TRECHOS_ONLINE, TOPICO_ESTADO_ONLINE]
+# parte 2: a estrada (/estrada/centro, de outro grupo), se foi gravada no bag, entra nos avisos (Frenet)
+from va_g05 import outros_sensores  # noqa: E402
+TOPICO_ESTRADA = outros_sensores.TOPICO_ESTRADA
+tem_estrada = TOPICO_ESTRADA in topicos if indice_ok else True
+if tem_estrada:
+    topicos_leitura.append(TOPICO_ESTRADA)
 trechos_do_online = trechos_pedidos is None          # usar os trechos do online
 print("Trechos do registo: " + ("os gravados no online." if trechos_do_online else
                                 f"os pedidos ({args.trechos} s desde o início da sessão)."))
@@ -476,10 +482,19 @@ def tratar_evento_online(msg):
         alternar_trecho()
 
 
+estrada_avisada = False
 for msg in leitura_bag.ler_mensagens(mcap_file, topicos_leitura, indice_ok):
     t_atual_ns = msg.log_time_ns
     if msg.channel.topic in (TOPICO_TRECHOS_ONLINE, TOPICO_ESTADO_ONLINE):
         tratar_evento_online(msg)
+        continue
+    if msg.channel.topic == TOPICO_ESTRADA:
+        if decisao_local is not None:
+            e = decisao_local.atualizar_estrada(*outros_sensores.pontos_do_caminho(msg.ros_msg),
+                                               outros_sensores.stamp_ns(msg.ros_msg.header, msg.log_time_ns))
+            if e is not None and not estrada_avisada:
+                estrada_avisada = True
+                print(f"\nEstrada da parte 2 ({TOPICO_ESTRADA}) no bag: os avisos usam-na (coordenadas de Frenet).")
         continue
     t_inicio = time.perf_counter()
     cam = topico_da_camara.get(msg.channel.topic, camaras[0])

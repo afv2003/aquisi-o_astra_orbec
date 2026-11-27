@@ -17,11 +17,16 @@ ONDE ESTÁ A FAIXA AO LADO (modo_faixa no config/montagem_camaras.yaml, secção
            for vista) o exterior, senão o interior + largura_faixa. Segue a faixa real (carro fora do
            centro, faixas mais largas ou estreitas, ligeiramente inclinadas). Sem linhas desse lado:
            SEM_INFORMACAO;
-  auto     (por omissão) as linhas quando há, o centro quando não há (cada lado à parte).
+  estrada  usa a estrada da parte 2 (/estrada/centro, contrato da aula 11: a linha de centro da faixa
+           do carro, de outro grupo) em coordenadas de Frenet (estrada_local.py): a faixa ao lado vai de
+           largura/2 a 1,5 x largura PARA O LADO DA ESTRADA, também numa curva (as linhas e o centro
+           supõem a estrada reta junto ao carro). Sem estrada recente (idade_max_estrada_s): SEM_INFORMACAO;
+  auto     (por omissão) a estrada quando há; senão as linhas quando há, o centro quando não há (cada
+           lado à parte).
 As linhas são suavizadas no tempo e guardadas durante validade_linhas_s (as deteções falham imagens).
 
-Para cada lado, olha-se para essa faixa ao longo do carro (x de x_tras a x_frente, no base_link) e dá-se
-um de quatro estados:
+Para cada lado, olha-se para essa faixa ao longo do carro (x de x_tras a x_frente, no base_link; com a
+estrada, s de Frenet em vez de x) e dá-se um de quatro estados:
   OCUPADA          há um veículo ou peão na zona (pegada do YOLO na grelha); diz a que distância
                    (aproximada) está o mais próximo e se está no ângulo morto (x >= x_angulo_morto);
                    ou um veículo na faixa ao lado, mesmo mais atrás (até x_tras_aproximacao), que se
@@ -44,7 +49,9 @@ POR_OMISSAO = {"modo_faixa": "auto", "largura_faixa": 3.5, "x_tras": -20.0, "x_f
                "x_tras_aproximacao": -30.0, "ttc_mudanca_s": 4.0,
                # linhas (modo linhas / auto)
                "x_referencia_linhas": -3.0, "min_comprimento_linha": 3.0, "max_inclinacao_linha": 0.25,
-               "validade_linhas_s": 1.5, "suavizacao_linhas": 0.5}
+               "validade_linhas_s": 1.5, "suavizacao_linhas": 0.5,
+               # estrada da parte 2 (/estrada/centro; modo estrada / auto)
+               "idade_max_estrada_s": 1.0}
 
 
 def parametros(montagem):
@@ -94,10 +101,11 @@ class EstimadorFaixas:
             return None
         return g[0], g[1]
 
-    def atualizar(self, linhas_chao, t_ns):
-        """linhas_chao: linhas projetadas no chão (todas as câmaras, recentes). Devolve as faixas:
-        {lado: {"modo", "interior": [a, b], "exterior": [a, b]}} (y = a + b x; None sem linhas no modo
-        "linhas")."""
+    def atualizar(self, linhas_chao, t_ns, estrada=None):
+        """linhas_chao: linhas projetadas no chão (todas as câmaras, recentes); estrada: EstradaLocal recente
+        (ou None). Devolve as faixas: {lado: {"modo", "interior": [a, b], "exterior": [a, b]}} (y = a + b x;
+        None sem linhas no modo "linhas"), ou, com a estrada, {lado: {"modo": "estrada", "d": [d_int, d_ext],
+        "estrada"}}. As linhas são sempre estimadas (o aviso de saída de faixa usa-as)."""
         w = float(self.p["largura_faixa"])
         retas = ajustar_linhas(linhas_chao, self.p)
         for lado in LADOS:
@@ -110,6 +118,10 @@ class EstimadorFaixas:
                 if exterior is not None:
                     self._guardar((lado, "exterior"), exterior[1], exterior[2], t_ns)
         modo = str(self.p["modo_faixa"]).lower()
+        if modo in ("auto", "estrada") and estrada is not None:
+            return faixas_estrada(estrada, self.p)
+        if modo == "estrada":
+            return {lado: {"modo": "estrada", "d": None, "estrada": None} for lado in LADOS}
         faixas = {}
         for lado in LADOS:
             s = SINAL[lado]
@@ -137,10 +149,37 @@ def faixas_centro(p):
                    "exterior": [SINAL[lado] * 1.5 * w, 0.0]} for lado in LADOS}
 
 
+def faixas_estrada(estrada, p):
+    """As faixas ao lado pela estrada (Frenet): d de largura/2 a 1,5 x largura, com sinal."""
+    w = float(p["largura_faixa"])
+    return {lado: {"modo": "estrada", "d": [SINAL[lado] * w / 2, SINAL[lado] * 1.5 * w], "estrada": estrada}
+            for lado in LADOS}
+
+
+def conhecida(faixa):
+    """True se se sabe onde está essa faixa (linhas, centro ou estrada)."""
+    if not faixa:
+        return False
+    if faixa.get("modo") == "estrada":
+        return faixa.get("estrada") is not None and faixa.get("d") is not None
+    return faixa.get("interior") is not None
+
+
+def longitudinal(faixa, x, y):
+    """Posição ao longo do carro: x no base_link, ou s de Frenet (relativo ao carro) com a estrada."""
+    if faixa and faixa.get("modo") == "estrada" and faixa.get("estrada") is not None:
+        return faixa["estrada"].frenet(x, y)[0]
+    return np.asarray(x, float)
+
+
 def na_faixa(faixa, lado, x, y):
     """Máscara (ou booleano) dos pontos (x, y) entre o limite interior e o exterior da faixa ao lado."""
-    if not faixa or faixa.get("interior") is None:
+    if not conhecida(faixa):
         return np.zeros(np.shape(x), bool)
+    if faixa.get("modo") == "estrada":
+        d = faixa["estrada"].frenet(x, y)[1]
+        lo, hi = sorted(faixa["d"])
+        return (d >= lo) & (d <= hi)
     (ai, bi), (ae, be) = faixa["interior"], faixa["exterior"]
     yi, ye = ai + bi * np.asarray(x), ae + be * np.asarray(x)
     if lado == "esquerda":
@@ -148,19 +187,42 @@ def na_faixa(faixa, lado, x, y):
     return (np.asarray(y) <= yi) & (np.asarray(y) >= ye)
 
 
+def coordenadas_celulas(grelha, p, faixa):
+    """(longitudinal, lateral ou None) das células: x e y no base_link, ou s e d de Frenet com a estrada."""
+    if faixa and faixa.get("modo") == "estrada" and faixa.get("estrada") is not None:
+        margem = 6.0                                     # numa curva, s e x afastam-se um pouco
+        return faixa["estrada"].frenet_celulas(grelha, float(p["x_tras"]) - margem, float(p["x_frente"]) + margem)
+    return grelha.cx, None
+
+
 def zonas(grelha, p, faixas=None):
     """{lado: máscara booleana da zona da faixa ao lado} na grelha."""
     faixas = faixas or faixas_centro(p)
-    ao_longo = (grelha.cx >= float(p["x_tras"])) & (grelha.cx <= float(p["x_frente"]))
-    return {lado: ao_longo & na_faixa(faixas.get(lado), lado, grelha.cx, grelha.cy) for lado in LADOS}
+    res = {}
+    for lado in LADOS:
+        faixa = faixas.get(lado)
+        longit, lateral = coordenadas_celulas(grelha, p, faixa)
+        with np.errstate(invalid="ignore"):
+            ao_longo = (longit >= float(p["x_tras"])) & (longit <= float(p["x_frente"]))
+            if lateral is not None:
+                lo, hi = sorted(faixa["d"])
+                res[lado] = ao_longo & (lateral >= lo) & (lateral <= hi)
+            else:
+                res[lado] = ao_longo & na_faixa(faixa, lado, grelha.cx, grelha.cy)
+    return res
 
 
 def poligono(faixa, p):
-    """Os 4 cantos (x, y) da zona, para desenhar."""
-    if not faixa or faixa.get("interior") is None:
+    """Os cantos (x, y) da zona, para desenhar (4; com a estrada, o contorno ao longo da curva)."""
+    if not conhecida(faixa):
         return None
-    (ai, bi), (ae, be) = faixa["interior"], faixa["exterior"]
     x0, x1 = float(p["x_tras"]), float(p["x_frente"])
+    if faixa.get("modo") == "estrada":
+        e = faixa["estrada"]
+        lado_int = e.borda(faixa["d"][0], x0, x1, 2.0)
+        lado_ext = e.borda(faixa["d"][1], x0, x1, 2.0)[::-1]
+        return [[round(x, 2), round(y, 2)] for x, y in lado_int + lado_ext]
+    (ai, bi), (ae, be) = faixa["interior"], faixa["exterior"]
     return [[round(x1, 2), round(ai + bi * x1, 2)], [round(x1, 2), round(ae + be * x1, 2)],
             [round(x0, 2), round(ae + be * x0, 2)], [round(x0, 2), round(ai + bi * x0, 2)]]
 
@@ -182,25 +244,28 @@ def avaliar(grelha, grelha_atual, veiculos, p, faixas=None, objetos=None):
         n_vistas = int(vistas.sum())
         veic = zona & veiculos
         nao_circ = vistas & (grelha_atual == grelha_local.OCUPADO) & ~veiculos
-        morto = zona & (grelha.cx >= float(p["x_angulo_morto"]))
+        longit = coordenadas_celulas(grelha, p, faixa)[0]
+        with np.errstate(invalid="ignore"):
+            morto = zona & (longit >= float(p["x_angulo_morto"]))
         vista_morto = float((morto & vistas).sum() / max(int(morto.sum()), 1))
         info = {"vista": round(n_vistas / n, 2) if n else 0.0, "vista_angulo_morto": round(vista_morto, 2),
                 "faixa": faixa.get("modo", "centro"), "zona": poligono(faixa, p)}
         # veículos da faixa ao lado que se aproximam (mesmo atrás da zona), pelo tempo até contacto
         perto = [o for o in (objetos or []) if o.get("x") is not None and o.get("ttc_s") is not None
                  and o.get("categoria") in ("veiculo", "bicicleta")
-                 and float(p["x_tras_aproximacao"]) <= o["x"] <= float(p["x_frente"])
+                 and float(p["x_tras_aproximacao"]) <= float(longitudinal(faixa, o["x"], o["y"]))
+                 <= float(p["x_frente"])
                  and bool(na_faixa(faixa, lado, o["x"], o["y"]))]
         aprox = min(perto, key=lambda o: o["ttc_s"]) if perto else None
         if aprox is not None:
             info["a_aproximar"] = {"ttc_s": aprox["ttc_s"], "classe": aprox["classe"], "x": aprox["x"]}
         rapido = aprox is not None and aprox["ttc_s"] <= float(p["ttc_mudanca_s"])
         ocupada = int(veic.sum()) >= int(p["min_celulas_veiculo"])
-        if faixa.get("interior") is None:
-            info.update(estado="SEM_INFORMACAO", motivo="sem linhas")
+        if not conhecida(faixa):
+            info.update(estado="SEM_INFORMACAO", motivo="sem estrada" if faixa.get("modo") == "estrada" else "sem linhas")
         elif ocupada or rapido:
             if ocupada:
-                x_mais_perto = float(grelha.cx[veic].max())          # o ponto do veículo mais à frente
+                x_mais_perto = float(np.nanmax(longit[veic]))         # o ponto do veículo mais à frente
                 info.update(distancia_m=round(x_mais_perto, 1),
                             angulo_morto=x_mais_perto >= float(p["x_angulo_morto"]))
             info.update(estado="OCUPADA", aproximacao_rapida=rapido)

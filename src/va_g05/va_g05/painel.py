@@ -130,8 +130,9 @@ def quadro_avisos(altura, faixa=None, saida=None, colisao=None, planeador=None, 
             item(lado.capitalize(), aviso_faixa.texto(info), aviso_faixa.COR.get(info["estado"], (140, 140, 140)))
     if faixa:
         modos = {lado: (faixa.get(lado) or {}).get("faixa", "centro") for lado in aviso_faixa.LADOS}
-        linha("faixa ao lado: " + ", ".join(f"{l[:3]}. pelas {m}" if m == "linhas" else f"{l[:3]}. pelo centro"
-                                            for l, m in modos.items()), f_pq, (130, 136, 146))
+        nome = {"linhas": "pelas linhas", "estrada": "pela estrada"}
+        linha("faixa ao lado: " + ", ".join(f"{l[:3]}. {nome.get(m, 'pelo centro')}" for l, m in modos.items()),
+              f_pq, (130, 136, 146))
     y += int(6 * esc)
     linha("Saída de faixa", f_sec, (156, 163, 175))
     for lado in aviso_saida_faixa.LADOS:

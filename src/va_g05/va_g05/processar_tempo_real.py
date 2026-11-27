@@ -24,7 +24,7 @@ que o planeador A* comum (src/va_planeamento, serviço "planeador" do compose) u
 mesma grelha, das linhas e dos objetos seguidos (decisao.py, o mesmo do offline) publica três avisos
 (std_msgs/String, JSON):
   /<grupo>/aviso_faixa         mudança de faixa (aviso_faixa.py): por lado, LIVRE / OCUPADA / SEM_FAIXA /
-                               SEM_INFORMACAO, com a faixa ao lado pelas linhas detetadas ou pelo centro;
+                               SEM_INFORMACAO, com a faixa ao lado pela estrada (parte 2), pelas linhas ou pelo centro;
   /<grupo>/aviso_saida_faixa   saída de faixa (aviso_saida_faixa.py): por lado, OK / A_APROXIMAR / PERTO /
                                A_PISAR / SEM_LINHA;
   /<grupo>/aviso_colisao       colisão (aviso_colisao.py): LIVRE / ATENCAO / AVISO / PERIGO, pelo tempo até
@@ -69,7 +69,7 @@ import numpy as np
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.serialization import deserialize_message, serialize_message
 from sensor_msgs.msg import CompressedImage, Image as ROSImage
 from std_msgs.msg import String
@@ -85,6 +85,7 @@ from . import aviso_saida_faixa  # aviso de saída de faixa
 from . import aviso_colisao     # aviso de colisão
 from . import relogio           # verificação da hora do PC (NTP)
 from . import caminhos          # config/, modelos/ e a pasta dos dados (data/)
+from . import outros_sensores   # parte 2: GNSS, odometria, TF do carro e estrada (de outros grupos), se existirem
 
 PASTA_REGISTO = Path(os.environ.get("PASTA_REGISTO") or caminhos.DADOS)   # /data no Docker (./data)
 TOPICO_ESTADO = "/processamento/estado_camaras"
@@ -93,6 +94,8 @@ TOPICO_PAINEL = "/processamento/painel"
 TOPICO_REPRODUCAO = "/processamento/reproducao"
 MODELOS = ("objetos", "linhas", "estrada")
 QOS_ESTADO = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+# outros sensores: "best effort" recebe tanto de publicadores "reliable" como "best effort" (GNSS, por exemplo)
+QOS_OUTROS = QoSProfile(depth=100, reliability=ReliabilityPolicy.BEST_EFFORT)
 
 
 class ProcessadorMultiCamara(Node):
@@ -127,6 +130,34 @@ class ProcessadorMultiCamara(Node):
         self.tf_estatico = None
         self.estado_planeador = None
         self.contagem_planeador = {}
+        self.estrada_bruta = None                            # última /estrada/centro (bytes, instante de chegada)
+        self.contagem_outros = {}                            # mensagens recebidas de cada outro sensor
+
+    def preparar_outros(self, topicos):
+        """Subscreve (em bruto, para gravar tal como chegam) os tópicos de outros sensores (parte 2)."""
+        ativos = []
+        for topico, tipo in topicos.items():
+            try:
+                cls = outros_sensores.classe(tipo)
+            except (ImportError, AttributeError) as e:
+                print(f"Aviso: {topico} ({tipo}) não pode ser subscrito ({e}).")
+                continue
+            self.create_subscription(cls, topico, partial(self.outro_callback, topico=topico, tipo=tipo),
+                                     QOS_OUTROS, raw=True)
+            ativos.append(topico)
+        return ativos
+
+    def outro_callback(self, dados, topico, tipo):
+        """Outro sensor (GNSS, odometria, TF, estrada): gravado nos trechos; a estrada vai para os avisos."""
+        agora = time.time_ns()
+        n = self.contagem_outros.get(topico, 0)
+        self.contagem_outros[topico] = n + 1
+        if n == 0:
+            print(f"Outro sensor a chegar: {topico} ({tipo.split('/')[-1]}); gravado nos trechos.")
+        if self.gravador is not None:
+            self.gravador.mensagem(outros_sensores.chave(topico), dados, agora)
+        if tipo == "nav_msgs/msg/Path":
+            self.estrada_bruta = (dados, agora)
 
     def preparar_tf(self):
         from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
@@ -359,6 +390,13 @@ def main():
                                     gravacao_online.DEFINICAO_GRELHA)}
     if no_ros.tf_estatico is not None:
         extra["tf_static"] = ("/tf_static", "tf2_msgs/msg/TFMessage", gravacao_online.DEFINICAO_TF)
+    # Parte 2: outros sensores do carro (GNSS, odometria, TF, estrada), gravados nos trechos se existirem
+    topicos_outros = outros_sensores.configurados()
+    extra.update(outros_sensores.canais_para_gravar(topicos_outros))
+    ativos_outros = no_ros.preparar_outros(topicos_outros)
+    if ativos_outros:
+        print(f"Outros sensores (parte 2): {', '.join(ativos_outros)} (gravados nos trechos, se existirem"
+              + ("; a estrada entra nos avisos)" if outros_sensores.TOPICO_ESTRADA in ativos_outros else ")"))
     if gravar:
         gravador = gravacao_online.GravadorTrechos(PASTA_REGISTO / sessao / f"{sessao}_0.mcap", camaras, extra,
                                                    relogio=est_relogio or None)
@@ -573,6 +611,14 @@ def main():
 
                 # Decisão local: a camada desta câmara na grelha (a partir das mesmas deteções), a grelha
                 # junta, as faixas, os objetos seguidos e os três avisos (decisao.py, o mesmo do offline)
+                if decisao_local is not None and no_ros.estrada_bruta is not None:
+                    # parte 2: a estrada mais recente (/estrada/centro), em Frenet nos avisos
+                    dados_e, t_chegada = no_ros.estrada_bruta
+                    no_ros.estrada_bruta = None
+                    from nav_msgs.msg import Path as RosPath
+                    m_e = deserialize_message(dados_e, RosPath)
+                    decisao_local.atualizar_estrada(*outros_sensores.pontos_do_caminho(m_e),
+                                                    outros_sensores.stamp_ns(m_e.header, t_chegada))
                 if decisao_local is not None and cam in montagem["camaras"]:
                     calib = corretor[cam].calibracao if cam in corretor else calibracao_sem_correcao.get(cam)
                     k = geometria.matriz_intrinseca(calib, frame.shape[1], frame.shape[0], corrigida)
