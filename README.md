@@ -190,7 +190,7 @@ src/va_g05/                   pacote ROS 2 do G5 (package.xml, setup.py)
 scripts/                      online.sh (arranque do online), trecho.sh, alternar_camara.sh
 offline/                      processar_bag.py, reproduzir_registo.py, juntar_registos.py, gui_resultados.py, ...
 tools/                        calibrar_astra.py, figura_bag.py, exportar_linhas.py
-docs/                         layout.json (Foxglove), img/ (figuras e GIF), referencia/ (marcação e métricas, 4.11)
+docs/                         layout.json (Lichtblick / Foxglove), img/ (figuras e GIF), referencia/ (marcação e métricas, 4.11)
 data/                         bags e gravações (não vão para o git)
 ```
 
@@ -216,7 +216,7 @@ data/                         bags e gravações (não vão para o git)
 | `src/va_g05/config/camera_astra_5.yaml`, `camera_astra_8.yaml` | calibração de cada câmara (K e D, secção 2) | ambos |
 | `src/va_g05/config/montagem_camaras.yaml` | posição das câmaras no carro, grelha local e parâmetros dos avisos (5.4.2) | ambos |
 | `src/va_g05/config/params.yaml` | parâmetros ROS do planeador A\* (5.4.6) | online |
-| `src/va_g05/config/g05.rviz`, `docs/layout.json` | RViz e Foxglove: câmaras, TF, grelha, caminho, avisos (3.13) | online / bags |
+| `src/va_g05/config/g05.rviz`, `docs/layout.json` | RViz e Lichtblick / Foxglove: câmaras, TF, grelha, caminho, avisos (3.13) | online / bags |
 | `src/va_g05/modelos/` | `objetos.onnx`, `linhas.onnx` + `linhas.json`, `estrada.onnx` (secção 5) | ambos |
 | `src/va_g05/test/` | testes dos avisos, da grelha e dos modelos (1.7) | CI |
 | `offline/processar_bag.py` | processamento de um bag: correção, deteções, vídeo, vista de cima, registo (4.4) | offline |
@@ -618,7 +618,7 @@ bash scripts/online.sh --bag <bag.mcap> -i                                    # 
   docker compose build
   docker compose --profile reproduzir --profile foxglove up
   ```
-  No Foxglove: `ws://localhost:8765` e o layout `docs/layout.json`. A imagem é a mesma do Linux (o Docker Desktop corre-a numa máquina virtual). Sem o script, as câmaras não se leem do bag: num bag de uma só câmara, indique-a antes do `up` (`$env:CAMARAS_ATIVAS = "5"`). O resumo fica em `data/g05_reproducao_<bag>_<data_hora>/`.
+  No Lichtblick ou no Foxglove: `ws://localhost:8765` e o layout `docs/layout.json`. A imagem é a mesma do Linux (o Docker Desktop corre-a numa máquina virtual). Sem o script, as câmaras não se leem do bag: num bag de uma só câmara, indique-a antes do `up` (`$env:CAMARAS_ATIVAS = "5"`). O resumo fica em `data/g05_reproducao_<bag>_<data_hora>/`.
 
 **Testar a imagem e os modelos** (sem câmaras nem bag; por exemplo, depois de preparar a GPU):
 ```bash
@@ -641,7 +641,7 @@ O enunciado pede o portátil com a hora certa (NTP) para os bags serem comparáv
 ### 3.13 RViz e outras formas de ver os dados
 * **RViz:** `--rviz` (ao vivo ou com `--bag`) abre o RViz com o `src/va_g05/config/g05.rviz`: as imagens (`/camara<N>/image_raw`, para confirmar a taxa e o `frame_id`, passo 3 do enunciado), o **TF** das câmaras, a **grelha local** e o **caminho do A\***, vistos de cima no `base_link`. Fechá-lo não termina a sessão. Para ver os desenhos, troque o tópico de uma imagem para `/camara<N>/processamento/imagem_anotada`.
 * **Câmaras trocadas?** Tape a câmara 5: deve escurecer o `/camara5/image_raw` (à esquerda no visualizador). Se não, relance com `bash scripts/online.sh 8 5`.
-* **Foxglove Studio** (recomendado pelo enunciado, em qualquer sistema e sem ROS): abra o `.mcap` diretamente; ao vivo, `--foxglove` lança o `foxglove_bridge` (*Abrir ligação* → *Foxglove WebSocket* → `ws://localhost:8765`, ou o IP deste PC noutro da mesma rede). Layout: `docs/layout.json` (*Layouts* → *Importar*), com as câmaras, a vista de cima (grelha, caminho, TF) e os avisos em texto; se um painel ficar vazio (o formato muda entre versões), escolha o tópico no painel e guarde de novo.
+* **Lichtblick ou Foxglove Studio** (os dois indicados pelos docentes, em qualquer sistema e sem ROS; o [Lichtblick](https://github.com/lichtblick-suite/lichtblick/releases) é gratuito e não pede conta): abra o `.mcap` diretamente; ao vivo, `--foxglove` lança o `foxglove_bridge` (*Abrir ligação* → *Foxglove WebSocket* → `ws://localhost:8765`, ou o IP deste PC noutro da mesma rede). Layout: `docs/layout.json` (no formato dos dois; *Layouts* → *Importar*), com as câmaras, a vista de cima (grelha, caminho, TF) e os avisos em texto; se um painel ficar vazio (o formato muda entre versões), escolha o tópico no painel e guarde de novo.
 * **Gravar só os resultados:** `--gravar` (o perfil `gravar` do modelo da aula 10) grava a grelha, os avisos, o caminho, o TF e as deteções em `data/g05_resultados_<data_hora>/`, à parte do bag da sessão.
 * **Noutro PC da mesma rede** (com ROS 2 Jazzy ou este Docker): com o mesmo `ROS_DOMAIN_ID` (42), os tópicos aparecem sozinhos (`ros2 topic list`).
 * **Figuras, GIF e métricas para o relatório** (`tools/figura_bag.py`, no `venv`, sem ROS; num `venv` antigo, `pip install matplotlib`), a partir de uma sessão do online copiada como em 4.2:
